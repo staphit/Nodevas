@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -49,6 +51,66 @@ type Message struct {
 	// decides who may approve the message or read its files, so it is not
 	// something to hand to every browser in the project.
 	RecipientActor string `json:"-"`
+	// Notice is the hub's stamp on its own notice of a person's decision,
+	// stored with it (agent_messages.hub_notice). Only Send's system notices
+	// set it; mail stored before it existed has none, whatever its sender
+	// fields claim.
+	Notice bool `json:"hubNotice,omitempty"`
+}
+
+// A person's own mail is sent as HumanAgent from WebSession; only the
+// hub's notices of a person's decision are sent as HumanAgent from another
+// session (Message.HubNotice). Send refuses both to everyone else.
+const (
+	HumanAgent = "human"
+	WebSession = "web"
+)
+
+// HubNotice reports whether m is the hub's own notice of a person's
+// decision (a verified approval, AnswerWith): stamped as one by the hub
+// (Notice) and sent as only the hub may send, as HumanAgent from a session
+// other than WebSession. Its markup is the hub's; everything else's is
+// escaped before an agent reads it.
+func (m Message) HubNotice() bool {
+	return m.Notice && m.claimsHubNotice()
+}
+
+// claimsHubNotice reports whether m's sender fields are a hub notice's. Mail
+// stored before Send refused them to agents may claim it without being one;
+// it is still kept from those who may not read a notice (ShownMessage).
+func (m Message) claimsHubNotice() bool {
+	return strings.EqualFold(m.SenderAgent, HumanAgent) && !strings.EqualFold(m.SenderSession, WebSession)
+}
+
+// trustMarker matches the opening of a <nodevas-...> tag, or its closing,
+// as the text an agent reads mail in wraps it (<nodevas-message>,
+// <nodevas-approval ... verified>), in the spellings a model still reads as
+// one: any case, lookalike brackets and slashes, fullwidth letters, and
+// spaces or invisible (zero-width, combining) characters anywhere up to the
+// end of "nodevas".
+var trustMarker = func() *regexp.Regexp {
+	const gap = `[\s\v\p{Z}\p{Cf}\p{Mn}]*`
+	var b strings.Builder
+	b.WriteString(`(?i)[<\x{FF1C}\x{FE64}\x{2039}\x{2329}\x{3008}\x{27E8}][\s\v\p{Z}\p{Cf}\p{Mn}/\x{FF0F}\x{2044}\x{2215}]*`)
+	for i, c := range "nodevas" {
+		if i > 0 {
+			b.WriteString(gap)
+		}
+		// The letter, or its fullwidth form (any case, as (?i) folds).
+		fmt.Fprintf(&b, `[%c\x{%X}]`, c, c-'a'+0xFF41)
+	}
+	return regexp.MustCompile(b.String())
+}()
+
+// EscapeTrustMarkers neutralizes the <nodevas-...> tags in s, so text a
+// sender wrote can neither close the envelope it is read in nor forge one of
+// the hub's (as </handoff-note is escaped in a handoff): the bracket that
+// opens one becomes "&lt;".
+func EscapeTrustMarkers(s string) string {
+	return trustMarker.ReplaceAllStringFunc(s, func(m string) string {
+		_, size := utf8.DecodeRuneInString(m)
+		return "&lt;" + m[size:]
+	})
 }
 
 // SendInput describes an outbound message from an agent session or human.
@@ -73,6 +135,9 @@ type SendInput struct {
 	// approval): they carry a decision a person already made, so a hold that
 	// asks a person again would only ask the same question twice.
 	system bool
+	// recipientActor, on a system notice, is the account it is for, whoever
+	// answers to the address now: the asker of a late answer.
+	recipientActor string
 }
 
 // DeliveryStatus reports the outcome for one resolved recipient.
@@ -118,10 +183,12 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	if senderActor == "" {
 		senderActor = "local"
 	}
-	senderSession := strings.TrimSpace(in.SenderSession)
-	if senderSession == "" {
+	// A session name, as Touch gives them: it is the From the recipient
+	// reads the mail under, and no place for markup.
+	senderSession := SessionName(in.SenderSession)
+	if senderSession == "" || (in.IsHuman && !in.system) {
 		if in.IsHuman {
-			senderSession = "web"
+			senderSession = WebSession
 		} else {
 			senderSession = shortActor(senderActor)
 		}
@@ -129,15 +196,22 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	senderAgent := strings.TrimSpace(in.SenderAgent)
 	if senderAgent == "" {
 		if in.IsHuman {
-			senderAgent = "human"
+			senderAgent = HumanAgent
 		} else {
 			senderAgent = "agent"
 		}
 	}
+	// "human" from "web" is a person's own message; "human" from a session
+	// is the hub's notice of their decision (HubNotice). An agent or a run
+	// claiming either would put words in a person's mouth.
+	if !in.IsHuman && !in.system &&
+		(strings.EqualFold(senderAgent, HumanAgent) || strings.EqualFold(senderSession, WebSession)) {
+		return SendResult{}, fmt.Errorf("%w: only a person sends as %q or from %q", ErrRefused, HumanAgent, WebSession)
+	}
 
 	replyTo := strings.TrimSpace(in.ReplyTo)
 	threadID := ""
-	nodeID := strings.TrimSpace(in.NodeID)
+	nodeID := agentNodeID(in.NodeID)
 	if replyTo != "" {
 		parent, err := h.getMessageByID(ctx, project, replyTo)
 		if err == nil {
@@ -171,6 +245,13 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		if s != nil {
 			recipientActor[recipient] = s.ActorID
 			held[recipient] = s.Inbound == InboundHold && !in.system
+		} else if actor, _, ok := strings.Cut(recipient, "/"); ok {
+			// An <actor>/<name> address no session of that actor answers
+			// to (resolveRecipients): the mail waits for that account.
+			recipientActor[recipient] = actor
+		}
+		if in.system && in.recipientActor != "" {
+			recipientActor[recipient] = in.recipientActor
 		}
 		// A run (which reads attacker-controllable content) does not reach a
 		// person's session, or an address no session holds, unasked.
@@ -213,6 +294,8 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 			Files:          fileInfos(files),
 			RecipientActor: recipientActor[recipient],
 		}
+		// Only the hub's own notices carry the stamp (HubNotice).
+		msg.Notice = in.system && msg.claimsHubNotice()
 		if err := h.persistMessage(ctx, msg, files); err != nil {
 			return SendResult{}, err
 		}
@@ -245,6 +328,10 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		if msg.Status == StatusDelivered && msg.Notify {
 			h.emit(project, "agent-notify", msg.ID)
 		}
+	}
+	if in.SenderSession != "" && !in.IsHuman {
+		h.LogAction(project, in.SenderSession, h.sessionRunID(project, in.SenderSession), ActionMessage,
+			nodeID, to)
 	}
 	return SendResult{
 		ThreadID:   threadID,
@@ -372,9 +459,16 @@ func (h *Hub) resolveRecipients(project, to string, claims []ClaimInfo) ([]strin
 			}
 		}
 		// Offline-session mail waits under the session name even if the session
-		// has not connected yet.
+		// has not connected yet. Addressed to an account's session, it waits
+		// under the whole address, for a session of that account (its inbox
+		// reads <actor>/<name>, recipientAliases): another account's session
+		// holding the name is not the one it is for.
 		if len(matched) == 0 {
-			add(targetName, false)
+			if targetActor != "" {
+				add(shortActor(targetActor)+"/"+targetName, false)
+			} else {
+				add(targetName, false)
+			}
 		}
 	}
 	return matched, online, nil
@@ -384,7 +478,7 @@ func (h *Hub) resolveRecipients(project, to string, claims []ClaimInfo) ([]strin
 // scanMessage's order.
 const messageColumns = `id, project, sender_actor, sender_session, sender_agent,
 	       recipient, reply_to, thread_id, node_id, body, created_at, read_at,
-	       status, notify, recipient_actor, decided_by, decided_at`
+	       status, notify, recipient_actor, decided_by, decided_at, hub_notice`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -398,7 +492,7 @@ func scanMessage(row rowScanner) (Message, error) {
 	if err := row.Scan(
 		&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
 		&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt, &m.ReadAt,
-		&m.Status, &notify, &m.RecipientActor, &m.DecidedBy, &m.DecidedAt,
+		&m.Status, &notify, &m.RecipientActor, &m.DecidedBy, &m.DecidedAt, &m.Notice,
 	); err != nil {
 		return Message{}, err
 	}
@@ -429,12 +523,12 @@ func (h *Hub) persistMessage(ctx context.Context, msg Message, files []storedFil
 			INSERT INTO agent_messages (
 				id, project, sender_actor, sender_session, sender_agent,
 				recipient, reply_to, thread_id, node_id, body, created_at, read_at,
-				status, notify, recipient_actor, decided_by, decided_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 0)
+				status, notify, recipient_actor, decided_by, decided_at, hub_notice
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 0, ?)
 		`,
 			msg.ID, msg.Project, msg.SenderActor, msg.SenderSession, msg.SenderAgent,
 			msg.Recipient, msg.ReplyTo, msg.ThreadID, msg.NodeID, msg.Body, msg.CreatedAt,
-			msg.Status, boolInt(msg.Notify), msg.RecipientActor,
+			msg.Status, boolInt(msg.Notify), msg.RecipientActor, msg.Notice,
 		); err != nil {
 			return err
 		}
@@ -563,7 +657,7 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 
 	for {
 		ch := h.registerInboxWaiter(project)
-		msgs, err := h.popUnread(ctx, project, aliases)
+		msgs, err := h.popUnread(ctx, project, aliases, actorID)
 		if err != nil {
 			h.unregisterInboxWaiter(project, ch)
 			return nil, err
@@ -585,7 +679,7 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 			return nil, ctx.Err()
 		case <-timer.C:
 			h.unregisterInboxWaiter(project, ch)
-			return h.popUnread(ctx, project, aliases)
+			return h.popUnread(ctx, project, aliases, actorID)
 		case <-ch:
 			timer.Stop()
 			h.unregisterInboxWaiter(project, ch)
@@ -593,7 +687,12 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 	}
 }
 
-func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) ([]Message, error) {
+// popUnread marks read and returns the delivered mail for aliases that is
+// actorID's: sent to no account in particular, or to actorID's (the
+// account whose session held the name when it was sent, RecipientActor). A
+// name is bound to its account in memory only, so after a restart another
+// account's session may answer to it; the mail stays with its account.
+func (h *Hub) popUnread(ctx context.Context, project string, aliases []string, actorID string) ([]Message, error) {
 	if len(aliases) == 0 {
 		return nil, nil
 	}
@@ -609,7 +708,7 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 		for i := range h.memMessages {
 			m := &h.memMessages[i]
 			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
-				aliasSet[strings.ToLower(m.Recipient)] {
+				aliasSet[strings.ToLower(m.Recipient)] && mailFor(*m, actorID) {
 				m.ReadAt = now
 				copied := *m
 				copied.Files = fileInfos(h.memFiles[m.ID])
@@ -622,15 +721,17 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 	var out []Message
 	err := h.database.Tx(ctx, func(tx *sql.Tx) error {
 		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(aliases)), ", ")
-		args := make([]any, 0, len(aliases)+1)
+		args := make([]any, 0, len(aliases)+4)
 		args = append(args, project)
 		for _, a := range aliases {
 			args = append(args, a)
 		}
+		args = append(args, actorForms(actorID)...)
 		rows, err := tx.QueryContext(ctx, `
 			SELECT `+messageColumns+`
 			  FROM agent_messages
 			 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
+			   AND `+recipientActorMatch+`
 			 ORDER BY created_at ASC, id ASC
 		`, args...)
 		if err != nil {
@@ -666,6 +767,22 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 	return out, nil
 }
 
+// recipientActorMatch is popUnread's condition on recipient_actor, with the
+// three actorForms as its arguments.
+const recipientActorMatch = `(recipient_actor = '' OR LOWER(recipient_actor) IN (?, ?, ?))`
+
+// actorForms are the lower-case spellings of actorID a message may be
+// stamped with (sameActor): as is, short, and with the "mcp:" prefix.
+func actorForms(actorID string) []any {
+	short := strings.ToLower(shortActor(actorID))
+	return []any{strings.ToLower(strings.TrimSpace(actorID)), short, "mcp:" + short}
+}
+
+// mailFor reports whether m is actorID's to read (popUnread).
+func mailFor(m Message, actorID string) bool {
+	return m.RecipientActor == "" || sameActor(m.RecipientActor, actorID)
+}
+
 // UnreadCount returns how many unread messages are waiting for sessionName /
 // actorID without marking them read. Used to append unread notices to MCP tool
 // responses. Held messages do not count: the agent cannot read them yet.
@@ -697,22 +814,24 @@ func (h *Hub) unreadCount(ctx context.Context, project, sessionName, actorID str
 		count := 0
 		for _, m := range h.memMessages {
 			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
-				aliasSet[strings.ToLower(m.Recipient)] {
+				aliasSet[strings.ToLower(m.Recipient)] && mailFor(m, actorID) {
 				count++
 			}
 		}
 		return count
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(aliases)), ", ")
-	args := make([]any, 0, len(aliases)+1)
+	args := make([]any, 0, len(aliases)+4)
 	args = append(args, project)
 	for _, a := range aliases {
 		args = append(args, a)
 	}
+	args = append(args, actorForms(actorID)...)
 	var count int
 	_ = h.database.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM agent_messages
 		 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
+		   AND `+recipientActorMatch+`
 	`, args...).Scan(&count)
 	return count
 }

@@ -5,13 +5,13 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 // ExportNodes snapshots a node selection so it can be recreated elsewhere.
@@ -68,11 +68,12 @@ func (s *Store) ExportNodes(ids []string, forMove bool) (*nodeTransferPayload, e
 		copied := *node
 		copied.Tags = append([]string(nil), node.Tags...)
 		copied.Effects = append([]engine.Effect(nil), node.Effects...)
+		copied.Refs = append([]string(nil), node.Refs...)
 		payload.nodes = append(payload.nodes, &copied)
 	}
 	for _, id := range unique {
 		if !found[id] {
-			return nil, fmt.Errorf("node %q not found", id)
+			return nil, locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 	}
 	if forMove {
@@ -191,6 +192,18 @@ func (s *Store) ExportNodes(ids []string, forMove bool) (*nodeTransferPayload, e
 			if usedPlanStatus[engine.Status(definition.ID)] {
 				payload.planStatuses = append(payload.planStatuses, definition)
 			}
+		}
+	}
+
+	// A custom node type exists only because this project defines it, so it
+	// travels with the nodes that use it.
+	usedKind := map[string]bool{}
+	for _, node := range payload.nodes {
+		usedKind[node.Kind] = true
+	}
+	for _, definition := range g.NodeTypes {
+		if !engine.IsBuiltinNodeKind(definition.ID) && usedKind[definition.ID] {
+			payload.nodeTypes = append(payload.nodeTypes, definition)
 		}
 	}
 

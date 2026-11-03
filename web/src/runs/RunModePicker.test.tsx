@@ -149,8 +149,20 @@ describe("DispatchDialog mode", () => {
   it("explains a 409 for an interactive dispatch", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     vi.spyOn(api, "createRun").mockRejectedValue(
-      new ConflictError("", "", "runner lacks interactive", "FAILED_PRECONDITION"),
+      new ConflictError("", "", "this runner cannot run interactive sessions", "FAILED_PRECONDITION"),
     );
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("combobox", { name: "Runner" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Interactive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    // The hub's reason when it gives one; the generic line only without it.
+    expect(await screen.findByRole("alert")).toHaveTextContent("this runner cannot run interactive sessions");
+  });
+
+  it("explains a 409 without a reason for an interactive dispatch", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    vi.spyOn(api, "createRun").mockRejectedValue(new ConflictError("", ""));
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     await screen.findByRole("combobox", { name: "Runner" });
 

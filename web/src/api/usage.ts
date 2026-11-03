@@ -65,9 +65,17 @@ export interface UsageReport {
   byDay: UsageGroup[];
   /** Most recently active first. */
   sessions: UsageSession[];
+  /** By the run's role (legacy runs by their kind; "session", "copilot"). */
+  byRole: UsageGroup[];
+  /** The top nodes by cost, across all their runs. */
+  byNode: UsageGroup[];
 }
 
-export type PriceSource = "builtin" | "custom";
+/**
+ * builtin: a vendor's list price; estimate: Nodevas's own estimate for a model
+ * whose CLI reports no cost (Codex, Gemini, Antigravity); custom: the owner's.
+ */
+export type PriceSource = "builtin" | "custom" | "estimate";
 
 /** USD per million tokens. */
 export interface ModelPrice {
@@ -155,6 +163,8 @@ export function normalizeUsage(raw: unknown): UsageReport {
       firstAt: str(s.firstAt),
       lastAt: str(s.lastAt),
     })),
+    byRole: list(r.byRole, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
+    byNode: list(r.byNode, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
   };
 }
 
@@ -168,7 +178,7 @@ export function normalizePrices(raw: unknown): UsagePrices {
       outputPerMTok: num(p.outputPerMTok),
       cacheReadPerMTok: num(p.cacheReadPerMTok),
       cacheWritePerMTok: num(p.cacheWritePerMTok),
-      source: p.source === "custom" ? "custom" : "builtin",
+      source: p.source === "custom" || p.source === "estimate" ? p.source : "builtin",
     })),
   };
 }

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { runCancellable, runFinal, type PipelineState, type Run, type RunEvent } from "../api";
+import {
+  runCancellable,
+  runFinal,
+  runWaitsForLimit,
+  type PipelineState,
+  type Run,
+  type RunAsk,
+  type RunEvent,
+} from "../api";
+import { useAgents } from "../agents/agentStore";
 import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
 import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { relativeTime } from "../runners/RunnersModal";
 import {
   formatCompact,
@@ -20,7 +30,11 @@ import { MergeControl } from "./MergeApproval";
 import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
 import { RunModeTabs } from "./RunModeTabs";
+import { askOutcome, askSubject, interleaveAsks } from "./runAsks";
 import { useRuns } from "./runStore";
+import { useNodeType } from "../nodeTypeTheme";
+import { usePreference } from "../store";
+import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
 
 /** The hub's cap on GET /api/runs. */
 const RUN_LIST_CAP = 50;
@@ -68,11 +82,6 @@ export interface RetryInfo {
   continues?: boolean;
 }
 
-/** Whether a run waits, queued, for its agent's usage limit to reset. */
-export function runWaitsForLimit(run: Run): boolean {
-  return run.status === "queued" && Boolean(run.retryAt);
-}
-
 /** "agent/model", or the agent alone. */
 function agentLabel(run: { agent: string; model?: string }): string {
   return run.model ? `${run.agent}/${run.model}` : run.agent;
@@ -91,15 +100,19 @@ export function failureLabel(t: (key: string) => string, kind: string): string {
   return KNOWN_FAILURES.has(kind) ? t(`runs.failure.${kind}`) : kind;
 }
 
+const SHOWN_KINDS = new Set(["review", "revise", "test", "verify", "judge"]);
+
 export function RunKindBadge({ kind }: { kind?: string }) {
   const { t } = useI18n();
-  if (kind !== "review" && kind !== "revise") return null;
+  if (!kind || !SHOWN_KINDS.has(kind)) return null;
   return <span className={`run-kind run-kind-${kind}`}>{t(`runs.kind.${kind}`)}</span>;
 }
 
+const SHOWN_VERDICTS = new Set(["approve", "changes", "pass", "fail"]);
+
 export function VerdictChip({ verdict }: { verdict?: string }) {
   const { t } = useI18n();
-  if (verdict !== "approve" && verdict !== "changes") return null;
+  if (!verdict || !SHOWN_VERDICTS.has(verdict)) return null;
   return (
     <span className={`run-verdict run-verdict-${verdict}`}>{t(`runs.verdict.${verdict}`)}</span>
   );
@@ -138,13 +151,14 @@ function RunTags({
 }) {
   const { t, language } = useI18n();
   const failure = run.status === "failed" && run.failureKind ? run.failureKind : "";
-  const kind = run.kind === "review" || run.kind === "revise";
-  const verdict = run.verdict === "approve" || run.verdict === "changes";
+  const kind = SHOWN_KINDS.has(run.kind ?? "");
+  const verdict = SHOWN_VERDICTS.has(run.verdict ?? "");
   const waiting = runWaitsForLimit(run);
   const handedTo = run.handoffBranch && next ? next : null;
-  if (!kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
+  if (!run.role && !kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
   return (
     <span className="run-row-tags">
+      <RoleBadge role={run.role} />
       <RunKindBadge kind={run.kind} />
       <VerdictChip verdict={run.verdict} />
       {failure && (
@@ -289,9 +303,12 @@ function RunRow({
           <RunStatusBadge status={run.status} />
           <strong className="run-row-agent">
             {number > 0 && (
-              <span className="run-row-number">{t("runs.number", { number })} </span>
+              <span className="run-row-number">
+                <span className="visually-hidden">{t("runs.runWord")} </span>
+                {t("runs.number", { number })}{" "}
+              </span>
             )}
-            {run.agent}
+            {run.agent || (run.kind === "verify" ? t("runs.testCommand") : "")}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
           <time
@@ -303,12 +320,17 @@ function RunRow({
         </span>
         <RunTags run={run} retry={retry} next={next} />
         <span className="run-row-meta">
-          <span>{run.runnerName || run.runnerId}</span>
+          <span>{runnerDisplayName(t, run.runnerName) || run.runnerId}</span>
           <span>{run.repoName || run.repoId}</span>
           {branch && <span className="mono">{branch}</span>}
           <UsageText run={run} />
         </span>
       </button>
+      {run.verify && (
+        <span className="run-row-evidence">
+          <VerifyEvidence verify={run.verify} />
+        </span>
+      )}
       {hasSummary && summary}
     </li>
   );
@@ -461,6 +483,41 @@ export function RunEventItem({
   }
 }
 
+/** One of the run's asks in its timeline: what it waits on, or how that
+ * ended. Waiting on the viewer, it opens the agent panel, where its card is
+ * answered. */
+export function RunAskItem({ ask }: { ask: RunAsk }) {
+  const { t } = useI18n();
+  // Station docks Agent chat (and lists what waits on you) beside the run
+  // view, with no floating panel to open from here.
+  const station = usePreference("projectMode") === "station";
+  const what = askSubject(t, ask);
+  if (ask.status === "pending") {
+    const text = t(ask.canAnswer ? "runs.ask.waitingYou" : "runs.ask.waiting", { what });
+    return (
+      <li className="run-ev run-ev-ask is-pending">
+        {ask.canAnswer && !station ? (
+          <button
+            type="button"
+            className="run-ev-ask-open"
+            title={t("runs.ask.open")}
+            onClick={() => useAgents.getState().setOpen(true)}
+          >
+            {text}
+          </button>
+        ) : (
+          text
+        )}
+      </li>
+    );
+  }
+  return (
+    <li className={`run-ev run-ev-ask is-${ask.decision || ask.status}`}>
+      {t("runs.ask.settled", { what, outcome: askOutcome(t, ask) })}
+    </li>
+  );
+}
+
 /** Whether a scroll box is (nearly) scrolled to its end. */
 function atEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
@@ -486,6 +543,7 @@ export function RunDetail({
 }) {
   const { t, language } = useI18n();
   const events = useRuns((s) => s.eventsByRun[run.id]);
+  const asks = useRuns((s) => s.asksByRun[run.id]);
   const eventError = useRuns((s) => s.eventErrors[run.id]);
   const cancelError = useRuns((s) => s.cancelErrors[run.id]);
   const cancelling = useRuns((s) => Boolean(s.cancelling[run.id]));
@@ -506,6 +564,7 @@ export function RunDetail({
   }, [final, run.id, loadEvents]);
 
   const list = events ?? [];
+  const items = useMemo(() => interleaveAsks(list, asks), [list, asks]);
   const toolNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const event of list) {
@@ -524,7 +583,7 @@ export function RunDetail({
     if (!element) return;
     if (following.current) element.scrollTop = element.scrollHeight;
     else setBehind(true);
-  }, [list.length]);
+  }, [items.length]);
 
   const onCancel = async () => {
     if (await confirmCancelRun(t, run)) await cancelRun(run.id);
@@ -562,6 +621,8 @@ export function RunDetail({
         )}
       </div>
       <MergeControl run={run} className="run-detail-merge" />
+      {run.override && <p className="run-override">{t("runs.override", { reason: run.override })}</p>}
+      {run.checks && run.checks.length > 0 && <JudgeChecks checks={run.checks} />}
       <RunHandoff
         run={run}
         prev={prev}
@@ -587,7 +648,7 @@ export function RunDetail({
       <dl className="run-meta">
         <div>
           <dt>{t("runs.runner")}</dt>
-          <dd>{run.runnerName || run.runnerId}</dd>
+          <dd>{runnerDisplayName(t, run.runnerName) || run.runnerId}</dd>
         </div>
         <div>
           <dt>{t("runs.repo")}</dt>
@@ -674,14 +735,18 @@ export function RunDetail({
             if (end) setBehind(false);
           }}
         >
-          {list.length === 0 ? (
+          {items.length === 0 ? (
             <li className="run-ev run-ev-empty">
               {eventError ? "" : events === undefined ? t("common.loading") : t("runs.noEvents")}
             </li>
           ) : (
-            list.map((event) => (
-              <RunEventItem key={event.seq} event={event} toolNames={toolNames} />
-            ))
+            items.map((item) =>
+              item.kind === "ask" ? (
+                <RunAskItem key={`ask-${item.ask.id}`} ask={item.ask} />
+              ) : (
+                <RunEventItem key={item.event.seq} event={item.event} toolNames={toolNames} />
+              ),
+            )
           )}
         </ol>
         {behind && (
@@ -735,6 +800,11 @@ export function pipelineHeaderText(
   runs: Run[],
 ): string {
   const parts = [t("pipeline.title")];
+  // A staged pipeline: its preset and where it is.
+  if (state?.stages) {
+    parts.push(t(`stages.preset.${state.stages.preset}`));
+    if (state.phase) parts.push(t(`pipeline.phase.${state.phase}`));
+  }
   if (state && state.round > 0) {
     parts.push(
       t("pipeline.round", { round: state.round, max: state.pipeline?.maxRounds || state.round }),
@@ -774,6 +844,7 @@ function PipelineGroup({ id, children, runs }: { id: string; children: React.Rea
           error && <span className="run-pipeline-error" title={error}>{t("pipeline.unknown")}</span>
         )}
       </div>
+      {state?.guard && <GuardView guard={state.guard} />}
       <ul className="run-list run-pipeline-runs">{children}</ul>
     </li>
   );
@@ -818,6 +889,9 @@ export function NodeRuns({ id }: { id: string }) {
   const loadRuns = useRuns((s) => s.loadRuns);
   const selectRun = useRuns((s) => s.selectRun);
   const openDispatch = useRuns((s) => s.openDispatch);
+  // Only a type an agent may work gets a "new run" button; a Goal's runs come
+  // from Autopilot and a Review's from nobody.
+  const canDispatch = useNodeType({ nodeId: id }).agentMode === "dispatch";
 
   useEffect(() => {
     void loadRuns(id);
@@ -860,10 +934,12 @@ export function NodeRuns({ id }: { id: string }) {
           {t("runs.title")}
           {list.length > 0 && <span className="node-runs-count">{list.length}</span>}
         </h3>
-        <button type="button" className="run-dispatch-button" onClick={() => openDispatch(id)}>
-          <IconSend size={13} />
-          <span>{t("runs.newRun")}</span>
-        </button>
+        {canDispatch && (
+          <button type="button" className="run-dispatch-button" onClick={() => openDispatch(id)}>
+            <IconSend size={13} />
+            <span>{t("runs.newRun")}</span>
+          </button>
+        )}
       </div>
 
       {error && (

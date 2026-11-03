@@ -1,5 +1,5 @@
 /**
- * Alignment snapping [B-06].
+ * Alignment snapping.
  *
  * Smart guides for the graph canvas: while something is dragged or resized, its
  * edges and centre lines are pulled onto the edges and centre lines of whatever

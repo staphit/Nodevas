@@ -25,6 +25,7 @@ import { test, expect, type Locator, type Page, type WebSocketRoute } from "@pla
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { hideCopilot } from "./demo-station";
 
 const QR = readFileSync(join(import.meta.dirname, "demo-assets", "totp-qr.txt"), "utf8").trim();
 
@@ -346,8 +347,12 @@ async function openBoard(page: Page) {
     const x = box.x + box.width / 2;
     await drag(page, { x, y: box.y + box.height / 2 }, { x, y: VH - 110 });
   }
-  const fit = page.getByRole("button", { name: "Fit all" }).first();
-  if (await fit.isVisible().catch(() => false)) await fit.click();
+  // Fit all lives in the graph header's ⋯ menu.
+  const more = page.getByRole("button", { name: "More graph tools" }).first();
+  if (await more.isVisible().catch(() => false)) {
+    await more.click();
+    await page.getByRole("menuitem", { name: "Fit all" }).click();
+  }
   await page.mouse.move(VW / 2, VH / 2);
   mouse = { x: VW / 2, y: VH / 2 };
   await pause(page, 900);
@@ -442,7 +447,7 @@ const runBase = {
   prompt: "",
   exitCode: 0,
   createdBy: "u1",
-  createdByName: "patrick",
+  createdByName: "alex",
 };
 
 // What the runner's ACP adapter (internal/runner/adapter/acp.go) reports for
@@ -520,6 +525,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   cam = FULL;
   mouse = { x: VW / 2, y: VH / 2 };
   await stage(page);
+  await hideCopilot(page);
   const frames = testInfo.outputPath("frames");
   rmSync(frames, { recursive: true, force: true });
   recorder = await record(page, frames);
@@ -581,7 +587,7 @@ test("agent-run", async ({ page }) => {
           ciStatus: "success",
           usage: { inputTokens: 38211, outputTokens: 2904, cacheReadTokens: 12416, costUsd: 0 },
           ...(phase === "merging"
-            ? { merge: { id: "m1", runId: "run1", headSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", status: "pending", requestedBy: "patrick", createdAt: now() } }
+            ? { merge: { id: "m1", runId: "run1", headSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", status: "pending", requestedBy: "alex", createdAt: now() } }
             : {}),
         };
     }
@@ -618,8 +624,8 @@ test("agent-run", async ({ page }) => {
   await pause(page, 1300);
   await focus(page, page.getByText("Add rate limiting middleware").first(), { pad: 140, minW: 760, hold: 700 });
   const drawer = await openNode(page, "Add rate limiting middleware");
-  const runsTab = drawer.getByRole("tab", { name: "Runs" });
-  await focus(page, [runsTab, drawer.getByRole("heading").first()], { pad: 40, minW: 760, hold: 300 });
+  const runsTab = drawer.getByRole("tab", { name: "Activity", exact: true });
+  await focus(page, [runsTab, drawer.getByLabel("Title", { exact: true })], { pad: 40, minW: 760, hold: 300 });
   await glide(page, runsTab);
   await pause(page, 400);
   const dispatch = drawer.getByRole("button", { name: "Dispatch to agent…" });
@@ -663,10 +669,10 @@ test("agent-run", async ({ page }) => {
   changed();
   const activity = drawer.getByRole("list", { name: "Run activity" });
   await expect(activity).toBeVisible();
-  await reveal(drawer.getByRole("region", { name: "Run details" }));
+  await reveal(details);
   await pause(page, 500);
   say("Watch it work", "OpenCode's reads, edits and thoughts stream in live.");
-  await focus(page, await band(drawer, 0.42, 1), { pad: 0, hold: 200 });
+  await focus(page, details, { pad: 8, minW: 760, within: drawer, hold: 200 });
   for (let i = 1; i <= runEvents.length; i++) {
     shown = i;
     push({ type: "run-events", id: "run1" });
@@ -676,9 +682,9 @@ test("agent-run", async ({ page }) => {
       // The refused command: centre it and look closer.
       await reveal(latest, "center");
       await pause(page, 500);
-      say("Risky commands are refused", "Nobody is at a headless run to approve them.");
+      say("Risky commands are refused", "A headless run has nobody to ask, unless its runner relays the prompt to you.");
       await focus(page, latest, { pad: 60, minW: 720, within: drawer, hold: 2600 });
-      await focus(page, await band(drawer, 0.42, 1), { pad: 0, d: 0.7 });
+      await focus(page, details, { pad: 8, minW: 760, within: drawer, d: 0.7 });
       continue;
     }
     await reveal(latest, "end");
@@ -695,6 +701,8 @@ test("agent-run", async ({ page }) => {
   await pause(page, 700);
   await focus(page, [drawer.getByText("The agent finished."), viewChanges, drawer.getByRole("button", { name: "Merge PR #42" })], {
     pad: 24,
+    // The drawer's width: its rows are cut off in anything narrower.
+    minW: 840,
     within: drawer,
     hold: 2600,
   });
@@ -775,7 +783,7 @@ test("autopilot", async ({ page }) => {
     ],
     [
       task("Design the quota table", [], "success", "done", [...pipeline.map((s) => done(s)), done("review", { round: 1 }), done("merge"), done("done")], merged(51)),
-      task("Add rate limiting middleware", ["Design the quota table"], "waiting_human", "human_review", [...pipeline.map((s) => done(s)), { stage: "review", status: "failed", at, round: 1 }, done("revise", { round: 1 }), done("review", { round: 2 }), { stage: "human_review", status: "waiting", at, round: 2 }], { prUrl: "https://github.com/example/public-api/pull/52", ciStatus: "success", votes: [{ ...reviewers[0], verdict: "changes", round: 1 }, { ...reviewers[1], verdict: "approve", round: 1 }, ...approve(2)] }),
+      task("Add rate limiting middleware", ["Design the quota table"], "waiting_human", "human_review", [...pipeline.map((s) => done(s)), { stage: "review", status: "failed", at, round: 1 }, done("revise", { round: 1 }), done("review", { round: 2 }), { stage: "human_review", status: "waiting", at, round: 2 }], { pipelineId: "p52", prUrl: "https://github.com/example/public-api/pull/52", ciStatus: "success", votes: [{ ...reviewers[0], verdict: "changes", round: 1 }, { ...reviewers[1], verdict: "approve", round: 1 }, ...approve(2)] }),
       task("Show quota in the dashboard", ["Add rate limiting middleware"], "none", "", []),
       task("Document the limits", ["Add rate limiting middleware"], "none", "", []),
     ],
@@ -807,7 +815,7 @@ test("autopilot", async ({ page }) => {
           skipped: 0,
         },
         createdBy: "u1",
-        createdByName: "patrick",
+        createdByName: "alex",
         createdAt: at,
         updatedAt: now(),
       },
@@ -815,7 +823,19 @@ test("autopilot", async ({ page }) => {
     };
   };
   await page.route(/\/api\/autopilot(\?|\/)/, (route) => route.fulfill({ json: view() }));
-  await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [] } }));
+  const status = await (await page.request.get("/api/auth/status")).json();
+  await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [runnerFor(status.actor?.id ?? "")] } }));
+  // What the runner is doing at each step: the first task's implement, then
+  // the second's two reviews; then nothing, while the task waits for you.
+  const activeRuns = () => {
+    const run = (id: string, title: string, fields: Record<string, unknown>) => ({ ...runBase, id, nodeId: ids[title], status: "running", createdAt: at, ...fields });
+    if (step === 0) return [run("ap-r1", "Design the quota table", { pipelineId: "p51" })];
+    if (step === 1) {
+      return reviewers.map((r, i) => run(`ap-r${i + 2}`, "Add rate limiting middleware", { ...r, kind: "review", pipelineId: "p52" }));
+    }
+    return [];
+  };
+  await page.route(/\/api\/runs(\?|$)/, (route) => route.fulfill({ json: { runs: activeRuns() } }));
   const advance = () => push({ type: "autopilot-changed", id: "ap1", goalNodeId: goal });
 
   await openBoard(page);
@@ -824,9 +844,13 @@ test("autopilot", async ({ page }) => {
   await pause(page, 2600);
   await focus(page, page.getByText("Ship the rate-limited public API").first(), { pad: 140, minW: 760, hold: 500 });
   const drawer = await openNode(page, "Ship the rate-limited public API");
-  const pill = drawer.getByRole("button", { name: /^Autopilot/ });
-  say("Open its autopilot", "The goal's Autopilot pill opens it in Station.");
-  await focus(page, pill, { pad: 120, minW: 720, hold: 1400 });
+  // Autopilot sits beside Dispatch, in the menu under its caret.
+  const caret = drawer.getByRole("button", { name: "More agent actions" });
+  say("Open its autopilot", "Next to Dispatch: Autopilot opens it in Station.");
+  await focus(page, caret, { pad: 120, minW: 720, hold: 900 });
+  await glide(page, caret);
+  const pill = drawer.getByRole("menuitem", { name: "Autopilot…" });
+  await focus(page, pill, { pad: 120, minW: 720, hold: 600 });
   const table = page.locator(".station-goal").getByRole("table");
   await cut(page, async () => {
     await glide(page, pill);
@@ -834,7 +858,7 @@ test("autopilot", async ({ page }) => {
     await reveal(table, "end");
     await pause(page, 900);
     await hidePointer(page);
-    await focus(page, table, { pad: 24, d: 0 });
+    await focus(page, table, { pad: 16, minW: 900, d: 0 });
   });
   say("Tasks run in order", "Each starts once the tasks it needs are done.");
   await pause(page, 3000);
@@ -852,7 +876,13 @@ test("autopilot", async ({ page }) => {
   await focus(page, [goalPanel.getByText("Waiting for your review"), approveButton], { pad: 20, hold: 400 });
   await glide(page, approveButton, { click: false });
   await pause(page, 2800);
-  await wide(page, 1.0, 1400);
+  await hidePointer(page);
+  // Station's own "Waiting on you" lists it too.
+  const waiting = page.getByRole("region", { name: "Waiting on you" });
+  await reveal(waiting, "start");
+  await pause(page, 700);
+  await focus(page, waiting, { pad: 24, minW: 900, hold: 2200 });
+  await wide(page, 1.0, 1200);
 });
 
 test("usage", async ({ page }) => {
@@ -898,7 +928,7 @@ test("usage", async ({ page }) => {
         id: "claude:abc",
         source: "session",
         name: "public-api-claude",
-        actorName: "patrick",
+        actorName: "alex",
         agent: "claude",
         model: "claude-opus-5-5",
         models: ["claude-opus-5-5", "claude-haiku-5-5"],
@@ -937,25 +967,36 @@ test("usage", async ({ page }) => {
   await page.route((url) => url.pathname.startsWith("/api/agents"), (route) =>
     route.fulfill({ json: { sessions: [], users: [], messages: [], asks: [], unreadCount: 0 } }),
   );
+  const status = await (await page.request.get("/api/auth/status")).json();
+  await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [runnerFor(status.actor?.id ?? "")] } }));
+  // Today's use against the budget, which the video sets.
+  let limits = { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 };
+  await page.route(/\/api\/runs\/budget/, async (route) => {
+    if (route.request().method() === "PUT") limits = { ...limits, ...route.request().postDataJSON() };
+    return route.fulfill({ json: { budget: limits, used: { runs: 6, costUsd: 6.4, tokens: 412_000 }, exceeded: "" } });
+  });
 
   await openBoard(page);
   await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
-  const settings = modes.getByRole("button", { name: "Settings" });
-  say("Usage lives in Settings", "Next to runners, routing and the daily budget.");
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  say("Usage lives in Settings", "Agents › Advanced, beside routing and the daily budget.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 600 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 600 });
   const parts = page.getByRole("navigation", { name: "Settings" });
-  const region = page.getByRole("region", { name: "Usage" });
+  const region = page.getByRole("region", { name: "Usage", exact: true });
   await cut(page, async () => {
     await glide(page, settings);
     await expect(parts).toBeVisible();
     await pause(page, 300);
     await focus(page, parts, { pad: 40, minW: 720, d: 0 });
   });
-  await glide(page, parts.getByRole("button", { name: "Usage", exact: true }));
+  await glide(page, parts.getByRole("button", { name: /^Agents/ }));
+  await glide(page, page.getByRole("button", { name: /^Advanced/ }));
+  await glide(page, page.getByRole("button", { name: /^Usage details/ }));
   await expect(region).toBeVisible();
-  await pause(page, 600);
+  await pause(page, 300);
+  await reveal(region.getByRole("tablist"), "start");
+  await pause(page, 700);
   say("By day, agent and model", "Tokens and API-equivalent cost for the last 30 days.");
   await focus(page, region, { pad: 16, hold: 1600 });
   const bars = region.locator(".usage-chart-plot .usage-hit");
@@ -975,24 +1016,42 @@ test("usage", async ({ page }) => {
   await pause(page, 500);
   await focus(page, region, { pad: 16, hold: 2400 });
   say("A daily budget", "Past the limit, the hub refuses new runs.");
-  const budget = parts.getByRole("button", { name: "Daily budget" });
+  const budget = page.getByRole("button", { name: /^Daily budget/ });
   await glide(page, budget);
-  const budgetRegion = page.getByRole("region", { name: "Daily budget" });
+  const budgetRegion = page.getByRole("region", { name: "Daily budget", exact: true });
   await expect(budgetRegion).toBeVisible();
-  await pause(page, 400);
+  await pause(page, 300);
+  await reveal(budget, "start");
+  await pause(page, 700);
   await focus(page, [budgetRegion.getByText(/^Limits on your runs/), budgetRegion.getByRole("button", { name: "Save budget" })], {
     pad: 40,
-    hold: 2800,
+    hold: 1200,
+  });
+  const cost = budgetRegion.getByLabel("Cost per day (USD)");
+  await glide(page, cost);
+  await cost.fill("");
+  await cost.pressSequentially("25", { delay: 120 });
+  await pause(page, 500);
+  await glide(page, budgetRegion.getByRole("button", { name: "Save budget" }));
+  await expect(budgetRegion.getByText(/\$6\.40 \/ \$25/)).toBeVisible();
+  await pause(page, 300);
+  await hidePointer(page);
+  await focus(page, [budgetRegion.getByText(/^Limits on your runs/), budgetRegion.getByRole("button", { name: "Save budget" })], {
+    pad: 40,
+    hold: 2600,
   });
   await wide(page, 1.0, 1200);
 });
 
 test("agent-network", async ({ page }) => {
+  const push = await liveSocket(page);
+  const status = await (await page.request.get("/api/auth/status")).json();
+  await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [runnerFor(status.actor?.id ?? "")] } }));
   const session = (name: string, agent: string, model: string, doing: string, extra = {}) => ({
     id: `${agent}:${name}`,
     project: "public-api",
     actorId: "",
-    actorName: "patrick",
+    actorName: "alex",
     name,
     agent,
     role: "worker",
@@ -1016,8 +1075,8 @@ test("agent-network", async ({ page }) => {
   const held = {
     id: "h1",
     project: "public-api",
-    from: "patrick/docs-codex",
-    senderActor: "patrick",
+    from: "alex/docs-codex",
+    senderActor: "alex",
     senderSession: "docs-codex",
     senderAgent: "codex",
     to: "limiter-claude",
@@ -1029,7 +1088,7 @@ test("agent-network", async ({ page }) => {
   const delivered = {
     ...held,
     id: "d1",
-    from: "patrick/limiter-claude",
+    from: "alex/limiter-claude",
     senderSession: "limiter-claude",
     senderAgent: "claude",
     to: "dashboard-opencode",
@@ -1037,9 +1096,35 @@ test("agent-network", async ({ page }) => {
     status: "delivered",
     createdAt: Date.now() - 300_000,
   };
+  // A run's Claude asks to run the tests: a permission prompt its runner
+  // relays (permissionRelay), answered here by the runner's owner.
+  let askState: "none" | "pending" | "allowed" = "none";
+  const ask = () => ({
+    id: "ask-1",
+    project: "public-api",
+    sessionId: "claude:limiter-claude",
+    sessionName: "limiter-claude",
+    actorId: status.actor?.id ?? "",
+    agent: "claude",
+    kind: "permission",
+    question: "Bash: go test ./internal/server/...",
+    tool: "Bash",
+    toolInput: JSON.stringify({ command: "go test ./internal/server/..." }),
+    runScope: "command",
+    runId: "run1",
+    status: askState === "allowed" ? "approved" : "pending",
+    ...(askState === "allowed" ? { decision: "approve", decidedBy: "alex", decidedAt: Date.now() } : {}),
+    createdAt: Date.now() - 5_000,
+    expiresAt: Date.now() + 10 * 60_000,
+    canAnswer: true,
+  });
   await page.route((url) => url.pathname.startsWith("/api/agents"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (request.method() === "POST" && url.pathname.startsWith("/api/agents/asks/")) {
+      askState = "allowed";
+      return route.fulfill({ json: { ok: true, ask: ask() } });
+    }
     if (request.method() === "POST") {
       if (url.pathname.endsWith("/approve")) {
         heldOpen = false;
@@ -1053,22 +1138,41 @@ test("agent-network", async ({ page }) => {
       const all = heldOpen ? [held, delivered] : [{ ...held, status: "delivered" }, delivered];
       return route.fulfill({ json: { messages: wantHeld ? (heldOpen ? [held] : []) : all } });
     }
-    if (url.pathname === "/api/agents/asks") return route.fulfill({ json: { asks: [] } });
+    if (url.pathname === "/api/agents/asks") {
+      const pendingOnly = url.searchParams.get("status") === "pending";
+      const asks = askState === "none" || (pendingOnly && askState !== "pending") ? [] : [ask()];
+      return route.fulfill({ json: { asks } });
+    }
     return route.fulfill({ json: {} });
   });
 
   await openBoard(page);
-  await begin(page, "Agent network", "See the other agents at work, and what they tell each other.");
-  const fab = page.getByRole("button", { name: "Open Agent Network" });
+  await begin(page, "Agent chat", "See the other agents at work, and what they tell each other.");
+  const fab = page.getByRole("button", { name: /^Open Agent chat/ });
   say("Every agent session, in one place", "Claude Code, Codex and OpenCode on the same project.");
   await pause(page, 1400);
   await focus(page, fab, { pad: 160, minW: 720, hold: 400 });
   await glide(page, fab);
-  const panel = page.getByRole("dialog", { name: "Agent Network" });
+  const panel = page.getByRole("dialog", { name: "Agent chat" });
   await expect(panel).toBeVisible();
   await pause(page, 400);
   await hidePointer(page);
   await focus(page, await band(panel, 0, 0.55), { pad: 8, hold: 2600 });
+
+  askState = "pending";
+  push({ type: "agent-ask", id: "ask-1" });
+  const asksSection = panel.getByRole("region", { name: "Agent asks" });
+  await expect(asksSection).toBeVisible();
+  say("Agents ask before risky steps", "A run's permission prompt, relayed to its runner's owner.");
+  await pause(page, 400);
+  await focus(page, asksSection, { pad: 40, minW: 640, hold: 2600 });
+  await glide(page, asksSection.getByRole("button", { name: /^Allow/ }).first());
+  await expect(asksSection.getByText("Allowed", { exact: true })).toBeVisible();
+  await pause(page, 300);
+  await hidePointer(page);
+  say("Allowed, once", "Or for the rest of the run, or denied: the agent gets the answer.");
+  await focus(page, asksSection, { pad: 40, minW: 640, hold: 2200 });
+
   const heldSection = panel.getByRole("region", { name: /Held messages/ });
   if (await heldSection.isVisible().catch(() => false)) {
     say("Hold a session's inbox", "Read what other agents send it before it gets there.");
@@ -1077,7 +1181,7 @@ test("agent-network", async ({ page }) => {
     await glide(page, heldSection.getByRole("button", { name: "Approve" }));
     await pause(page, 700);
     await hidePointer(page);
-    await focus(page, await band(panel, 0.15, 0.85), { pad: 8, hold: 2800 });
+    await focus(page, [panel.locator(".agent-filter-bar"), panel.locator(".agent-messages-list")], { pad: 40, minW: 640, hold: 2800 });
   }
   await wide(page, 1.0, 1200);
 });
@@ -1085,7 +1189,7 @@ test("agent-network", async ({ page }) => {
 test("two-factor-and-device-link", async ({ page }) => {
   // A hub with accounts: the board belongs to a signed-in person whose
   // second factor is set up here.
-  const actor = { id: "u1", name: "patrick", email: "patrick@example.com", role: "admin" };
+  const actor = { id: "u1", name: "alex", email: "alex@example.com", role: "admin" };
   let totp = { enabled: false, pending: false, recoveryCodesLeft: 0 } as Record<string, unknown>;
   let stepUp: Record<string, unknown> = { required: true, active: true, until: new Date(Date.now() + 600_000).toISOString(), method: "email" };
   await page.route(/\/api\/auth\/status/, (route) =>
@@ -1096,9 +1200,9 @@ test("two-factor-and-device-link", async ({ page }) => {
     route.fulfill({
       json: {
         secret: "JBSWY3DPEHPK3PXPDEMOKEY7",
-        uri: "otpauth://totp/Nodevas:patrick%40example.com?secret=JBSWY3DPEHPK3PXPDEMOKEY7&issuer=Nodevas",
+        uri: "otpauth://totp/Nodevas:alex%40example.com?secret=JBSWY3DPEHPK3PXPDEMOKEY7&issuer=Nodevas",
         qr: QR,
-        account: "patrick@example.com",
+        account: "alex@example.com",
         issuer: "Nodevas",
         digits: 6,
         period: 30,
@@ -1147,15 +1251,15 @@ test("two-factor-and-device-link", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Two-factor and device links", "Lock your account down, then link a new runner.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
   const parts = page.getByRole("navigation", { name: "Settings" });
   say("Your account, in Settings", "Turn on an authenticator app as a second factor.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 400 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 400 });
   await cut(page, async () => {
-    await glide(page, modes.getByRole("button", { name: "Settings" }));
+    await glide(page, settings);
     await expect(parts).toBeVisible();
-    await glide(page, parts.getByRole("button", { name: "Your account" }));
+    await glide(page, parts.getByRole("button", { name: /^Account/ }));
     await pause(page, 600);
     await hidePointer(page);
     await focus(page, page.getByRole("button", { name: "Set up" }), { pad: 200, minW: 760, d: 0 });
@@ -1167,7 +1271,7 @@ test("two-factor-and-device-link", async ({ page }) => {
   await pause(page, 300);
   say("Scan, then type the code", "Any authenticator app works.");
   const code = page.getByLabel("6-digit code from the app");
-  await focus(page, [qr, code], { pad: 32, hold: 1800 });
+  await focus(page, [qr, code, page.getByRole("button", { name: "Turn on" })], { pad: 32, hold: 1800 });
   await typeSlowly(page, code, "482913");
   await pause(page, 400);
   await glide(page, page.getByRole("button", { name: "Turn on" }));
@@ -1179,10 +1283,10 @@ test("two-factor-and-device-link", async ({ page }) => {
   await glide(page, saved);
   await pause(page, 900);
 
-  say("Link a new runner", "A one-time device link from Settings, Runners.");
-  const runners = page.getByRole("region", { name: "Runners" });
+  say("Link a new runner", "A one-time device link from Settings, Agents.");
+  const runners = page.getByRole("region", { name: "Agents", exact: true });
   await cut(page, async () => {
-    await glide(page, parts.getByRole("button", { name: "Runners" }));
+    await glide(page, parts.getByRole("button", { name: /^Agents/ }));
     await expect(runners).toBeVisible();
     await pause(page, 500);
     await hidePointer(page);

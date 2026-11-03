@@ -1,4 +1,4 @@
-// The project store: one directory on disk, one mutex, and the reads and writes every other layer goes through. State and the journal live here too because they are written under the same lock as the graph.
+// The project store: one directory on disk, one read-write lock, and the reads and writes every other layer goes through. State and the journal live here too because they are written under the same lock as the graph.
 
 package store
 
@@ -7,16 +7,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/workspace"
 )
 
@@ -30,7 +31,10 @@ const (
 	maxNodePages  = 256
 	// maxNodeLinks bounds a node's named references; they are a menu for the
 	// `/` inserter, not a database.
-	maxNodeLinks        = 64
+	maxNodeLinks = 64
+	// maxNodeRefs bounds the notes a node uses as context (Node.Refs); a
+	// run's prompt summarizes at most MaxReferenceNotes of them anyway.
+	maxNodeRefs         = 32
 	maxJournalLineBytes = 64 << 10
 	// maxJournalBytes is only an absolute sanity bound on one journal
 	// segment. Compaction (see journal.go) rotates the file at
@@ -57,12 +61,39 @@ func Rev(data []byte) string {
 // Layout: graph.yaml, nodes/<id>.md, run/{state.json,journal.jsonl},
 // .vised/{history,trash,drafts}.
 type Store struct {
-	mu      sync.Mutex
+	// mu orders access to the project's files: writers take it exclusively,
+	// readers (claims, page reads, page saves) share it. The hot reads of
+	// files that are only ever replaced whole (LoadGraph, LoadNodeContent,
+	// ListNodePages) take none: see settledRead.
+	mu      sync.RWMutex
 	mediaMu sync.Mutex
 	root    string
 
+	// graphCache is the last graph.yaml parsed, shared read-only by every
+	// reader; see graph_cache.go. Guarded by graphCacheMu, not mu, because
+	// readers holding mu only for reading fill it.
+	graphCacheMu sync.Mutex
+	graphFillMu  sync.Mutex
+	graphCache   *cachedGraph
+
+	// pageLists is each node's last page listing; see pages_cache.go.
+	pageListMu  sync.Mutex
+	pageLists   map[string]*cachedPageList
+	pageListGen atomic.Uint64
+
 	selfMu     sync.Mutex
 	selfWrites map[string]time.Time
+
+	// onChange hears every path this store writes, renames or removes; see
+	// SetOnChange.
+	onChange atomic.Pointer[func(path string)]
+
+	// opsQueue holds the graph-op calls waiting for the next group commit,
+	// and opsLeading says one of them is committing; see graph_ops_batch.go.
+	// Guarded by opsMu, never held together with mu except to drain.
+	opsMu      sync.Mutex
+	opsQueue   []*graphOpsCall
+	opsLeading bool
 
 	// sharedStatuses supplies the workspace-wide lifecycle vocabulary; see
 	// workspacedefs.go. Absent for a store nobody wired one into.
@@ -74,8 +105,16 @@ type Store struct {
 	compactFailedAt time.Time
 
 	// historyMarks is what lets version history survive auto-saving editors;
-	// see snapshotHistory. Guarded by mu, like every other write path here.
+	// see snapshotHistory. Guarded by marksMu: a page save updates it while
+	// holding mu only for reading. One path's mark is only ever changed by
+	// that path's writer (mu exclusively, or the path's lock).
+	marksMu      sync.Mutex
 	historyMarks map[string]historyMark
+
+	// pathLocks serialises writers of one file that hold mu only for
+	// reading (page saves); see lockPath.
+	pathLocksMu sync.Mutex
+	pathLocks   map[string]*pathLock
 
 	// historyImpl is where version history goes, chosen on first use; see
 	// history_backend.go. historyMode is a choice made before that.
@@ -121,11 +160,16 @@ func (s *Store) NodePagesManifestPath(id string) string {
 	return filepath.Join(s.NodePagesDir(id), "pages.json")
 }
 func (s *Store) NodePagePath(nodeID, pageID, format string) string {
-	extension, ok := pageFormatExtension[format]
-	if !ok {
-		extension = ".md"
+	return filepath.Join(s.NodePagesDir(nodeID), pageID+pageFileExtension(format))
+}
+
+// pageFileExtension is the extension a page of format is stored with;
+// Markdown for a format this build does not know.
+func pageFileExtension(format string) string {
+	if extension, ok := pageFormatExtension[format]; ok {
+		return extension
 	}
-	return filepath.Join(s.NodePagesDir(nodeID), pageID+extension)
+	return ".md"
 }
 func (s *Store) draftPath(id string) string {
 	return filepath.Join(s.root, DataDir, "drafts", id+".md")
@@ -180,7 +224,27 @@ func (s *Store) WasSelfWrite(path string) bool {
 	return now.Sub(t) <= 2*time.Second
 }
 
+// SetOnChange registers fn to hear every path this store writes, renames or
+// removes. Those are exactly the changes the file watcher keeps quiet about
+// (self-writes), so anything that mirrors the files, such as the search index,
+// needs them from here. fn runs on the writer's goroutine, often with s.mu
+// held: it must only note the path and return, never call back into the store.
+func (s *Store) SetOnChange(fn func(path string)) {
+	if fn == nil {
+		s.onChange.Store(nil)
+		return
+	}
+	s.onChange.Store(&fn)
+}
+
+func (s *Store) noteChange(path string) {
+	if fn := s.onChange.Load(); fn != nil {
+		(*fn)(path)
+	}
+}
+
 func (s *Store) markSelfWrite(path string) {
+	s.noteChange(path)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return
@@ -196,19 +260,77 @@ func (s *Store) markSelfWrite(path string) {
 	s.selfMu.Unlock()
 }
 
+// ---------- per-file write serialisation ----------
+
+// pathLock is one file's write lock, kept only while someone holds or waits
+// for it.
+type pathLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockPath takes path's write lock and returns its release.
+//
+// A page save changes one file, and taking the store-wide write lock for its
+// read, history snapshot, fsync and rename made every reader and every other
+// page wait on it. So a page save holds mu for reading, which still keeps out
+// every writer that restructures the tree (a node delete or move, a page
+// delete or conversion, an import), and this lock, which keeps out a second
+// save of the same file: the revision check, the history mark and the write
+// stay one step per file, in the order their locks are granted.
+func (s *Store) lockPath(path string) func() {
+	key := filepath.Clean(path)
+	s.pathLocksMu.Lock()
+	if s.pathLocks == nil {
+		s.pathLocks = map[string]*pathLock{}
+	}
+	lock := s.pathLocks[key]
+	if lock == nil {
+		lock = &pathLock{}
+		s.pathLocks[key] = lock
+	}
+	lock.refs++
+	s.pathLocksMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		s.pathLocksMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(s.pathLocks, key)
+		}
+		s.pathLocksMu.Unlock()
+	}
+}
+
 // ---------- atomic write + local history ----------
 
 // WriteAtomic writes via temp file + rename so a crash can never leave a
-// half-written file (the VS Code / SQLite pattern).
+// half-written file (the VS Code pattern).
 func (s *Store) WriteAtomic(path string, data []byte) error {
-	return writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite)
+	if s.isGraphPath(path) {
+		// The cache is keyed by content and would miss anyway; dropping it
+		// here just frees the old graph as soon as it is stale.
+		defer s.InvalidateGraphCache()
+	}
+	if err := writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite); err != nil {
+		return err
+	}
+	// markSelfWrite already reported it, just before the rename; once more
+	// now that the new content is in place, for a listener that got there
+	// first and read the old one.
+	s.noteChange(path)
+	return nil
 }
 
 type fileUpdate struct {
-	path          string
-	data          []byte
-	before        []byte
-	existed       bool
+	path    string
+	data    []byte
+	before  []byte
+	existed bool
+	// read says before and existed are already what the file holds: the
+	// caller read it under s.mu, held exclusively, so it cannot have changed.
+	read          bool
 	checkRevision bool
 	expectedRev   string
 }
@@ -219,17 +341,28 @@ type fileUpdate struct {
 // content.
 //
 // The caller must hold s.mu — the compiler cannot check that, hence the name.
+// A single-file write may instead hold s.mu for reading together with that
+// file's lockPath, as a page save does.
 func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) error {
+	return s.applyUpdatesForLocked([]identity.Actor{actor}, updates)
+}
+
+// applyUpdatesForLocked is applyUpdatesLocked for a write made on behalf of
+// several actors at once (a group commit): each becomes an author of the
+// history record.
+func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpdate) error {
 	history := s.history()
 	for i := range updates {
-		before, err := s.ReadFile(updates[i].path)
-		switch {
-		case err == nil:
-			updates[i].before = before
-			updates[i].existed = true
-		case errors.Is(err, os.ErrNotExist):
-		default:
-			return err
+		if !updates[i].read {
+			before, err := s.ReadFile(updates[i].path)
+			switch {
+			case err == nil:
+				updates[i].before = before
+				updates[i].existed = true
+			case errors.Is(err, os.ErrNotExist):
+			default:
+				return err
+			}
 		}
 		if updates[i].checkRevision {
 			actualRev := ""
@@ -243,7 +376,10 @@ func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) e
 		if updates[i].existed && bytes.Equal(updates[i].before, updates[i].data) {
 			continue
 		}
-		if err := history.beforeOverwrite(updates[i].path, false); err != nil {
+		if !updates[i].existed {
+			continue // nothing to keep
+		}
+		if err := history.beforeOverwrite(updates[i].path, updates[i].before, false); err != nil {
 			return err
 		}
 	}
@@ -263,13 +399,13 @@ func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) e
 				s.forgetHistoryMark(previous.path)
 				if previous.existed {
 					if rollbackErr := s.WriteAtomic(previous.path, previous.before); rollbackErr != nil {
-						combinedErr = errors.Join(combinedErr, fmt.Errorf("rollback %s: %w", previous.path, rollbackErr))
+						combinedErr = errors.Join(combinedErr, locale.Errorf("rollback %s: %w", "復原 %s：%w", previous.path, rollbackErr))
 					}
 				} else {
 					s.markSelfWrite(previous.path)
 					if rollbackErr := s.removePath(previous.path); rollbackErr != nil &&
 						!errors.Is(rollbackErr, os.ErrNotExist) {
-						combinedErr = errors.Join(combinedErr, fmt.Errorf("rollback %s: %w", previous.path, rollbackErr))
+						combinedErr = errors.Join(combinedErr, locale.Errorf("rollback %s: %w", "復原 %s：%w", previous.path, rollbackErr))
 					}
 				}
 			}
@@ -283,10 +419,13 @@ func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) e
 		for i, update := range applied {
 			paths[i] = update.path
 		}
-		history.wrote(actor, "", paths)
+		for _, actor := range actors {
+			history.wrote(actor, "", paths)
+		}
 	}
 	return nil
 }
+
 func (s *Store) checkRevision(path, baseRev string) error {
 	current, err := s.ReadFile(path)
 	if err != nil {
@@ -309,14 +448,14 @@ func (s *Store) checkRevision(path, baseRev string) error {
 
 func (s *Store) SaveDraft(id, content string) error {
 	if !engine.ValidNodeID(id) {
-		return fmt.Errorf("invalid node id")
+		return locale.Errorf("invalid node id", "節點代號無效")
 	}
 	return s.WriteAtomic(s.draftPath(id), []byte(content))
 }
 
 func (s *Store) LoadDraft(id string) (string, error) {
 	if !engine.ValidNodeID(id) {
-		return "", fmt.Errorf("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	data, err := s.ReadFile(s.draftPath(id))
 	if err != nil {
@@ -327,7 +466,7 @@ func (s *Store) LoadDraft(id string) (string, error) {
 
 func (s *Store) DeleteDraft(id string) error {
 	if !engine.ValidNodeID(id) {
-		return fmt.Errorf("invalid node id")
+		return locale.Errorf("invalid node id", "節點代號無效")
 	}
 	err := s.removePath(s.draftPath(id))
 	if err != nil && !os.IsNotExist(err) {
@@ -391,15 +530,20 @@ func (s *Store) SetStatus(nodeID string, status engine.Status, by, note string) 
 // — a check that releases the lock before writing is not a check — so the two
 // halves cannot each take the lock for themselves.
 func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note string) (*engine.RunState, error) {
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found", nodeID)
+		return nil, locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
+	}
+	// A type without status (Note) takes none from anybody, including the
+	// actor-less Autopilot and Copilot writers that come through here.
+	if nodeType := g.TypeOf(g.NodeByID(nodeID)); nodeType.Completion == engine.CompletionNone {
+		return nil, noStatusError(nodeID, nodeType)
 	}
 	if strings.HasPrefix(string(status), "custom-status-") {
-		// loadGraphLocked already merged the workspace vocabulary in, so this
+		// graphViewLocked already merged the workspace vocabulary in, so this
 		// check covers both project-local and workspace-wide definitions.
 		defined := false
 		if g.UI != nil {
@@ -411,7 +555,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 			}
 		}
 		if !defined {
-			return nil, fmt.Errorf("custom status %q is not defined in this project or workspace", status)
+			return nil, locale.Errorf("custom status %q is not defined in this project or workspace", "這個專案或工作區沒有定義自訂狀態「%s」", status)
 		}
 	}
 	node := g.NodeByID(nodeID)
@@ -423,7 +567,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 
 	from := before[nodeID]
 	if !engine.CanTransition(from, status) {
-		return nil, fmt.Errorf("invalid status transition %s -> %s", from, status)
+		return nil, locale.Errorf("invalid status transition %s -> %s", "無效的狀態轉換 %s -> %s", from, status)
 	}
 	if err := rs.SetStatus(nodeID, status, by, time.Now()); err != nil {
 		return nil, err
@@ -458,7 +602,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*engine.RunState, error) {
 	movedAt, err := time.Parse(time.RFC3339, newT)
 	if err != nil {
-		return nil, fmt.Errorf("invalid event time: %w", err)
+		return nil, locale.Errorf("invalid event time: %w", "事件時間無效：%w", err)
 	}
 	newT = movedAt.UTC().Format(time.RFC3339)
 	s.mu.Lock()
@@ -477,13 +621,16 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		}
 	}
 	if target == nil {
-		return nil, fmt.Errorf("event %q not found", id)
+		return nil, locale.Errorf("event %q not found", "找不到事件「%s」", id)
 	}
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return nil, err
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(target.Node)); err != nil {
+		return nil, err
+	}
+	if err := checkRole(actor, g, engine.CapStatus, g.NodeByID(target.Node)); err != nil {
 		return nil, err
 	}
 	for i := targetIndex - 1; i >= 0; i-- {
@@ -493,8 +640,8 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		}
 		previousAt, parseErr := time.Parse(time.RFC3339, previous.T)
 		if parseErr == nil && movedAt.Before(previousAt) {
-			return nil, fmt.Errorf(
-				"實際紀錄不可早於上一個生命週期事件（%s）",
+			return nil, locale.Errorf(
+				"an actual record cannot be earlier than the lifecycle event before it (%s)", "實際紀錄不可早於上一個生命週期事件（%s）",
 				previousAt.Local().Format("2006-01-02 15:04"),
 			)
 		}
@@ -509,8 +656,8 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		isLatestStatus = false
 		nextAt, parseErr := time.Parse(time.RFC3339, next.T)
 		if parseErr == nil && movedAt.After(nextAt) {
-			return nil, fmt.Errorf(
-				"實際紀錄不可晚於下一個生命週期事件（%s）",
+			return nil, locale.Errorf(
+				"an actual record cannot be later than the lifecycle event after it (%s)", "實際紀錄不可晚於下一個生命週期事件（%s）",
 				nextAt.Local().Format("2006-01-02 15:04"),
 			)
 		}
@@ -552,7 +699,7 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 // ...Locked convention and is spelled this way in transfer.go too).
 func (s *Store) appendJournal(line []byte) error {
 	if len(line) == 0 || len(line) > maxJournalLineBytes {
-		return fmt.Errorf("journal event exceeds %d bytes", maxJournalLineBytes)
+		return locale.Errorf("journal event exceeds %d bytes", "日誌事件超過 %d 位元組", maxJournalLineBytes)
 	}
 	if err := MkdirAllProjectPath(s.root, filepath.Dir(s.JournalPath()), 0o755); err != nil {
 		return err
@@ -572,7 +719,7 @@ func (s *Store) appendJournal(line []byte) error {
 		return err
 	}
 	if size > int64(maxJournalBytes-len(line)) {
-		return fmt.Errorf("run journal reached its %d-byte safety limit", maxJournalBytes)
+		return locale.Errorf("run journal reached its %d-byte safety limit", "執行日誌已達 %d 位元組的安全上限", maxJournalBytes)
 	}
 	s.markSelfWrite(s.JournalPath())
 	f, err := openProjectFileAppend(s.root, s.JournalPath(), 0o644)
@@ -597,7 +744,7 @@ func WriteMetaFile(path string, data []byte) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameWithRetry(func() error { return os.Rename(tmp, path) }); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

@@ -1,4 +1,4 @@
-// Whether the game views may move. A person who asked their system for
+// Whether the war room may move. A person who asked their system for
 // reduced motion gets still sprites (the CSS keys off data-motion as well as
 // the media query, so effects started from script stop too), and a page in a
 // background tab pauses every animation.

@@ -5,7 +5,6 @@ package project
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -17,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -75,7 +76,7 @@ func (a *API) GetProjectExport(c *gin.Context) {
 	if !acquireProjectExport(c.Request.Context()) {
 		if c.Request.Context().Err() == nil {
 			c.Header("Retry-After", "2")
-			httpx.Err(c, http.StatusTooManyRequests, fmt.Errorf("too many project exports in progress"))
+			httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many project exports in progress", "進行中的專案匯出太多"))
 		}
 		return
 	}
@@ -93,7 +94,7 @@ func (a *API) GetProjectExport(c *gin.Context) {
 	root := scope.Root()
 	if a.access != nil && !a.access.ReadableTree(c.Request, root.Path) {
 		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
-			fmt.Errorf("the export would include a project you are not a member of"), nil)
+			locale.Errorf("the export would include a project you are not a member of", "這次匯出會包含你不是成員的專案"), nil)
 		return
 	}
 	file, err := os.CreateTemp("", "nodevas-*.veproj")
@@ -161,7 +162,7 @@ func (a *API) GetProjectExport(c *gin.Context) {
 func (a *API) PostProjectImport(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, project.MaxProjectArchiveBytes)
 	if err := c.Request.ParseMultipartForm(project.MaxProjectArchiveBytes); err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("read project archive: %w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("read project archive: %w", "讀取專案封存檔：%w", err))
 		return
 	}
 	if c.Request.MultipartForm != nil {
@@ -169,7 +170,7 @@ func (a *API) PostProjectImport(c *gin.Context) {
 	}
 	upload, header, err := c.Request.FormFile("file")
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("file is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("file is required", "需要提供檔案"))
 		return
 	}
 	defer upload.Close()

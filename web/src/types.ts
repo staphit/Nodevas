@@ -1,6 +1,56 @@
 // Mirrors internal/engine JSON shapes.
 
-export type NodeKind = "task" | "scene" | "choice" | "gate" | "event" | "start" | "end" | "";
+/** Built-in node type ids. Mirrors `internal/engine/nodetypes.go`. */
+export type BuiltinNodeKind =
+  | "task"
+  | "goal"
+  | "scene"
+  | "event"
+  | "gate"
+  | "choice"
+  | "start"
+  | "end"
+  | "note";
+/** A project-defined node type (`graph.yaml → node_types`). */
+export type CustomNodeTypeId = `custom-type-${string}`;
+/** A node's type id. "" means Task. */
+export type NodeKind = BuiltinNodeKind | CustomNodeTypeId | "";
+
+/** Who may hand a node of this type to an agent. */
+export type AgentMode = "none" | "dispatch" | "autopilot";
+/**
+ * Who settles a node of this type: anyone (a person or a successful run),
+ * people only, automatically once its prerequisites settle, or nobody — the
+ * type has no status at all and sits outside the flow.
+ */
+export type NodeCompletion = "anyone" | "people" | "auto" | "none";
+
+/**
+ * Stored, sparse form (`graph.yaml → node_types`). A custom entry carries every
+ * behaviour field; a built-in entry only its shape and colour override.
+ */
+export interface NodeTypeDef {
+  id: string;
+  label?: string;
+  shape?: NodeShape;
+  color?: string;
+  agentMode?: AgentMode;
+  completion?: NodeCompletion;
+  countsInProgress?: boolean;
+}
+
+/** Resolved form: every field set. */
+export interface NodeType {
+  id: string;
+  /** English for built-ins; the UI localizes them by id. */
+  label: string;
+  builtin: boolean;
+  shape: NodeShape;
+  color?: string;
+  agentMode: AgentMode;
+  completion: NodeCompletion;
+  countsInProgress: boolean;
+}
 
 export type BuiltinStatus =
   | "locked"
@@ -47,7 +97,8 @@ export interface NodeLinkRef {
 export interface GraphNode {
   id: string;
   title?: string;
-  kind?: NodeKind;
+  /** Legacy free-form values (e.g. "bug") still load and read as Task. */
+  kind?: NodeKind | string;
   priority?: "urgent" | "high" | "medium" | "low" | "";
   assignee?: string;
   /** "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD" (end of that day), local time. */
@@ -62,6 +113,82 @@ export interface GraphNode {
   tags?: string[];
   effects?: { set?: string }[];
   links?: NodeLinkRef[];
+  /**
+   * Nodes this one uses as context — usually Notes (character sheets,
+   * setting). A reference never blocks: readiness, the critical path, entry
+   * points and Problems all ignore it. Stored on the node that uses the note.
+   */
+  refs?: string[];
+  /** Acceptance criteria (Task, Scene, Event, Goal and custom worked types). */
+  acceptance?: Acceptance;
+  /** A Goal's workflow-stage override of its project's (Autopilot types only). */
+  workflow?: Workflow;
+}
+
+/** One acceptance criterion; ids ("a1", "a2"…) are stable across edits. */
+export interface AcceptanceItem {
+  id: string;
+  text: string;
+}
+
+/** A node's acceptance criteria. The hub locks them when an Executor is dispatched. */
+export interface Acceptance {
+  items: AcceptanceItem[];
+  locked?: boolean;
+  by?: string;
+}
+
+/** Which stages of the task and goal flows a project runs. */
+export interface WorkflowStages {
+  planner: boolean;
+  goalQa: boolean;
+  tester: boolean;
+  reviewer: boolean;
+  ci: boolean;
+  goalReview: boolean;
+}
+
+export type WorkflowPreset = "light" | "standard" | "full" | "custom";
+
+/** A project's (or a Goal's) workflow stages and cost levers. Absent is legacy. */
+export interface Workflow {
+  preset: WorkflowPreset;
+  stages: WorkflowStages;
+  reviewerSkipBelowLines?: number;
+  maxQaRounds?: number;
+  maxTesterRounds?: number;
+  maxGreenTries?: number;
+  testGlobs?: string[];
+  /** "" judges by tests (code); "checklist" by a model's checklist (story). */
+  judge?: "" | "checklist";
+}
+
+export type Capability = "read" | "claim" | "status" | "body" | "create" | "link" | "meta" | "acceptance" | "message" | "verdict";
+
+/** A project's stored (sparse) agent role: a custom role, or a built-in's tool/type override. */
+export interface AgentRoleDef {
+  id: string;
+  label?: string;
+  basedOn?: string;
+  rank?: "worker" | "orchestrator";
+  tools?: string[];
+  writeTypes?: string[];
+  acceptanceTypes?: string[];
+  instructions?: string;
+}
+
+/** A resolved agent role. */
+export interface AgentRole {
+  id: string;
+  label: string;
+  builtin: boolean;
+  basedOn?: string;
+  rank: "worker" | "orchestrator";
+  tools: string[];
+  writeTypes: string[];
+  acceptanceTypes: string[];
+  caps: Capability[];
+  instructions?: string;
 }
 
 export interface GraphUser {
@@ -135,14 +262,19 @@ export interface LogicGate {
   applied?: string;
 }
 
-/** Card outline on the canvas. Absent means the default rectangle. */
+/**
+ * Card outline on the canvas. A node's type picks the default; a per-node
+ * `ui.nodeStyles[id].shape` overrides it.
+ */
 export type NodeShape =
   | "rect"
   | "round"
   | "pill"
   | "ellipse"
   | "diamond"
-  | "hexagon";
+  | "hexagon"
+  | "dashed"
+  | "thick";
 
 export type NodeAlign = "left" | "center" | "right";
 export type NodeVAlign = "top" | "middle" | "bottom";
@@ -193,6 +325,9 @@ export interface SavedView {
   sort?: "manual" | "title" | "priority" | "status" | "assignee";
 }
 
+/** Station's office looks (game/officeStyle.ts), in display order. */
+export type OfficeStyle = "default" | "engineering" | "study" | "studio" | "cafe";
+
 export interface Graph {
   version: number;
   type?: string;
@@ -200,6 +335,15 @@ export interface Graph {
   nodes: GraphNode[] | null;
   edges?: GraphEdge[] | null;
   flags?: Record<string, unknown>;
+  /** Project node types: custom ones plus built-in shape/colour overrides. */
+  nodeTypes?: NodeTypeDef[];
+  /** Project agent roles: custom ones plus built-in tool/type overrides. */
+  agentRoles?: AgentRoleDef[];
+  /** Project workflow stages; absent or null is legacy. */
+  workflow?: Workflow | null;
+  /** How the project's office looks in Station (graph.yaml office_style);
+   * absent: the layout's default (game/officeStyle.ts). */
+  officeStyle?: OfficeStyle;
   ui?: {
     positions?: Record<string, { x: number; y: number }>;
     /** Timeline-only node order. Graph positions never affect this sequence. */
@@ -232,7 +376,8 @@ export interface Graph {
 }
 
 export interface Issue {
-  severity: "error" | "warning";
+  /** "info" is a hint: listed, never counted as a problem. */
+  severity: "error" | "warning" | "info";
   nodeId?: string;
   field?: string;
   offset?: number;

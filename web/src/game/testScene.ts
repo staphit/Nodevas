@@ -1,4 +1,4 @@
-// Seeds the app's stores with one small scene for the game views' component
+// Seeds the app's stores with one small scene for the war room's component
 // tests, and stubs every loader and action the views call, so nothing goes
 // to the network and every click can be asserted. Not imported by app code.
 
@@ -105,7 +105,7 @@ export function seedScene(now = NOW): SceneSpies {
     openDispatch: vi.fn(),
     showAutopilot: vi.fn(),
     decideHeld: vi.fn(async () => undefined),
-    answerAsk: vi.fn(async () => undefined),
+    answerAsk: vi.fn(async () => true),
     loadSessions: vi.fn(async () => undefined),
     loadChanges: vi.fn(async () => undefined),
     setLifecycleStatus: vi.fn(async () => ({ ok: true })),

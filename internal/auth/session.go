@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"nodevas/internal/identity"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -27,8 +28,6 @@ const (
 	LoginFailureLimit = 10 // retained name for compatibility; all attempts count
 	loginIPWindow     = 1 * time.Minute
 	loginIPLimit      = 20
-	loginGlobalWindow = 1 * time.Minute
-	loginGlobalLimit  = 60
 	maxLoginBuckets   = 2048
 	maxSessions       = 4096
 )
@@ -117,13 +116,12 @@ func NewSessionAuth(users *UserStore) *SessionAuth {
 // taken by other people. It is deliberately distinguishable from bad
 // credentials: the person got the passcode right, and telling them the server
 // is full is not a fact an attacker did not already have.
-var ErrTooManyActiveUsers = errors.New(
-	"the maximum number of people are already signed in; ask one of them to sign out")
+var ErrTooManyActiveUsers = locale.Errorf("the maximum number of people are already signed in; ask one of them to sign out", "已登入的人數已達上限；請其中一人登出")
 
 // ErrSessionPersistence means a destructive session transaction did not
 // commit. Callers can distinguish infrastructure failure from rejected
 // credentials without exposing the database error to a remote client.
-var ErrSessionPersistence = errors.New("session persistence is unavailable")
+var ErrSessionPersistence = locale.Errorf("session persistence is unavailable", "無法保存工作階段")
 
 // SetMaxActiveUsers caps how many distinct accounts may be signed in at once.
 // Zero, the default, means no cap.
@@ -194,6 +192,17 @@ func (a *SessionAuth) CurrentActor(ctx context.Context, id string) (identity.Act
 	return a.users.ActorRevision(ctx, id)
 }
 
+// LookupActor is CurrentActor for work done on an account's behalf outside
+// any request: it tells an account that is gone (not found) from one that
+// could not be read (an error), which the caller may try again.
+func (a *SessionAuth) LookupActor(ctx context.Context, id string) (identity.Actor, bool, error) {
+	user, found, err := a.users.lookupAccount(ctx, id)
+	if err != nil || !found {
+		return identity.Actor{}, false, err
+	}
+	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, true, nil
+}
+
 // Authenticate resolves the session cookie to an account. The
 // X-Nodevas-Agent-Role header is deliberately ignored here: it is only
 // trustworthy on a loopback server, where the OS account is the boundary. The
@@ -208,11 +217,11 @@ func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
 // well: the check reads the account's row on every request anyway, and the
 // request's log line names the address.
 func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, string, error) {
-	cookie, err := r.Cookie(SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := SessionToken(r)
+	if !ok {
 		return identity.Actor{}, "", ErrUnauthenticated
 	}
-	key := sessionKey(cookie.Value)
+	key := sessionKey(token)
 	a.mu.Lock()
 	found, ok := a.sessions[key]
 	if !ok {
@@ -235,8 +244,8 @@ func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, st
 	a.mu.Unlock()
 
 	// The request's context, so a client that disconnects mid-request releases
-	// the read slot this query is holding instead of pinning it until SQLite's
-	// busy timeout gives up. A cancelled read reads as "no such revision" and
+	// the read slot this query is holding instead of pinning it until the
+	// query gives up on its own. A cancelled read reads as "no such revision" and
 	// the request is refused, which is the direction an authentication check
 	// must fail in anyway.
 	currentRevision, email, exists := a.users.revisionAndEmail(r.Context(), actor.ID)
@@ -412,9 +421,9 @@ func (a *SessionAuth) Logout(token string) error {
 	return a.removeSessionsLocked(key)
 }
 
-// allowLogin atomically charges global, source-IP, and account buckets before
-// Argon2 starts. Rotating names cannot bypass the global/IP budgets, and every
-// map and timestamp slice is bounded.
+// allowLogin atomically charges the source and account buckets before Argon2
+// starts. Rotating names cannot bypass the source budget, and every map and
+// timestamp slice is bounded.
 func (a *SessionAuth) allowLogin(name, source string) bool {
 	account := ""
 	if userNamePattern.MatchString(name) {
@@ -425,7 +434,7 @@ func (a *SessionAuth) allowLogin(name, source string) bool {
 
 // allowEmailLogin is allowLogin for the email sign-in: the address, already
 // reduced to its throttle key, stands where the account name does. An empty
-// key charges only the global and per-source budgets.
+// key charges only the per-source budget.
 func (a *SessionAuth) allowEmailLogin(key, source string) bool {
 	account := ""
 	if key != "" {
@@ -434,15 +443,21 @@ func (a *SessionAuth) allowEmailLogin(key, source string) bool {
 	return a.chargeLogin(account, source)
 }
 
-// chargeLogin charges the global and per-source sign-in budgets, plus the
-// per-account one when account is not empty.
+// chargeLogin charges the per-source sign-in budget, plus the per-account one
+// when account is not empty.
+//
+// There is deliberately no hub-wide budget. Every attempt would count against
+// it, so a stranger spending a request a second from a few addresses would
+// hold the door shut for everybody; the per-source, per-address and
+// per-passcode budgets already bound guessing, and the pre-auth limiter bounds
+// the load.
 func (a *SessionAuth) chargeLogin(account, source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepAttemptsLocked(now)
 
-	charges := []rateCharge{{key: "global", window: loginGlobalWindow, limit: loginGlobalLimit}}
+	var charges []rateCharge
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "ip:" + source, window: loginIPWindow, limit: loginIPLimit})
 	}
@@ -450,6 +465,17 @@ func (a *SessionAuth) chargeLogin(account, source string) bool {
 		charges = append(charges, rateCharge{key: account, window: loginUserWindow, limit: LoginFailureLimit})
 	}
 	return a.chargeLocked(charges, now)
+}
+
+// chargeAccount charges only an account's own budget, for a check a signed-in
+// person makes (step-up, authenticator changes). Strangers cannot reach it, so
+// nothing they send to the sign-in door counts against it.
+func (a *SessionAuth) chargeAccount(account string) bool {
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sweepAttemptsLocked(now)
+	return a.chargeLocked([]rateCharge{{key: account, window: loginUserWindow, limit: LoginFailureLimit}}, now)
 }
 
 // rateCharge is one budget: how many events of a kind are allowed in a window.
@@ -486,7 +512,7 @@ func normalizeSource(source string) string {
 	if source == "" || len(source) > 64 {
 		return ""
 	}
-	return source
+	return SourceKey(source)
 }
 
 func (a *SessionAuth) recentAttemptsLocked(key string, window time.Duration, now time.Time) []time.Time {
@@ -508,7 +534,7 @@ func (a *SessionAuth) recentAttemptsLocked(key string, window time.Duration, now
 func (a *SessionAuth) sweepAttemptsLocked(now time.Time) {
 	cutoff := now.Add(-loginUserWindow)
 	for key, bucket := range a.attempts {
-		if key != "global" && bucket.touched.Before(cutoff) {
+		if bucket.touched.Before(cutoff) {
 			delete(a.attempts, key)
 		}
 	}
@@ -519,9 +545,6 @@ func (a *SessionAuth) makeBucketRoomLocked() {
 		oldestKey := ""
 		var oldest time.Time
 		for key, bucket := range a.attempts {
-			if key == "global" {
-				continue
-			}
 			if oldestKey == "" || bucket.touched.Before(oldest) {
 				oldestKey, oldest = key, bucket.touched
 			}

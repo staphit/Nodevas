@@ -104,7 +104,7 @@ func accountServerForTest(t *testing.T) (*Server, *project.ProjectManager, *mail
 }
 
 // accountServerWithAuditDBForTest exposes the audit handle only to tests that
-// must deterministically toggle SQLite write availability. Product code never
+// must deterministically toggle the database's write availability. Product code never
 // swaps or reaches through the audit store's database.
 func accountServerWithAuditDBForTest(t *testing.T) (*Server, *project.ProjectManager, *mailbox, *db.DB) {
 	t.Helper()
@@ -117,21 +117,13 @@ func accountServerWithAuditDBForTest(t *testing.T) (*Server, *project.ProjectMan
 func accountServerPartsForTest(t *testing.T) (*Server, *project.ProjectManager, *mailbox, *db.DB, *auth.UserStore) {
 	t.Helper()
 	pm := projectManagerForTest(t)
-	database, err := db.Open(pm.Workspace())
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	users, err := auth.NewUserStore(pm.Workspace())
-	// The store holds an open SQLite handle now, and Windows will not let the
-	// test's temporary directory be removed while it is open.
-	t.Cleanup(func() {
-		if users != nil {
-			_ = users.Close()
-		}
-	})
-	if err != nil {
-		t.Fatalf("NewUserStore: %v", err)
+	// Two handles on one database, as the audit trail and the accounts had
+	// when this was written: the audit tests make the audit handle read-only
+	// without taking sign-in down with it.
+	database := dbtestOpenForServer(t, pm.Workspace())
+	users := auth.NewUserStoreDB(dbtestOpenForServer(t, pm.Workspace()))
+	if err := users.EnsureAdmin(); err != nil {
+		t.Fatalf("EnsureAdmin: %v", err)
 	}
 	if err := users.Add(context.Background(), "ann", "correct-horse-battery"); err != nil {
 		t.Fatalf("add user: %v", err)

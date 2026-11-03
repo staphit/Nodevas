@@ -129,7 +129,7 @@ export const CopilotPanel = forwardRef<
             className="copilot-icon-btn"
             onClick={onClose}
             aria-label={t("copilot.close")}
-            title={`${t("copilot.close")} (Esc)`}
+            title={t("common.withHint", { label: t("copilot.close"), hint: "Esc" })}
           >
             <IconClose size={16} />
           </button>

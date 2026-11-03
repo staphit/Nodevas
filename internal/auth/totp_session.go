@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 const (
@@ -61,16 +62,16 @@ var (
 	// ErrSecondFactorRequired is LoginWithOTP's answer when the passcode was
 	// right but the account also has an authenticator: the sign-in is not
 	// finished. SignInWithOTP returns the pending ticket instead.
-	ErrSecondFactorRequired = errors.New("this account also needs a code from its authenticator app")
+	ErrSecondFactorRequired = locale.Errorf("this account also needs a code from its authenticator app", "這個帳號還需要驗證器 App 的代碼")
 	// ErrSignInExpired is a pending sign-in that is unknown, expired, used up
 	// or overtaken by an account change. The way on is a new passcode.
-	ErrSignInExpired = errors.New("this sign-in has expired; start again with a new email passcode")
+	ErrSignInExpired = locale.Errorf("this sign-in has expired; start again with a new email passcode", "這次登入已過期；請用新的電子郵件驗證碼重新開始")
 	// ErrStepUpRequired guards enrollment: turning a second factor on is done
 	// from a session that recently re-proved who it is.
-	ErrStepUpRequired = errors.New("verify it's you first (step-up), then try again")
+	ErrStepUpRequired = locale.Errorf("verify it's you first (step-up), then try again", "請先驗證身分（step-up），再試一次")
 	// ErrPersonOnly refuses an agent: only a person at a browser changes
 	// their own sign-in factors.
-	ErrPersonOnly = errors.New("only a person at a browser can change two-factor authentication")
+	ErrPersonOnly = locale.Errorf("only a person at a browser can change two-factor authentication", "只有在瀏覽器前的人可以變更雙重驗證")
 )
 
 // SecondFactorProof says what a second factor was proved with.
@@ -165,8 +166,8 @@ func (a *SessionAuth) CompleteSignIn(r *http.Request, ticket, code string) (Sign
 		source = ClientIP(r)
 	}
 	ctx := requestContext(r)
-	// The global and per-source budgets, charged before the ticket is even
-	// looked at, like every other sign-in door.
+	// The per-source budget, charged before the ticket is even looked at,
+	// like every other sign-in door.
 	if !a.chargeLogin("", source) {
 		return SignInResult{}, ErrTooManyLogins
 	}
@@ -439,7 +440,7 @@ func (a *SessionAuth) ConfirmTOTP(r *http.Request, code string) ([]string, error
 	if err := a.requireStepUp(r); err != nil {
 		return nil, err
 	}
-	if !a.chargeLogin("totp-enroll:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-enroll:" + account.ID) {
 		return nil, ErrTooManyLogins
 	}
 	if len(code) == 0 || len(code) > MaxOTPBytes {
@@ -474,7 +475,7 @@ func (a *SessionAuth) DisableTOTP(r *http.Request, code string) (SecondFactorPro
 	if err != nil {
 		return SecondFactorProof{}, err
 	}
-	if !a.chargeLogin("totp-change:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-change:" + account.ID) {
 		return SecondFactorProof{}, ErrTooManyLogins
 	}
 	ctx := requestContext(r)
@@ -503,7 +504,7 @@ func (a *SessionAuth) RegenerateRecoveryCodes(r *http.Request, code string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	if !a.chargeLogin("totp-change:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-change:" + account.ID) {
 		return nil, ErrTooManyLogins
 	}
 	ctx := requestContext(r)

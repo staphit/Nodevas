@@ -25,11 +25,12 @@ import type {
 } from "../../types";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { COL_W, ROW_H } from "./geometry";
+import { withRequiresProjection } from "./requiresProjection";
 
 const EDITABLE_GATE_OPERATORS = new Set(["and", "or", "xor", "nand", "nor"]);
 
 export function useNodeConditions({
-  graph,
+  graph: storedGraph,
   logicGates,
   contextMenu,
   setContextMenu,
@@ -50,6 +51,9 @@ export function useNodeConditions({
   runCanvasCommand: (command: CanvasCommand) => void;
 }) {
   const { t } = useI18n();
+  // A prerequisite named only in `requires` is still a prerequisite: listed,
+  // removable, and never offered again as one to add.
+  const graph = withRequiresProjection(storedGraph);
   const [conditionSource, setConditionSource] = useState("");
   const [conditionOperator, setConditionOperator] = useState("and");
   const [conditionRelation, setConditionRelation] = useState<EdgeRelation>("");

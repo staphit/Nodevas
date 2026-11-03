@@ -12,18 +12,33 @@ on:
         required: true
         default: "testflight-v1.0"
 
+# build-macos runs npm, esbuild's installer, vite, go and electron-builder,
+# and any step of a job can read that job's token and secrets from the
+# runner's memory (steps have passwordless sudo), so it holds no secret and
+# its token only reads: it builds an unsigned app. sign-macos, the one job
+# handed the Developer ID certificate and the Apple ID app password, runs
+# none of that code: it checks nothing out and signs, packs and notarizes
+# what build-macos made with Apple's own tools. publish-macos, the one job
+# whose token can write, runs none of it either: it checks the tag,
+# downloads what sign-macos made and uploads it to the release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-macos:
     runs-on: macos-14
     timeout-minutes: 35
-    # Protected environment: the user's required reviewer approves a release
-    # before the job (its token and the signing secrets) runs.
-    environment: release
-    # Secrets and the token are handed only to the steps that use them:
-    # builds and dependency installs never see them.
+    # Not in the release environment: environment secrets reach only that
+    # environment's jobs, and this one runs dependency code. The required
+    # reviewer approves sign-macos, before anything is signed or published.
+    # The tag and commit the provenance step verified, before any dependency
+    # code ran. publish-macos still works the tag out again from the event.
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      target_sha: ${{ steps.release.outputs.target_sha }}
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      release_label: ${{ steps.release.outputs.release_label }}
     env:
       GH_OWNER: ${{ github.repository_owner }}
       ELECTRON_REPO_NAME: ${{ github.event.repository.name }}
@@ -39,14 +54,15 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
           fetch-tags: true
+          # Nothing in this job needs the token in the clone's git config.
+          persist-credentials: false
 
       - name: Verify release provenance
         id: release
         shell: bash
         # INPUT_TAG comes in through the environment, never through ${{ }}
         # interpolation: a dispatch value is attacker-controlled text and would
-        # otherwise be pasted into the script — in a job holding contents:write
-        # plus the signing and notarization secrets — before bash parses it.
+        # otherwise be pasted into the script before bash parses it.
         env:
           INPUT_TAG: ${{ inputs.tag }}
           EVENT_REF: ${{ github.ref }}
@@ -105,8 +121,8 @@ jobs:
       - name: Build web interface
         shell: bash
         # No dependency runs an install script (a compromised package's
-        # postinstall would run with this job's token); esbuild's, the one the
-        # build needs, runs explicitly from the lockfile's own copy.
+        # postinstall would run inside the release build); esbuild's, the one
+        # the build needs, runs explicitly from the lockfile's own copy.
         run: |
           npm ci --ignore-scripts --prefix web
           node web/node_modules/esbuild/install.js
@@ -129,10 +145,84 @@ jobs:
           chmod +x desktop/resources/bin/nodevas
           lipo -info desktop/resources/bin/nodevas
 
+      # The embedded PostgreSQL for both architectures (the app is universal;
+      # the backend picks pg/darwin-<arch>), fetched by the same Go code serve
+      # uses: the archive is refused unless its SHA-256 matches the manifest.
+      # sign-macos signs these Mach-O files with the app.
+      - name: Bundle the pinned PostgreSQL
+        shell: bash
+        run: |
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target darwin-arm64 --out desktop/resources/pg/darwin-arm64
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target darwin-amd64 --out desktop/resources/pg/darwin-x64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/darwin-arm64 darwin-arm64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/darwin-x64 darwin-amd64
+
       # electron-builder downloads the Electron it packages itself, and the
       # dmg/zip targets need no package's install script.
       - name: Install desktop dependencies
         run: npm ci --ignore-scripts --prefix desktop
+
+      # Always unsigned here: this job holds no certificate. sign-macos signs
+      # the app, then packs the zip and the dmg again around it.
+      - name: Build unsigned app, DMG and zip
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        shell: bash
+        run: npm run pack:mac --prefix desktop
+
+      - name: Verify app and DMG
+        shell: bash
+        run: |
+          app_path="$(find desktop/dist -maxdepth 3 -type d -name 'Nodevas.app' | head -n 1)"
+          dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
+          zip_path="$(find desktop/dist -maxdepth 1 -type f -name '*.zip' | head -n 1)"
+          test -n "${app_path}"
+          test -n "${dmg_path}"
+          test -n "${zip_path}"
+          test -x "${app_path}/Contents/Resources/bin/nodevas"
+          node desktop/scripts/verify-pg-bundle.mjs "${app_path}/Contents/Resources/pg/darwin-arm64" darwin-arm64
+          node desktop/scripts/verify-pg-bundle.mjs "${app_path}/Contents/Resources/pg/darwin-x64" darwin-amd64
+          # The app itself as a tar: an artifact keeps neither the symlinks
+          # of Electron's frameworks nor the executable bits.
+          tar -C "$(dirname "${app_path}")" -cf desktop/dist/Nodevas.app.tar Nodevas.app
+
+      # Kept for one day: long enough for sign-macos, short enough not to
+      # fill the account's small artifact quota.
+      - name: Hand the unsigned build to sign-macos
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-unsigned
+          path: |
+            desktop/dist/Nodevas.app.tar
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*-mac.yml
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-macos:
+    # Holds the signing and notarization secrets, so it runs no project or
+    # dependency code: no checkout, no toolchain, nothing from the build is
+    # executed. codesign, hdiutil, ditto, notarytool and stapler only read
+    # and rewrite the files build-macos made.
+    needs: build-macos
+    runs-on: macos-14
+    timeout-minutes: 45
+    # Protected environment: the user's required reviewer approves every
+    # release before it is signed. Keep MAC_CSC_LINK, MAC_CSC_PASSWORD,
+    # APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID as secrets of
+    # this environment, not of the repository: environment secrets reach only
+    # its jobs. publish-macos only runs after this job, so the same approval
+    # covers it.
+    environment: release
+    steps:
+      - name: Download the unsigned build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-unsigned
+          path: in
 
       # Which credentials are configured, as flags: secrets cannot appear in
       # a step's if, and job-level env would hand them to every step.
@@ -146,75 +236,254 @@ jobs:
           echo "signing=${CSC_LINK_SET}" >> "${GITHUB_OUTPUT}"
           echo "notarize=${NOTARIZE_SET}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build DMG without signing
-        if: ${{ steps.creds.outputs.signing != 'true' }}
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Name the release files
+        id: files
         shell: bash
-        run: npm run pack:mac --prefix desktop
+        run: |
+          dmg="$(find in -maxdepth 1 -type f -name '*.dmg')"
+          zip="$(find in -maxdepth 1 -type f -name '*.zip')"
+          feed="$(find in -maxdepth 1 -type f -name '*-mac.yml')"
+          # Exactly one of each, with plain names: they go into the update
+          # feed and on the release as they are.
+          for path in "${dmg}" "${zip}" "${feed}"; do
+            if [[ -z "${path}" || "${path}" == *$'\n'* || ! "$(basename "${path}")" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "refusing to sign: expected one plainly named dmg, zip and update feed, got '${path}'" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "$(basename "${feed}")" =~ ^(latest|testflight)-mac\.yml$ ]]; then
+            echo "refusing to sign: unexpected update feed '${feed}'" >&2
+            exit 1
+          fi
+          mkdir -p out
+          echo "dmg=$(basename "${dmg}")" >> "${GITHUB_OUTPUT}"
+          echo "zip=$(basename "${zip}")" >> "${GITHUB_OUTPUT}"
+          echo "feed=$(basename "${feed}")" >> "${GITHUB_OUTPUT}"
 
-      - name: Build signed DMG
+      - name: Pass the unsigned build through
+        if: ${{ steps.creds.outputs.signing != 'true' }}
+        shell: bash
+        env:
+          DMG: ${{ steps.files.outputs.dmg }}
+          ZIP: ${{ steps.files.outputs.zip }}
+          FEED: ${{ steps.files.outputs.feed }}
+        run: |
+          cp "in/${DMG}" "in/${ZIP}" "in/${FEED}" out/
+          echo "::warning::DMG is unsigned. Configure MAC_CSC_LINK for distributable updates."
+
+      # The certificate goes into a keychain of this run only, deleted at the
+      # end. The entitlements are electron-builder's defaults for a hardened
+      # Electron app, written here rather than read from the repository.
+      - name: Sign the app and pack it again
         if: ${{ steps.creds.outputs.signing == 'true' }}
+        shell: bash
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_PASSWORD }}
-        shell: bash
-        run: npm run pack:mac --prefix desktop
-
-      - name: Verify app and DMG
-        shell: bash
-        env:
-          SIGNED: ${{ steps.creds.outputs.signing }}
+          DMG: ${{ steps.files.outputs.dmg }}
+          ZIP: ${{ steps.files.outputs.zip }}
         run: |
-          app_path="$(find desktop/dist -maxdepth 3 -type d -name 'Nodevas.app' | head -n 1)"
-          dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
-          zip_path="$(find desktop/dist -maxdepth 1 -type f -name '*.zip' | head -n 1)"
-          test -n "${app_path}"
-          test -n "${dmg_path}"
-          test -n "${zip_path}"
-          test -x "${app_path}/Contents/Resources/bin/nodevas"
-          if [[ "${SIGNED}" == "true" ]]; then
-            codesign --verify --deep --strict "${app_path}"
-          else
-            echo "::warning::DMG is unsigned. Configure MAC_CSC_LINK for distributable updates."
+          set -euo pipefail
+          keychain="${RUNNER_TEMP}/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 3600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          certificate="${RUNNER_TEMP}/signing.p12"
+          # MAC_CSC_LINK is the base64 of the .p12, as electron-builder takes it.
+          printf '%s' "${CSC_LINK#data:*base64,}" | base64 --decode > "${certificate}"
+          security import "${certificate}" -k "${keychain}" -P "${CSC_KEY_PASSWORD}" -T /usr/bin/codesign
+          rm -f "${certificate}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "${keychain}" | awk '/Developer ID Application/ { print $2; exit }')"
+          if [[ -z "${identity}" ]]; then
+            echo "refusing to sign: MAC_CSC_LINK holds no Developer ID Application identity" >&2
+            exit 1
           fi
 
+          entitlements="${RUNNER_TEMP}/entitlements.plist"
+          cat > "${entitlements}" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+            <dict>
+              <key>com.apple.security.cs.allow-jit</key>
+              <true/>
+              <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+              <true/>
+              <key>com.apple.security.cs.disable-library-validation</key>
+              <true/>
+            </dict>
+          </plist>
+          PLIST
+          plutil -lint "${entitlements}"
+
+          work="${RUNNER_TEMP}/sign"
+          mkdir -p "${work}"
+          tar -xf in/Nodevas.app.tar -C "${work}"
+          app="${work}/Nodevas.app"
+          test -d "${app}"
+          sign() {
+            codesign --force --timestamp --options runtime --entitlements "${entitlements}" \
+              --sign "${identity}" --keychain "${keychain}" "$1"
+          }
+          # Inside out: every Mach-O file (the bundled nodevas and PostgreSQL
+          # among them), then the nested frameworks and helper apps from the
+          # deepest up, then the app.
+          while IFS= read -r -d '' file; do
+            if file -b "${file}" | grep -q 'Mach-O'; then sign "${file}"; fi
+          done < <(find "${app}/Contents" -type f -print0)
+          while IFS= read -r -d '' bundle; do
+            sign "${bundle}"
+          done < <(find "${app}/Contents" -depth -type d \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' \) -print0)
+          sign "${app}"
+          codesign --verify --deep --strict --verbose=2 "${app}"
+
+          ditto -c -k --sequesterRsrc --keepParent "${app}" "out/${ZIP}"
+
+          # The dmg build-macos made, with the signed app in place of the
+          # unsigned one: its window layout and volume name stay.
+          writable="${work}/writable.dmg"
+          hdiutil convert "in/${DMG}" -format UDRW -o "${writable}"
+          sectors="$(hdiutil resize -limits "${writable}" | tail -n 1 | awk '{ print $2 }')"
+          app_mb="$(du -sm "${app}" | cut -f 1)"
+          hdiutil resize -sectors "$((sectors + (app_mb + 64) * 2048))" "${writable}"
+          mount="${work}/mount"
+          mkdir -p "${mount}"
+          hdiutil attach "${writable}" -nobrowse -noautoopen -readwrite -mountpoint "${mount}"
+          test -d "${mount}/Nodevas.app"
+          rm -rf "${mount}/Nodevas.app"
+          ditto "${app}" "${mount}/Nodevas.app"
+          hdiutil detach "${mount}" || hdiutil detach -force "${mount}"
+          hdiutil convert "${writable}" -format UDZO -imagekey zlib-level=9 -o "out/${DMG}"
+          codesign --timestamp --sign "${identity}" --keychain "${keychain}" "out/${DMG}"
+          codesign --verify --strict --verbose=2 "out/${DMG}"
+
       - name: Notarize and staple DMG
-        if: ${{ steps.creds.outputs.notarize == 'true' }}
+        if: ${{ steps.creds.outputs.signing == 'true' && steps.creds.outputs.notarize == 'true' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DMG: ${{ steps.files.outputs.dmg }}
         shell: bash
         run: |
-          dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
-          xcrun notarytool submit "${dmg_path}" \
+          xcrun notarytool submit "out/${DMG}" \
             --apple-id "${APPLE_ID}" \
             --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
             --team-id "${APPLE_TEAM_ID}" \
             --wait
-          xcrun stapler staple "${dmg_path}"
-          xcrun stapler validate "${dmg_path}"
+          xcrun stapler staple "out/${DMG}"
+          xcrun stapler validate "out/${DMG}"
+
+      # Signing changed the zip and the dmg, so the update feed is written
+      # again with their new hashes and sizes. The blockmaps electron-builder
+      # made describe the unsigned files and are dropped: electron-updater
+      # then downloads an update whole.
+      - name: Write the update feed and checksums
+        if: ${{ steps.creds.outputs.signing == 'true' }}
+        shell: bash
+        env:
+          DMG: ${{ steps.files.outputs.dmg }}
+          ZIP: ${{ steps.files.outputs.zip }}
+          FEED: ${{ steps.files.outputs.feed }}
+          RELEASE_VERSION: ${{ needs.build-macos.outputs.version }}
+        run: |
+          if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing to write the update feed: version '${RELEASE_VERSION}'" >&2
+            exit 1
+          fi
+          sha512() { openssl dgst -sha512 -binary "out/$1" | openssl base64 -A; }
+          size() { stat -f %z "out/$1"; }
+          {
+            echo "version: ${RELEASE_VERSION}"
+            echo "files:"
+            echo "  - url: ${ZIP}"
+            echo "    sha512: $(sha512 "${ZIP}")"
+            echo "    size: $(size "${ZIP}")"
+            echo "  - url: ${DMG}"
+            echo "    sha512: $(sha512 "${DMG}")"
+            echo "    size: $(size "${DMG}")"
+            echo "path: ${ZIP}"
+            echo "sha512: $(sha512 "${ZIP}")"
+            echo "releaseDate: '$(date -u +%Y-%m-%dT%H:%M:%S.000Z)'"
+          } > "out/${FEED}"
 
       - name: Create release checksums
         shell: bash
+        env:
+          DMG: ${{ steps.files.outputs.dmg }}
+          ZIP: ${{ steps.files.outputs.zip }}
         run: |
-          dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
-          zip_path="$(find desktop/dist -maxdepth 1 -type f -name '*.zip' | head -n 1)"
-          shasum -a 256 "${dmg_path}" "${zip_path}" > desktop/dist/SHA256SUMS.txt
+          cd out
+          shasum -a 256 "${DMG}" "${ZIP}" > SHA256SUMS.txt
 
-      # Release assets are uploaded directly by gh below. Keeping a second
-      # copy as an Actions artifact wastes the account's small artifact quota.
+      - name: Forget the signing keychain
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          keychain="${RUNNER_TEMP}/signing.keychain-db"
+          if [[ -e "${keychain}" ]]; then security delete-keychain "${keychain}"; fi
+          rm -f "${RUNNER_TEMP}/signing.p12"
+
+      # Kept for one day: long enough for publish-macos.
+      - name: Hand the release files to publish-macos
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-signed
+          path: |
+            out/*.dmg
+            out/*.zip
+            out/*-mac.yml
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-macos:
+    # Runs no project or dependency code and checks nothing out: the token
+    # that can write reaches only the tag checks, git ls-remote and gh.
+    # sign-macos's approval in the release environment covers this job.
+    needs: [build-macos, sign-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-signed
+          path: dist
+
       - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_TARGET_SHA: ${{ steps.release.outputs.target_sha }}
-          RELEASE_PRERELEASE: ${{ steps.release.outputs.prerelease }}
-          RELEASE_LABEL: ${{ steps.release.outputs.release_label }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.build-macos.outputs.tag }}
+          RELEASE_TARGET_SHA: ${{ needs.build-macos.outputs.target_sha }}
+          RELEASE_PRERELEASE: ${{ needs.build-macos.outputs.prerelease }}
+          RELEASE_LABEL: ${{ needs.build-macos.outputs.release_label }}
         run: |
-          tag="${RELEASE_TAG}"
+          # The tag is worked out again from the event: everything build-macos
+          # hands over, through sign-macos too, comes from a job that ran dependency code.
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${INPUT_TAG}"
+          fi
+          if [[ ! "${tag}" =~ ^(testflight-)?v[0-9.]+$ || "${tag}" != "${RELEASE_TAG}" ]]; then
+            echo "refusing to publish: event tag '${tag}' is not the built tag '${RELEASE_TAG}'" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_REF}" != "refs/tags/${tag}" ]]; then
+            echo "refusing to publish: event ref '${EVENT_REF}' does not identify 'refs/tags/${tag}'" >&2
+            exit 1
+          fi
           resolve_remote_tag_commit() {
             local release_tag="$1"
             local release_ref="refs/tags/${release_tag}"
@@ -230,7 +499,8 @@ jobs:
             # Capture first so ls-remote's exit status cannot be hidden by a
             # pipeline or process substitution. Request only the exact tag and
             # its annotated-tag peel; branch names and tag prefixes never count.
-            if ! remote_rows="$(git ls-remote --exit-code --tags origin \
+            if ! remote_rows="$(git ls-remote --exit-code --tags \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
               "${release_ref}" "${release_ref}^{}")"; then
               printf 'refusing to publish: remote tag %q is missing or unreadable\n' \
                 "${release_ref}" >&2
@@ -282,6 +552,10 @@ jobs:
             echo "refusing to publish: remote tag commit (${remote_release_sha}) does not match verified release SHA (${RELEASE_TARGET_SHA})" >&2
             exit 1
           fi
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_SHA}" != "${remote_release_sha}" ]]; then
+            echo "refusing to publish: event SHA '${EVENT_SHA}' does not match remote tag commit '${remote_release_sha}'" >&2
+            exit 1
+          fi
 
           prerelease_args=()
           if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
@@ -294,19 +568,17 @@ jobs:
               exit 1
             fi
             gh release upload "${tag}" \
-              desktop/dist/*.dmg \
-              desktop/dist/*.zip \
-              desktop/dist/*.blockmap \
-              desktop/dist/*-mac.yml \
-              desktop/dist/SHA256SUMS.txt \
+              dist/*.dmg \
+              dist/*.zip \
+              dist/*-mac.yml \
+              dist/SHA256SUMS.txt \
               --clobber
           else
             gh release create "${tag}" \
-              desktop/dist/*.dmg \
-              desktop/dist/*.zip \
-              desktop/dist/*.blockmap \
-              desktop/dist/*-mac.yml \
-              desktop/dist/SHA256SUMS.txt \
+              dist/*.dmg \
+              dist/*.zip \
+              dist/*-mac.yml \
+              dist/SHA256SUMS.txt \
               --title "Nodevas ${RELEASE_LABEL}" \
               --notes "${notes}" \
               --verify-tag \

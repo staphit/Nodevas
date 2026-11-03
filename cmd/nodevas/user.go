@@ -7,12 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"nodevas/internal/auth"
+	"nodevas/internal/db"
 	"nodevas/internal/identity"
 )
 
@@ -20,7 +20,7 @@ import (
 func user(args []string) {
 	if len(args) == 0 {
 		usage()
-		os.Exit(2)
+		exit(2)
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("user", flag.ExitOnError)
@@ -45,7 +45,7 @@ func user(args []string) {
 
 	root, err := filepath.Abs(*projectFlag)
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	// No workspace lock, for any action.
 	//
@@ -53,20 +53,27 @@ func user(args []string) {
 	// a users.json that both this process and the server rewrote read-modify-
 	// write: a CLI edit racing a running server silently discarded one side's
 	// change, and refusing to run was the only defence. Accounts are rows in the
-	// workspace database now. Two processes writing it is WAL doing its job, and
-	// UserStore caches nothing on either side, so a change here is visible to the
-	// server on its next query rather than at its next restart.
+	// workspace database now. Beside a running serve this command connects to
+	// the same server (its embedded cluster, or NODEVAS_DATABASE_URL), and
+	// UserStore caches nothing on either side, so a change here is visible to
+	// the server on its next query rather than at its next restart.
 	//
 	// Keeping the lock would have kept the restart under a different name, and
 	// the restart is the expensive part: changing one person's sign-in address
 	// should not cost everybody else their editing session.
-	users, err := auth.NewUserStore(root)
+	database, err := db.OpenRoot(root)
 	if err != nil {
-		log.Fatalf("accounts: %v", err)
+		fatalf("account database: %v", err)
 	}
-	// The CLI owns this handle, and SQLite's WAL sidecars are only tidied away
-	// on a clean close.
-	defer users.Close()
+	users := auth.NewUserStoreDB(database)
+	if err := users.EnsureAdmin(); err != nil {
+		database.Close()
+		fatalf("accounts: %v", err)
+	}
+	// A cluster this command started (no serve running) is stopped here; the
+	// fatal paths below exit through closeAndFatal for the same reason.
+	defer database.Close()
+	atFatal = func() { database.Close() }
 
 	// A CLI invocation has no request behind it; nothing cancels these.
 	ctx := context.Background()
@@ -76,11 +83,11 @@ func user(args []string) {
 		printAccounts(os.Stdout, users.Records(ctx))
 	case "add", "passwd":
 		if strings.TrimSpace(*name) == "" {
-			log.Fatal("--user is required")
+			fatal("--user is required")
 		}
 		secret, err := readPassword(*password, *passwordStdin)
 		if err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		if action == "add" {
 			err = users.AddWithEmail(ctx, *name, secret,
@@ -89,7 +96,7 @@ func user(args []string) {
 			err = users.SetPassword(ctx, *name, secret)
 		}
 		if err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		fmt.Printf("%s: ok\n", *name)
 	case "email":
@@ -97,14 +104,14 @@ func user(args []string) {
 		// mailbox can sign in as this account. There is nothing to print once
 		// and hand over any more — registering the address is the grant.
 		if strings.TrimSpace(*name) == "" {
-			log.Fatal("--user is required")
+			fatal("--user is required")
 		}
 		if *clearEmail {
 			if strings.TrimSpace(*email) != "" {
-				log.Fatal("--email and --clear are mutually exclusive")
+				fatal("--email and --clear are mutually exclusive")
 			}
 			if err := users.ClearEmail(ctx, *name); err != nil {
-				log.Fatal(err)
+				fatal(err)
 			}
 			fmt.Printf("%s: email cleared; this account can no longer sign in to the web UI\n", *name)
 			fmt.Fprintln(os.Stderr,
@@ -112,10 +119,10 @@ func user(args []string) {
 			return
 		}
 		if strings.TrimSpace(*email) == "" {
-			log.Fatal("--email is required (or --clear to remove web sign-in)")
+			fatal("--email is required (or --clear to remove web sign-in)")
 		}
 		if err := users.SetEmail(ctx, *name, *email); err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		fmt.Printf("%s: signs in with %s\n", *name, strings.TrimSpace(*email))
 		// Revocation rides on the account revision, which includes the address:
@@ -126,11 +133,11 @@ func user(args []string) {
 				"Whoever can read this mailbox can sign in as this account: it is the only factor.")
 	case "remove":
 		if strings.TrimSpace(*name) == "" {
-			log.Fatal("--user is required")
+			fatal("--user is required")
 		}
 		refuseRemovingTheLastAccount(ctx, users, root)
 		if err := users.Remove(ctx, *name); err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		// The server revokes this account's sessions on its own: Authenticate
 		// re-reads the row on every request and a session whose account is gone
@@ -138,18 +145,18 @@ func user(args []string) {
 		fmt.Printf("%s: removed\n", *name)
 	case "role":
 		if strings.TrimSpace(*name) == "" {
-			log.Fatal("--user is required")
+			fatal("--user is required")
 		}
 		if strings.TrimSpace(*role) == "" {
-			log.Fatal("--role admin|member is required")
+			fatal("--role admin|member is required")
 		}
 		if err := users.SetRole(ctx, *name, identity.Role(strings.ToLower(strings.TrimSpace(*role)))); err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		fmt.Printf("%s: role %s\n", *name, strings.ToLower(strings.TrimSpace(*role)))
 	default:
 		usage()
-		os.Exit(2)
+		exit(2)
 	}
 }
 
@@ -178,7 +185,7 @@ func refuseRemovingTheLastAccount(ctx context.Context, users *auth.UserStore, ro
 	if users.Count(ctx) > 1 {
 		return
 	}
-	log.Fatalf(
+	fatalf(
 		"refusing to remove the only account: a networked server will not start with an "+
 			"empty account table. Add the replacement first with "+
 			"`nodevas user add --project %q --user <name> --role admin`.", root)

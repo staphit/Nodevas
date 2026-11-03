@@ -24,6 +24,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/locale"
+	"nodevas/internal/secretenv"
 )
 
 // Dir is the git directory inside a project folder.
@@ -48,7 +51,7 @@ const MinVersion = "2.32"
 
 // ErrUnavailable is returned when no git of MinVersion or newer is
 // installed.
-var ErrUnavailable = errors.New("git " + MinVersion + " or newer is not installed on this server")
+var ErrUnavailable = locale.Errorf("git %s or newer is not installed on this server", "這個伺服器沒有安裝 git %s 以上版本", MinVersion)
 
 // Person is a commit's author or committer.
 type Person struct {
@@ -81,9 +84,6 @@ var (
 	availableOnce sync.Once
 	gitPath       string
 	unavailable   string
-
-	noHooksOnce sync.Once
-	noHooksDir  string
 )
 
 // Available reports whether a git of MinVersion or newer can be run here.
@@ -137,16 +137,16 @@ func versionAtLeast(out, min string) bool {
 	return atoi(have[2]) >= atoi(want[2])
 }
 
-// noHooksPath is an empty directory for core.hooksPath: no hook runs.
+// noHooksPath is the core.hooksPath that runs no hook: a path inside the
+// git executable, which is a file, so no folder can ever exist there, nothing
+// is left behind, and no hook can be planted there by anyone who could not
+// already replace git itself. Git finds no hook and runs none.
 func noHooksPath() string {
-	noHooksOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nodevas-gitrepo-nohooks-")
-		if err != nil {
-			dir = filepath.Join(os.DevNull, "nodevas-nohooks")
-		}
-		noHooksDir = filepath.ToSlash(dir)
-	})
-	return noHooksDir
+	base := gitPath
+	if base == "" {
+		base = os.DevNull
+	}
+	return filepath.ToSlash(base) + "/no-hooks"
 }
 
 // Open opens the repository of the project folder workTree, creating it on
@@ -205,10 +205,11 @@ func (r *Repo) WorkTree() string { return r.workTree }
 // dropped first: one left in the server's environment could point git at
 // another repository or index (GIT_DIR, GIT_INDEX_FILE), or turn on tracing
 // that prints a backup push's credentials (GIT_TRACE*, GIT_CURL_VERBOSE,
-// which counts as on whatever its value). Callers add their own in extra.
+// which counts as on whatever its value). The hub's own secrets are dropped
+// too: git runs a repository's content. Callers add their own in extra.
 func (r *Repo) env(extra []string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range secretenv.Without(os.Environ()) {
 		if !strings.HasPrefix(strings.ToUpper(kv), "GIT_") {
 			env = append(env, kv)
 		}
@@ -343,7 +344,7 @@ func ValidSHA(s string) bool { return shaPattern.MatchString(s) }
 // Show is path's content at commit sha.
 func (r *Repo) Show(ctx context.Context, sha, path string) ([]byte, error) {
 	if !ValidSHA(sha) {
-		return nil, fmt.Errorf("invalid commit %q", sha)
+		return nil, locale.Errorf("invalid commit %q", "提交「%s」無效", sha)
 	}
 	return r.run(ctx, nil, nil, "show", sha+":"+filepath.ToSlash(path))
 }

@@ -1,0 +1,284 @@
+[
+ {
+  "id": "q01",
+  "cat": "exact",
+  "q": "林曉的妹妹叫什麼名字？",
+  "gold": [
+   "note-01",
+   "note-02"
+  ]
+ },
+ {
+  "id": "q02",
+  "cat": "exact",
+  "q": "周海生養的狗叫什麼名字？",
+  "gold": [
+   "note-03",
+   "s-05"
+  ]
+ },
+ {
+  "id": "q03",
+  "cat": "exact",
+  "q": "往返本島的渡輪叫什麼名字？每天幾點開？",
+  "gold": [
+   "note-08",
+   "s-01"
+  ]
+ },
+ {
+  "id": "q04",
+  "cat": "exact",
+  "q": "黃金城手上戴的是什麼戒指？",
+  "gold": [
+   "note-05",
+   "s-09"
+  ]
+ },
+ {
+  "id": "q05",
+  "cat": "exact",
+  "q": "蘇懷安發表詩作時用的筆名是什麼？",
+  "gold": [
+   "note-07"
+  ]
+ },
+ {
+  "id": "q06",
+  "cat": "exact",
+  "q": "許阿嬤養的貓叫什麼？",
+  "gold": [
+   "note-06",
+   "s-04"
+  ]
+ },
+ {
+  "id": "q07",
+  "cat": "exact",
+  "q": "陳默的父親是誰？以前做什麼工作？",
+  "gold": [
+   "note-04",
+   "s-20"
+  ]
+ },
+ {
+  "id": "q08",
+  "cat": "exact",
+  "q": "林小雨的生日是哪一天？",
+  "gold": [
+   "note-02",
+   "note-09",
+   "s-40"
+  ]
+ },
+ {
+  "id": "q09",
+  "cat": "semantic",
+  "q": "誰害怕水？",
+  "gold": [
+   "note-01",
+   "s-01",
+   "s-21",
+   "en-03"
+  ]
+ },
+ {
+  "id": "q10",
+  "cat": "semantic",
+  "q": "哪個角色的腿受過傷？是怎麼受傷的？",
+  "gold": [
+   "note-03",
+   "s-07",
+   "s-26"
+  ]
+ },
+ {
+  "id": "q11",
+  "cat": "semantic",
+  "q": "哪個角色慣用左手？",
+  "gold": [
+   "note-04",
+   "s-02",
+   "s-14"
+  ]
+ },
+ {
+  "id": "q12",
+  "cat": "semantic",
+  "q": "林曉的母親為什麼多年來一直把錄音帶藏起來？",
+  "gold": [
+   "s-27"
+  ]
+ },
+ {
+  "id": "q13",
+  "cat": "semantic",
+  "q": "鎮長想把燈塔那塊地拿來做什麼？",
+  "gold": [
+   "note-05",
+   "s-04",
+   "s-09"
+  ]
+ },
+ {
+  "id": "q14",
+  "cat": "semantic",
+  "q": "颱風那晚有沒有人看到可疑的光往燈塔移動？",
+  "gold": [
+   "s-12"
+  ]
+ },
+ {
+  "id": "q15",
+  "cat": "semantic",
+  "q": "林曉第一次搭船不再覺得不舒服是什麼時候？",
+  "gold": [
+   "s-38"
+  ]
+ },
+ {
+  "id": "q16",
+  "cat": "semantic",
+  "q": "哪個角色曾經失去自己的孩子？",
+  "gold": [
+   "note-03",
+   "s-18"
+  ]
+ },
+ {
+  "id": "q17",
+  "cat": "semantic",
+  "q": "黃金城當年利用燈塔底下的房間做什麼非法勾當？",
+  "gold": [
+   "s-28",
+   "s-33"
+  ]
+ },
+ {
+  "id": "q18",
+  "cat": "semantic",
+  "q": "林曉是怎麼確認那位畫家就是失散的妹妹？",
+  "gold": [
+   "s-39"
+  ]
+ },
+ {
+  "id": "q19",
+  "cat": "consistency",
+  "q": "第三章之前，林曉有沒有見過那把銅鑰匙？在哪裡見到的？",
+  "gold": [
+   "s-06",
+   "s-10"
+  ]
+ },
+ {
+  "id": "q20",
+  "cat": "consistency",
+  "q": "錄音帶裡那個男人說了什麼？後來確認是誰的聲音？",
+  "gold": [
+   "s-13",
+   "s-33"
+  ]
+ },
+ {
+  "id": "q21",
+  "cat": "consistency",
+  "q": "石室裡找到的懷錶停在幾點？跟英國工程師日記寫的一致嗎？",
+  "gold": [
+   "s-23",
+   "en-02"
+  ]
+ },
+ {
+  "id": "q22",
+  "cat": "consistency",
+  "q": "小雨的紅色髮夾最後到了誰手上？",
+  "gold": [
+   "s-39",
+   "s-40"
+  ]
+ },
+ {
+  "id": "q23",
+  "cat": "consistency",
+  "q": "1977年颱風夜燈塔為什麼會亮？是誰點的燈？",
+  "gold": [
+   "s-26"
+  ]
+ },
+ {
+  "id": "q24",
+  "cat": "consistency",
+  "q": "潮汐室要在什麼時候才進得去？",
+  "gold": [
+   "note-08",
+   "s-13",
+   "s-16",
+   "s-17",
+   "en-04"
+  ]
+ },
+ {
+  "id": "q25",
+  "cat": "consistency",
+  "q": "第一章裡，陳默說小雨的案子當年是怎麼結案的？",
+  "gold": [
+   "s-02",
+   "note-09"
+  ]
+ },
+ {
+  "id": "q26",
+  "cat": "english",
+  "q": "Who built the lighthouse, and in what year?",
+  "gold": [
+   "en-01",
+   "note-08",
+   "note-09",
+   "s-06",
+   "s-16"
+  ]
+ },
+ {
+  "id": "q27",
+  "cat": "english",
+  "q": "Why must the lighthouse never be lit during a typhoon?",
+  "gold": [
+   "en-02",
+   "note-08",
+   "s-16"
+  ]
+ },
+ {
+  "id": "q28",
+  "cat": "english",
+  "q": "How long is the tide room accessible at the lowest tide?",
+  "gold": [
+   "en-04",
+   "s-17",
+   "s-24"
+  ]
+ },
+ {
+  "id": "q29",
+  "cat": "english",
+  "q": "Which character is afraid of the sea?",
+  "gold": [
+   "note-01",
+   "s-01",
+   "s-21",
+   "en-03"
+  ]
+ },
+ {
+  "id": "q30",
+  "cat": "english",
+  "q": "What is engraved on the brass key?",
+  "gold": [
+   "en-01",
+   "note-10",
+   "s-06",
+   "s-22"
+  ]
+ }
+]

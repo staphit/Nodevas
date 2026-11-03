@@ -3,21 +3,20 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 func storeForTest(t *testing.T) (*UserStore, string) {
 	t.Helper()
-	dbtest.UsePostgres(t)
+	testpg.UseEnv(t)
 	workspace := t.TempDir()
-	users, err := NewUserStore(workspace)
+	users, err := openUserStore(t, workspace)
 	if err != nil {
 		t.Fatalf("NewUserStore: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestAccountEditedInTheDatabaseTakesEffectAtOnce(t *testing.T) {
 		t.Fatal("bob cannot sign in")
 	}
 
-	outside, err := db.Open(workspace)
+	outside, err := db.OpenRoot(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,12 +227,7 @@ func TestRemoveLeavesTheAuditTrailIntact(t *testing.T) {
 // NewUserStoreDB is the constructor the server should use: one handle, one
 // writer queue.
 func TestNewUserStoreDBUsesTheCallersHandle(t *testing.T) {
-	workspace := t.TempDir()
-	database, err := db.Open(workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
+	database := testpg.New(t)
 	users := NewUserStoreDB(database)
 	if err := users.EnsureAdmin(); err != nil {
 		t.Fatal(err)
@@ -306,86 +300,8 @@ func TestAccountByEmailFindsTheRegisteredAccount(t *testing.T) {
 	}
 }
 
-// The migration that retired the PIN must leave no PIN hash behind, and must
-// not refuse to start on a workspace where two accounts already share an
-// address in different case: the oldest keeps it, the other loses it.
-func TestTheEmailMigrationClearsPinsAndSettlesSharedAddresses(t *testing.T) {
-	workspace := t.TempDir()
-	ctx := context.Background()
-	database, err := db.Open(workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Wind the workspace back to how 0005 left it, then fill it the way the
-	// PIN sign-in could have.
-	for _, stmt := range []string{
-		`DROP INDEX accounts_email_nocase`,
-		`DELETE FROM schema_migrations WHERE name = '0006_email_sign_in'`,
-	} {
-		if _, err := database.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("%s: %v", stmt, err)
-		}
-	}
-	// dan and eve-old were shut out with `pin-clear`, which left their address
-	// behind. eve-old is older than eve, who holds the same mailbox and could
-	// still sign in.
-	for i, row := range []struct{ name, pin, email string }{
-		{"ann", "an-old-pin-hash", "Shared@Example.test"},
-		{"bob", "an-old-pin-hash", "shared@example.test"},
-		{"cat", "an-old-pin-hash", "cat@example.test"},
-		{"dan", "", "dan@example.test"},
-		{"eve-old", "", "eve@example.test"},
-		{"eve", "an-old-pin-hash", "Eve@example.test"},
-	} {
-		if _, err := database.ExecContext(ctx,
-			`INSERT INTO accounts (id, name, role, password_hash, pin_hash, email, created_at)
-			 VALUES (?, ?, ?, '', ?, ?, ?)`,
-			fmt.Sprintf("id-%d", i), row.name, map[bool]string{true: "admin", false: "member"}[i == 0],
-			row.pin, row.email, db.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	users, err := NewUserStore(workspace)
-	if err != nil {
-		t.Fatalf("reopening after the migration: %v", err)
-	}
-	t.Cleanup(func() { _ = users.Close() })
-
-	var pins int
-	if err := users.database.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM accounts WHERE pin_hash != ''`).Scan(&pins); err != nil {
-		t.Fatal(err)
-	}
-	if pins != 0 {
-		t.Fatalf("%d accounts still carry a PIN hash", pins)
-	}
-	emails := map[string]string{}
-	for _, record := range users.Records(ctx) {
-		emails[record.Name] = record.Email
-	}
-	want := map[string]string{
-		"ann": "Shared@Example.test", "bob": "", "cat": "cat@example.test",
-		// A revoked account stays revoked, and does not take the address from
-		// the account that could actually use it.
-		"dan": "", "eve-old": "", "eve": "Eve@example.test",
-	}
-	for name, address := range want {
-		if emails[name] != address {
-			t.Fatalf("after migration %s has %q, want %q (all: %v)", name, emails[name], address, emails)
-		}
-	}
-	// And the index is in place from here on.
-	if err := users.SetEmail(ctx, "bob", "SHARED@example.test"); !errors.Is(err, ErrEmailTaken) {
-		t.Fatalf("after migration a clashing address = %v, want ErrEmailTaken", err)
-	}
-}
-
-// A limit is required of every caller of accounts, and the one value SQLite
-// reads backwards — a negative LIMIT means no limit — must not become a way to
+// A limit is required of every caller of accounts, and a value SQLite used to
+// read backwards — a negative LIMIT meant no limit — must not become a way to
 // select the whole table by accident.
 func TestAccountReadWithNoUsableLimitReturnsNothing(t *testing.T) {
 	users, _ := storeForTest(t)

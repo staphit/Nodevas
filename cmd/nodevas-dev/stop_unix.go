@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"syscall"
 )
@@ -14,8 +15,9 @@ const ungracefulStopNote = ""
 // is one of the two signals cmd/nodevas's signal.NotifyContext waits for, so
 // the child runs its own shutdown path: it closes the realtime hub, drains
 // connections, and then takes up to thirty seconds for the final remote
-// backup. Nothing is lost.
-func terminateChild(process *os.Process) (graceful bool, err error) {
+// backup and stops its embedded PostgreSQL. Nothing is lost. (stdin, which
+// Windows closes instead, is left alone.)
+func terminateChild(process *os.Process, _ io.Closer) (graceful bool, err error) {
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		return false, err
 	}

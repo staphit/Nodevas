@@ -9,7 +9,7 @@ import {
 } from "react";
 import { AuthError, api, onUnauthorized, type Actor } from "../api";
 import { IconSignOut } from "../icons";
-import { LANGUAGE_OPTIONS, useI18n } from "../i18n";
+import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../i18n";
 import { compactSecondFactor, isSecondFactorCode } from "./secondFactor";
 
 /**
@@ -365,8 +365,8 @@ export function SignIn({
             onChange={(event) => setLanguage(event.target.value as typeof language)}
           >
             {LANGUAGE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {t(`language.option.${option}`)}
+              <option key={option} value={option} lang={option}>
+                {LANGUAGE_NATIVE_NAMES[option]}
               </option>
             ))}
           </select>

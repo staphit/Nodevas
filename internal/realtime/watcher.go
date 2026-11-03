@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/safego"
 )
 
 // Watch monitors the project directory and broadcasts change events for
@@ -56,7 +57,10 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 	// Debounce: editors fire several events per save.
 	pending := map[string]time.Time{}
 
-	go func() {
+	// A panic in an event's handling is logged and the loop starts again
+	// (safego); it ends for good when Close closes the watcher's channels.
+	// There is no stop channel of its own, hence nil.
+	safego.LoopUntil(nil, "file watcher "+root, func() {
 		ticker := time.NewTicker(150 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -82,6 +86,18 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 					strings.HasPrefix(filepath.Clean(ev.Name), nodesDir) {
 					store.InvalidateNodeTree(root)
 				}
+				// A node's files changed from outside the store: its page
+				// listings re-check their files (pages_cache.go). The store's
+				// own writes are regular files and need not drop them.
+				if strings.HasPrefix(filepath.Clean(ev.Name), nodesDir) && !st.WasSelfWrite(ev.Name) {
+					st.InvalidatePageLists()
+				}
+				// graph.yaml changed under the store (git checkout, an agent,
+				// an editor). Reads verify the bytes anyway; dropping the
+				// parsed graph now just frees it before the next read.
+				if filepath.Clean(ev.Name) == filepath.Clean(st.GraphPath()) {
+					st.InvalidateGraphCache()
+				}
 				pending[ev.Name] = time.Now()
 			case err, ok := <-w.Errors:
 				if !ok {
@@ -101,7 +117,7 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 				}
 			}
 		}
-	}()
+	})
 	return w.Close, nil
 }
 
@@ -141,7 +157,9 @@ func emitEvent(hub *Hub, root, path string, onEvent func(string, string)) {
 		if onEvent != nil {
 			onEvent(eventType, id)
 		}
-		hub.BroadcastRoom(root, eventType, id)
+		if hub != nil {
+			hub.BroadcastRoom(root, eventType, id)
+		}
 	}
 	if strings.HasPrefix(rel, store.DataDir+"/") || strings.Contains(rel, "/"+store.TmpPrefix) || strings.HasPrefix(filepath.Base(rel), store.TmpPrefix) {
 		return // internal bookkeeping — never broadcast

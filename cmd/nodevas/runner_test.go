@@ -163,7 +163,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		t.Fatal(stderr)
 	}
 	for _, want := range []string{"remoteMerge            false (approvals on the hub are refused; merge on GitHub yourself (the default)", "mergeMethod            squash",
-		"deleteBranchOnMerge    false"} {
+		"deleteBranchOnMerge    false", "permissionRelay        false (headless runs refuse what needs a permission (the default)"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("default status missing %q:\n%s", want, stdout)
 		}
@@ -182,6 +182,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		{"set", "remoteMerge", "true"},
 		{"set", "mergeMethod", "Rebase"},
 		{"set", "deleteBranchOnMerge", "true"},
+		{"set", "permissionRelay", "true"},
 	} {
 		args = append(args, "--config", cfgPath)
 		if code, _, stderr := runRunner(t, "", args...); code != 0 {
@@ -224,7 +225,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		"geminiApprovalMode     yolo", "opencodePermission     full", "antigravityMode        full", "autoPR                 false (commit only", "prDraft                true",
 		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60",
 		"remoteMerge            true (a merge approved on the hub", "mergeMethod            rebase",
-		"deleteBranchOnMerge    true"} {
+		"deleteBranchOnMerge    true", "permissionRelay        true (Claude Code, Antigravity and OpenCode ACP runs ask you in Nodevas"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)
 		}

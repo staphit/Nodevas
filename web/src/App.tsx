@@ -1,5 +1,4 @@
 import {
-  lazy,
   Suspense,
   useEffect,
   useReducer,
@@ -9,8 +8,21 @@ import {
 import { connectWS } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
-import { reportError, useApp, useLastOperation, usePreference } from "./store";
-import { Sidebar, SidebarBackdrop } from "./components/Sidebar";
+import { reportError, useApp, usePreference } from "./store";
+import { resyncAfterReconnect } from "./state/reconnect";
+import { applyTextScale } from "./preferences/textScale";
+import {
+  EXPLORER_DEFAULT_W,
+  EXPLORER_MAX_W,
+  explorerMinWidth,
+  explorerShellStyle,
+  explorerWidthFor,
+} from "./explorerWidth";
+import { SidebarBackdrop } from "./components/Sidebar";
+import { useNarrowViewport } from "./components/TopbarOverflow";
+import ExplorerShell from "./explorer/ExplorerShell";
+import { useExplorer } from "./explorer/explorerStore";
+import { useProjectNodeSelection } from "./projectSelection";
 import { GraphPane } from "./components/GraphPane";
 import { TimelinePane } from "./components/TimelinePane";
 import { ConfirmDialogHost } from "./components/ConfirmDialog";
@@ -18,20 +30,20 @@ import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { StartScreen } from "./components/StartScreen";
+import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
 import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
 import { followupArrived as copilotFollowupArrived, runnersChanged as copilotRunnersChanged } from "./copilot/session";
-import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
+import { AgentChatRoot } from "./agents/AgentChatRoot";
 import { useAgents } from "./agents/agentStore";
 import { useUsage } from "./usage/usageStore";
 import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
-import { ModeSwitch } from "./station/ModeSwitch";
 import { openSettings } from "./settings/openSettings";
-import { usePacks } from "./game/packStore";
+import { useBuilding } from "./station/buildingStore";
 import { useStation } from "./station/stationStore";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
@@ -41,34 +53,25 @@ import {
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
-import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
-import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
+import { AuthGate } from "./components/SignIn";
+import { ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
-import { PresenceAvatars } from "./components/PresenceAvatars";
-import { TopbarOverflow, useNarrowViewport } from "./components/TopbarOverflow";
+import { TopBar } from "./components/topbar/TopBar";
 import { useI18n } from "./i18n";
-import {
-  IconHelp,
-  IconMoon,
-  IconSignOut,
-  IconSun,
-  IconTree,
-} from "./icons";
+import { lazyWithRetry } from "./lazyWithRetry";
+import { watchProjectList } from "./state/projectListSync";
 
-const Drawer = lazy(() =>
+const Drawer = lazyWithRetry(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
 );
-const StationView = lazy(() => import("./station/StationView"));
-const SettingsView = lazy(() => import("./settings/SettingsView"));
-const PopoutEditor = lazy(() =>
+const StationView = lazyWithRetry(() => import("./station/StationView"));
+const ExplorerMain = lazyWithRetry(() => import("./explorer/ExplorerMain"));
+const SettingsView = lazyWithRetry(() => import("./settings/SettingsView"));
+const PopoutEditor = lazyWithRetry(() =>
   import("./components/PopoutEditor").then((module) => ({
     default: module.PopoutEditor,
   })),
 );
-
-const EXPLORER_MIN_W = 200;
-const EXPLORER_MAX_W = 520;
-const EXPLORER_DEFAULT_W = 304;
 
 function MainApp() {
   const { language, t } = useI18n();
@@ -76,18 +79,12 @@ function MainApp() {
   const refreshState = useApp((s) => s.refreshState);
   const refreshTrash = useApp((s) => s.refreshTrash);
   const refreshProjects = useApp((s) => s.refreshProjects);
-  const switchProject = useApp((s) => s.switchProject);
   const notifyDiskChange = useApp((s) => s.notifyDiskChange);
   const saveTab = useApp((s) => s.saveTab);
   const activeTab = useApp((s) => s.activeTab);
   const undoLast = useApp((s) => s.undoLast);
   const redoLast = useApp((s) => s.redoLast);
   const theme = useApp((s) => s.theme);
-  const toggleTheme = useApp((s) => s.toggleTheme);
-  const viewer = useViewer();
-  const signOut = useSignOut();
-  const graph = useApp((s) => s.graph);
-  const projects = useApp((s) => s.projects);
   const activeProject = useApp((s) => s.activeProject);
   const paneOpen = useApp((s) => s.paneOpen);
   const togglePane = useApp((s) => s.togglePane);
@@ -95,12 +92,9 @@ function MainApp() {
   const clearError = useApp((s) => s.clearError);
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const explorerCollapsed = usePreference("explorerCollapsed");
+  // A file, diff or agent the Explorer opened stands in for the board.
+  const explorerView = useExplorer((s) => s.view !== null);
   const projectMode = usePreference("projectMode");
-  const workspace = useApp((s) => s.workspace);
-  const workspaceLabel = useApp(
-    (s) => s.workspaces.find((entry) => entry.active)?.label ?? "",
-  );
-  const lastOperation = useLastOperation();
   // Agents seen in this workspace turn the workstation on.
   useWorkstationAutoEnable();
   const [degradedDocuments, dispatchDocumentPersistence] = useReducer(
@@ -114,10 +108,6 @@ function MainApp() {
   const [explorerWidth, setExplorerWidth] = useState(preferredExplorerWidth);
   useEffect(() => setExplorerWidth(preferredExplorerWidth), [preferredExplorerWidth]);
 
-  const toggleExplorer = () => {
-    updateUIPreference("explorerCollapsed", !explorerCollapsed);
-  };
-
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -125,6 +115,14 @@ function MainApp() {
   useEffect(() => {
     document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
   }, [language]);
+
+  const textScale = usePreference("textScale");
+  useEffect(() => applyTextScale(textScale), [textScale]);
+  // Larger text needs a wider explorer to read; the stored width is kept and
+  // only drawn wider while the text size asks for it.
+  const explorerMin = explorerMinWidth(textScale);
+  const shownExplorerWidth = explorerWidthFor(explorerWidth, textScale);
+  const narrowViewport = useNarrowViewport();
 
   // Ctrl/⌘+Z steps back, Shift+Z (and Ctrl+Y, which Windows users reach for)
   // steps forward again. Text fields keep their own history, so anything
@@ -199,6 +197,8 @@ function MainApp() {
     void loadAll().catch(reportError);
     void refreshTrash().catch(reportError);
     void refreshProjects().catch(reportError);
+    // The first hello is this page's own start, which the loads above cover.
+    let socketGenerations = 0;
     const live = connectWS((ev) => {
       const persistenceAction = documentPersistenceAction(ev);
       if (persistenceAction) {
@@ -315,16 +315,17 @@ function MainApp() {
           // system notification when this browser allows one.
           void useAgents.getState().handleAsk(ev.id ?? "");
           break;
-        case "packs-changed":
-          // A view pack was installed or removed: a loaded list refetches.
-          usePacks.getState().onPacksChanged();
-          break;
         case "runners-changed":
           // Only refetched once the Runners dialog has loaded them; a board
           // that never opened it has nothing to keep current.
           void useRunners.getState().refreshIfLoaded();
           // The copilot's model calls may run on this person's runner.
           copilotRunnersChanged();
+          break;
+        case "building-changed":
+          // Something changed in a project this viewer may read (any of
+          // them): an open Station's building refetches, coalesced.
+          useBuilding.getState().onChanged();
           break;
         case "usage-changed":
           // A session reported its tokens: an open Usage dialog refetches.
@@ -347,8 +348,8 @@ function MainApp() {
           break;
         case "run-events":
           // The id is a run: an open run view fetches what came after its
-          // last event.
-          useRuns.getState().onRunEvents(ev.id);
+          // last event, or with kind "ask" the run's asks.
+          useRuns.getState().onRunEvents(ev.id, ev.kind);
           break;
         case "session-changes":
           // The id is a node: its external sessions are refetched if shown.
@@ -385,6 +386,10 @@ function MainApp() {
           // whatever run lists and live runs are on screen.
           useRuns.getState().resync();
           useSessions.getState().resync();
+          // A later one is the server coming back: clear what only said it
+          // was unreachable, and reload what it broadcast while it was gone.
+          socketGenerations += 1;
+          if (socketGenerations > 1) void resyncAfterReconnect();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);
@@ -407,6 +412,11 @@ function MainApp() {
     };
   }, [loadAll, refreshState, refreshTrash, refreshProjects, notifyDiskChange]);
 
+  // A project written straight into the workspace (an agent, a script) comes
+  // with no broadcast; the explorer finds it when the reader comes back, and
+  // now and then while it is on screen.
+  useEffect(() => watchProjectList(refreshProjects), [refreshProjects]);
+
   // The socket only carries the project this window shows, so a project switch
   // has to move the client to the other room.
   const live = useApp((s) => s.live);
@@ -419,9 +429,6 @@ function MainApp() {
 
   // Presence follows the open document: which node, and whether it is being
   // edited rather than just read.
-  // The presence cluster keeps fewer faces on a phone-width bar; same
-  // breakpoint the overflow menu uses, so the bar collapses as one thing.
-  const narrowTopbar = useNarrowViewport();
   const editingTab = useApp((s) => (s.activeTab ? s.tabs.find((tab) => tab.id === s.activeTab) : null));
   useEffect(() => {
     if (!live) return;
@@ -430,128 +437,7 @@ function MainApp() {
 
   return (
     <div className={`app mode-${projectMode}`}>
-      <header className="topbar">
-        <button
-          type="button"
-          className="icon-btn explorer-toggle"
-          hidden={projectMode !== "info"}
-          onClick={toggleExplorer}
-          title={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
-          aria-label={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
-          aria-expanded={!explorerCollapsed}
-          aria-controls="project-explorer"
-        >
-          <IconTree size={15} />
-          <span aria-hidden>{explorerCollapsed ? "»" : "«"}</span>
-        </button>
-        <span className="brand-mark">
-          <IconTree size={17} />
-        </span>
-        <h1>Nodevas</h1>
-
-        {/* Breadcrumb, not a bare dropdown: the workspace is named, and the
-            control says what switching it does [B-03]. */}
-        <nav className="file-ops project-breadcrumb" aria-label={t("topbar.currentLocation")}>
-          <span className="crumb-workspace" title={workspace}>
-            {workspaceLabel || t("topbar.workspace")}
-          </span>
-          <span className="crumb-separator" aria-hidden>
-            ／
-          </span>
-          <label className="crumb-label" htmlFor="project-quick-switch">
-            {t("topbar.project")}
-          </label>
-          <select
-            id="project-quick-switch"
-            className="project-select"
-            value={activeProject}
-            title={t("topbar.switchProject")}
-            onChange={(e) => {
-              if (e.target.value) void switchProject(e.target.value).catch(reportError);
-            }}
-          >
-            {projects
-              .filter((p) => !p.isFolder)
-              .map((p) => (
-                <option key={p.name} value={p.name}>
-                  {`${"　".repeat(p.depth)}${p.label} (${p.nodes})`}
-                </option>
-              ))}
-          </select>
-        </nav>
-
-        <ModeSwitch />
-        {graph?.type && <span className="project-type">{graph.type}</span>}
-        {lastOperation && (
-          <OperationStatus
-            status={lastOperation.status}
-            message={
-              lastOperation.status === "error" || lastOperation.status === "conflict"
-                ? lastOperation.message
-                : undefined
-            }
-          />
-        )}
-        <PresenceAvatars narrow={narrowTopbar} />
-        <div className="topbar-actions">
-          <button
-            className="command-trigger"
-            type="button"
-            onClick={() => window.dispatchEvent(new Event("nodevas-command-palette"))}
-            title={`${t("topbar.searchOrCommand")} (Ctrl/⌘ K)`}
-          >
-            {t("topbar.searchOrCommand")} <kbd>Ctrl/⌘ K</kbd>
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="tour-replay"
-            onClick={() => window.dispatchEvent(new CustomEvent("nodevas-tour-start"))}
-            title={t("topbar.replayTour")}
-            aria-label={t("topbar.replayTour")}
-          >
-            <IconHelp size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="theme"
-            onClick={toggleTheme}
-            title={theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode")}
-          >
-            {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
-          </button>
-          {/* Renders nothing on a loopback server, where there is no session. */}
-          <SignOutButton />
-          {/* Same five actions, one button wide, for the phone row. The
-              buttons above are hidden by CSS there rather than unmounted, so
-              nothing about the desktop bar changes. */}
-          <TopbarOverflow
-            items={[
-              {
-                id: "tour-replay",
-                label: t("topbar.replayTour"),
-                icon: <IconHelp size={16} />,
-                onSelect: () => window.dispatchEvent(new CustomEvent("nodevas-tour-start")),
-              },
-              {
-                id: "theme",
-                label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
-                icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
-                onSelect: toggleTheme,
-              },
-              ...(viewer
-                ? [
-                    {
-                      id: "sign-out",
-                      label: t("topbar.signOut", { name: viewer.name || viewer.role }),
-                      icon: <IconSignOut size={16} />,
-                      onSelect: signOut,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </div>
-      </header>
+      <TopBar />
       <DocumentPersistenceBanner documents={degradedDocuments} />
       <ProjectAccessBanner />
       <RemoteSyncBanner onOpenBackup={() => openSettings("backup")} />
@@ -565,23 +451,29 @@ function MainApp() {
       )}
       <div className="main">
         {projectMode === "settings" ? (
-          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
-            <SettingsView />
-          </Suspense>
+          <ViewErrorBoundary resetKey={projectMode}>
+            <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+              <SettingsView />
+            </Suspense>
+          </ViewErrorBoundary>
         ) : projectMode === "station" ? (
-          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
-            <StationView
-              drawer={
-                activeTab !== null && (
-                  <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
-                    <Drawer />
-                  </Suspense>
-                )
-              }
-            />
-          </Suspense>
+          <ViewErrorBoundary resetKey={projectMode}>
+            <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+              <StationView
+                drawer={
+                  activeTab !== null && (
+                    <ViewErrorBoundary resetKey={activeTab}>
+                      <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
+                        <Drawer />
+                      </Suspense>
+                    </ViewErrorBoundary>
+                  )
+                }
+              />
+            </Suspense>
+          </ViewErrorBoundary>
         ) : (
-          <>
+          <ViewErrorBoundary resetKey={`info:${activeProject}`}>
         {/* Phone-width only (the component renders nothing when wide): dims
             the board the explorer overlay covers and gives a tap anywhere
             outside the panel the obvious meaning — close it. */}
@@ -593,20 +485,21 @@ function MainApp() {
           id="project-explorer"
           className={`sidebar-shell${explorerCollapsed ? " collapsed" : ""}`}
           aria-hidden={explorerCollapsed}
-          style={
-            explorerCollapsed
-              ? undefined
-              : { width: explorerWidth, flexBasis: explorerWidth }
-          }
+          style={explorerShellStyle({
+            width: shownExplorerWidth,
+            collapsed: explorerCollapsed,
+            narrow: narrowViewport,
+          })}
         >
-          {!explorerCollapsed && <Sidebar />}
+          {!explorerCollapsed && <ExplorerShell />}
         </div>
-        {!explorerCollapsed && (
+        {/* The phone overlay has a fixed width, so there is nothing to drag. */}
+        {!explorerCollapsed && !narrowViewport && (
           <ResizeHandle
             className="explorer-resize"
             orientation="vertical"
-            value={explorerWidth}
-            min={EXPLORER_MIN_W}
+            value={shownExplorerWidth}
+            min={explorerMin}
             max={EXPLORER_MAX_W}
             step={12}
             largeStep={32}
@@ -621,18 +514,42 @@ function MainApp() {
             }}
           />
         )}
-        <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
-          </>
+        {explorerView ? (
+          <Suspense fallback={<div className="station-loading">{t("common.loading")}</div>}>
+            <ExplorerMain />
+          </Suspense>
+        ) : (
+          <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
+        )}
+          </ViewErrorBoundary>
         )}
       </div>
-      <ConfirmDialogHost />
-      <ProjectPickerHost />
-      <CommandPalette />
-      <StartScreen />
-      <OnboardingTour />
-      <CopilotRoot />
-      <AgentNetworkRoot />
-      <RunsRoot />
+      {/* Each floating root in its own boundary: one that crashes becomes a
+          small notice, and the page and the others carry on. */}
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <ConfirmDialogHost />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <ProjectPickerHost />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <CommandPalette />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <StartScreen />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <OnboardingTour />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <CopilotRoot />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <AgentChatRoot />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <RunsRoot />
+      </ViewErrorBoundary>
     </div>
   );
 }
@@ -656,10 +573,11 @@ function ResizableStage({
     setSplit(preferredSplit);
   }, [preferredSplit]);
   const [stageHeight, setStageHeight] = useState(0);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activePane, setActivePane] = useState<"graph" | "timeline" | null>(null);
   const bothOpen = paneOpen.graph && paneOpen.timeline;
   const activeTab = useApp((state) => state.activeTab);
+  const activeProject = useApp((state) => state.activeProject);
+  const [selectedNodeId, setSelectedNodeId] = useProjectNodeSelection(activeProject);
 
   useEffect(
     () => () => {
@@ -690,15 +608,19 @@ function ResizableStage({
 
   return (
     <main ref={stageRef} className={`stage split${bothOpen ? " has-open-split" : ""}`}>
-      <GraphPane
-        collapsed={!paneOpen.graph}
-        onToggle={() => togglePane("graph")}
-        paneStyle={bothOpen ? { flex: `0 0 ${split}%` } : undefined}
-        selectedNodeId={selectedNodeId}
-        onSelectedNodeChange={setSelectedNodeId}
-        keyboardActive={activePane === "graph"}
-        onActivate={() => setActivePane("graph")}
-      />
+      {/* Each pane in its own boundary, so one that crashes leaves the
+          other working. */}
+      <ViewErrorBoundary resetKey={`graph:${activeProject}`}>
+        <GraphPane
+          collapsed={!paneOpen.graph}
+          onToggle={() => togglePane("graph")}
+          paneStyle={bothOpen ? { flex: `0 0 ${split}%` } : undefined}
+          selectedNodeId={selectedNodeId}
+          onSelectedNodeChange={setSelectedNodeId}
+          keyboardActive={activePane === "graph"}
+          onActivate={() => setActivePane("graph")}
+        />
+      </ViewErrorBoundary>
       <ResizeHandle
         className={`pane-resizer${bothOpen ? "" : " disabled"}`}
         orientation="horizontal"
@@ -723,18 +645,22 @@ function ResizableStage({
           document.body.classList.toggle("pane-resizing", resizing)
         }
       />
-      <TimelinePane
-        collapsed={!paneOpen.timeline}
-        onToggle={() => togglePane("timeline")}
-        selectedNodeId={selectedNodeId}
-        onSelectedNodeChange={setSelectedNodeId}
-        keyboardActive={activePane === "timeline"}
-        onActivate={() => setActivePane("timeline")}
-      />
+      <ViewErrorBoundary resetKey={`timeline:${activeProject}`}>
+        <TimelinePane
+          collapsed={!paneOpen.timeline}
+          onToggle={() => togglePane("timeline")}
+          selectedNodeId={selectedNodeId}
+          onSelectedNodeChange={setSelectedNodeId}
+          keyboardActive={activePane === "timeline"}
+          onActivate={() => setActivePane("timeline")}
+        />
+      </ViewErrorBoundary>
       {activeTab !== null && (
-        <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
-          <Drawer />
-        </Suspense>
+        <ViewErrorBoundary resetKey={activeTab}>
+          <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
+            <Drawer />
+          </Suspense>
+        </ViewErrorBoundary>
       )}
     </main>
   );

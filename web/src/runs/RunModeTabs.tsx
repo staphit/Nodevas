@@ -1,10 +1,11 @@
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import { runInteractive, type Run } from "../api";
 import { useI18n } from "../i18n";
+import { lazyWithRetry } from "../lazyWithRetry";
 
 // A dynamic import keeps xterm out of the main bundle: only an interactive
 // run's view ever loads it.
-const RunTerminal = lazy(() => import("./RunTerminal"));
+const RunTerminal = lazyWithRetry(() => import("./RunTerminal"));
 
 type Tab = "terminal" | "activity";
 

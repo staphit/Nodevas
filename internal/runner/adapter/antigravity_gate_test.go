@@ -107,7 +107,7 @@ func TestAntigravityGateReadOnly(t *testing.T) {
 	// The hook command carries the flag only for a read-only run.
 	exe := filepath.Join(t.TempDir(), "nodevas.exe")
 	for _, readOnly := range []bool{false, true} {
-		hooks := antigravityGateHooks(exe, readOnly)
+		hooks := antigravityGateHooks(exe, readOnly, false)
 		if hooks == nil {
 			t.Skip("no hook path on this machine")
 		}

@@ -161,8 +161,8 @@ func TestChangedTaskIsHeld(t *testing.T) {
 	if b := task(v, "b"); h.runs.startsFor("b") != 1 || b.Hold != "" || b.State != runnerwire.TaskQueued {
 		t.Fatalf("retried: %+v", b)
 	}
-	if _, body, _, _ := h.runs.lastStart("b").LoadNode(); !strings.Contains(body, "deploy key") {
-		t.Fatalf("the retry runs the content the person accepted: %q", body)
+	if node, _, _ := h.runs.lastStart("b").LoadNode(); !strings.Contains(node.Content, "deploy key") {
+		t.Fatalf("the retry runs the content the person accepted: %q", node.Content)
 	}
 }
 

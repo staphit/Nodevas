@@ -16,11 +16,11 @@ import (
 
 	"nodevas/internal/copilot"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
 	runnersapi "nodevas/internal/httpapi/runners"
 	"nodevas/internal/identity"
 	"nodevas/internal/runner"
 	"nodevas/internal/runners"
+	"nodevas/internal/testpg"
 )
 
 var ann = identity.Actor{ID: "u-ann", Name: "ann", Role: identity.RoleMember}
@@ -93,9 +93,11 @@ func hub(t *testing.T, reg *runners.Registry, relay *runners.LLMRelay) *httptest
 // a hub that holds no model key goes to the speaker's runner, which calls the
 // provider with its own key and streams the answer back into the turn.
 func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	database := dbtest.Open(t)
+	// The test's own context, not a 30 s one: under a saturated "go test
+	// ./..." the database setup alone can outlast a fixed budget. A hang ends
+	// the run at -timeout with every goroutine's stack.
+	ctx := t.Context()
+	database := testpg.New(t)
 	reg := runners.NewRegistry(database, nil)
 	relay := runners.NewLLMRelay(reg)
 	relay.OfflineCheck = 50 * time.Millisecond
@@ -117,17 +119,24 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		},
 		Commands:     noCommands{},
 		PingInterval: time.Second,
+		// The test hub is plain http on loopback, as serve's own is.
+		ServeManaged: true,
 	}
 	runCtx, stopRunner := context.WithCancel(ctx)
-	runnerDone := make(chan error, 1)
-	go func() { runnerDone <- client.Run(runCtx) }()
+	var runErr error
+	runnerStopped := make(chan struct{})
+	go func() {
+		runErr = client.Run(runCtx)
+		close(runnerStopped)
+	}()
 	defer func() {
 		stopRunner()
-		<-runnerDone
+		<-runnerStopped
 	}()
 
-	// The runner's hello says it makes copilot calls, and with what.
-	deadline := time.Now().Add(10 * time.Second)
+	// The runner's hello says it makes copilot calls, and with what. A runner
+	// that stops first (a token it refuses, a runner the hub revoked) fails
+	// the test with its error instead of leaving it to wait out -timeout.
 	var target struct{ provider, model string }
 	for {
 		r, err := relay.Target(ctx, ann.ID)
@@ -135,10 +144,14 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 			target.provider, target.model = r.Info.LLM.Provider, r.Info.LLM.Model
 			break
 		}
-		if time.Now().After(deadline) {
+		if !errors.Is(err, runners.ErrNoLLMRunner) {
 			t.Fatalf("runner never offered copilot calls: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-runnerStopped:
+			t.Fatalf("the runner stopped before it offered copilot calls: %v", runErr)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if target.provider != "openai" || target.model != "gpt-test" {
 		t.Fatalf("target = %+v", target)

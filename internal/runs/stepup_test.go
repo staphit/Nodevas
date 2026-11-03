@@ -65,7 +65,15 @@ func newStepUpFixture(t *testing.T) *stepUpFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f := &stepUpFixture{s: s, conn: &offerConn{}, runner: runner, clock: time.Now()}
+	// One clock for the store and the dispatcher, starting early in today's
+	// UTC day: the daily budget counts the runs the store stamped today, and
+	// with the store on the wall clock a test running across UTC midnight
+	// (or one moving the dispatcher's clock hours ahead) counted the
+	// wrong day's runs.
+	now := time.Now().UTC()
+	f := &stepUpFixture{s: s, conn: &offerConn{}, runner: runner,
+		clock: time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)}
+	s.now = func() time.Time { return f.clock }
 	reg.Attach(runner.ID, f.conn)
 	f.d = NewDispatcher(s, reg, nil, nil)
 	f.d.now = func() time.Time { return f.clock }

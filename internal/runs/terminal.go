@@ -14,21 +14,23 @@ package runs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 var (
 	// ErrTermGone is an interactive run whose terminal is no longer kept: it
 	// ended, and its output expired (or the hub restarted since).
-	ErrTermGone = errors.New("the run's terminal output is no longer kept")
+	ErrTermGone = locale.Errorf("the run's terminal output is no longer kept", "這次執行的終端機輸出已不再保留")
 	// ErrTermBusy is a terminal with as many viewers as it takes.
-	ErrTermBusy = errors.New("too many viewers on this terminal")
+	ErrTermBusy = locale.Errorf("too many viewers on this terminal", "這個終端機的觀看者太多")
 	// ErrTermClosed is a viewer the hub let go; see TermViewer.Reason.
-	ErrTermClosed = errors.New("terminal viewer closed")
+	ErrTermClosed = locale.Errorf("terminal viewer closed", "終端機觀看已關閉")
 )
 
 // Terminal limits.
@@ -241,7 +243,7 @@ func (t *Terminal) setStatus(status string) {
 		v.push(frame)
 	}
 	if runnerwire.RunFinal(status) && t.expiry == nil {
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 
@@ -365,17 +367,18 @@ func (t *Terminal) setFinal(status string) {
 	defer t.mu.Unlock()
 	if t.expiry == nil && !t.gone {
 		t.status = status
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 
-// expire drops an ended run's relay and lets its viewers go.
+// termUnlisted, when set, is called as an expired relay leaves the map.
+// A seam for tests; atomic, since other tests' relays expire meanwhile.
+var termUnlisted atomic.Pointer[func(*Terminal)]
+
+// expire lets an ended run's viewers go and then drops its relay. In that
+// order: whoever finds the relay gone finds its viewers let go too. A gone
+// relay still in the map for that moment takes no output and no viewer.
 func (ts *Terminals) expire(t *Terminal) {
-	ts.mu.Lock()
-	if ts.runs[t.runID] == t {
-		delete(ts.runs, t.runID)
-	}
-	ts.mu.Unlock()
 	t.mu.Lock()
 	t.gone = true
 	t.buf = nil
@@ -384,6 +387,14 @@ func (ts *Terminals) expire(t *Terminal) {
 	t.mu.Unlock()
 	for v := range viewers {
 		v.close(TermEnded)
+	}
+	ts.mu.Lock()
+	if ts.runs[t.runID] == t {
+		delete(ts.runs, t.runID)
+	}
+	ts.mu.Unlock()
+	if hook := termUnlisted.Load(); hook != nil {
+		(*hook)(t)
 	}
 }
 

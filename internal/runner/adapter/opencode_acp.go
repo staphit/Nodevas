@@ -22,6 +22,8 @@ import (
 //
 // A permission the rules leave at ask comes to the runner, which refuses it,
 // and the run goes on; headless `opencode run` ends the run there instead.
+// With permissionRelay (in edit, and not in a read-only run) the shell is
+// left at ask and each request is asked about in Nodevas instead.
 // The runner takes this adapter for OpenCode runs when its opencodeProtocol
 // setting is acp.
 type OpenCodeACP struct{}
@@ -37,7 +39,23 @@ func (OpenCodeACP) Kind() string { return "opencode" }
 func (OpenCodeACP) NewParser() Parser { return newACPSession("opencode", "", "", nil) }
 
 func (OpenCodeACP) NewConversation(job runnerwire.Job, env RunEnv) Conversation {
-	return newACPSession("opencode", env.Workdir, Prompt(job, env.Branch), nil)
+	s := newACPSession("opencode", env.Workdir, Prompt(job, env.Branch), nil)
+	if openCodeACPRelay(job, env) {
+		s.asker = env.Permissions
+		if s.asker == nil {
+			if hub, ok := HubAskerFromMCPArgs(env.MCP.Args); ok {
+				hub.Agent, hub.NodeID = "opencode", job.NodeID
+				s.asker = hub
+			}
+		}
+	}
+	return s
+}
+
+// openCodeACPRelay reports whether a run relays its permission requests:
+// permissionRelay on, the owner's edit setting, and a run that may write.
+func openCodeACPRelay(job runnerwire.Job, env RunEnv) bool {
+	return env.PermissionRelay && !ReadOnly(job) && PermissionRelayApplies("opencode", env.PermissionMode, true)
 }
 
 func (OpenCodeACP) Classify(text string) string { return classify(openCodeFailures, text) }
@@ -56,6 +74,13 @@ func (OpenCodeACP) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
+	if openCodeACPRelay(job, env) {
+		// The shell asks, and the runner relays the question; the web and
+		// paths outside the worktree stay denied.
+		if config, err = withShellAsk(config); err != nil {
+			return nil, err
+		}
+	}
 	if job.Model != "" && job.Model != "default" {
 		// `opencode run -m`'s equivalent: the session starts on this model.
 		if config, err = withConfigKey(config, "model", job.Model); err != nil {
@@ -69,6 +94,26 @@ func (OpenCodeACP) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("opencode: %w", err)
 	}
 	return cmd, nil
+}
+
+// withShellAsk turns the config's denied shell (bash, and OpenCode 2's
+// execute) into ask.
+func withShellAsk(config string) (string, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(config), &m); err != nil {
+		return "", err
+	}
+	permission, _ := m["permission"].(map[string]any)
+	for _, tool := range []string{"bash", "execute"} {
+		if permission[tool] == "deny" {
+			permission[tool] = "ask"
+		}
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // withConfigKey sets one top-level key of a JSON config object.

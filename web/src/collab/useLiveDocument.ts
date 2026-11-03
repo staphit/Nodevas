@@ -1,5 +1,5 @@
 /**
- * A document edited by several people at once [P2].
+ * A document edited by several people at once.
  *
  * Wires one `DocSession` to the socket, the editor and the store, and answers
  * the one question the rest of the drawer needs: may this window write the file.

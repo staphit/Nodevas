@@ -22,6 +22,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/nodes/:id/status", a.postStatus)
 	api.POST("/nodes/:id/claim", a.postClaim)
 	api.POST("/nodes/:id/release", a.postRelease)
+	api.POST("/nodes/:id/acceptance", a.postAcceptance)
 	// Uncached: a claim's whole value is being current, and it also expires on
 	// its own, which no revalidation would notice.
 	api.GET("/claims", a.getClaims)

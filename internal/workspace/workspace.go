@@ -2,7 +2,7 @@
 // agree on.
 //
 // A workspace is written by two of them: the file store (graph.yaml, node
-// bodies) and the SQLite database (accounts, audit, settings, search index).
+// bodies) and the PostgreSQL database (accounts, audit, settings, search index).
 // Both need to know where a workspace keeps the data that is not the user's
 // content, and neither should have to import the other to find out — the
 // database is the lower layer, so having it reach up into the store for a

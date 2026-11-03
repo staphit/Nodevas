@@ -3,19 +3,16 @@ package members
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 func testStore(t *testing.T) (*Store, *db.DB) {
 	t.Helper()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	store := NewStore(database)
 	if err := store.Load(context.Background()); err != nil {

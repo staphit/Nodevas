@@ -12,7 +12,15 @@ import { useWorkstationAutoEnable, useWorkstationVisible } from "./workstation";
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
-  return { ...actual, api: { ...actual.api, listRunners: vi.fn(), getRunBudget: vi.fn() } };
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      listRunners: vi.fn(),
+      getRunBudget: vi.fn(),
+      getRouting: vi.fn(() => Promise.resolve({ rules: [] })),
+    },
+  };
 });
 
 const listRunners = vi.mocked(api.listRunners);
@@ -83,7 +91,7 @@ describe("agent workstation visibility", () => {
     expect(screen.getByText("hidden")).toBeInTheDocument();
   });
 
-  it("is switched on from its Settings part, which is all the Agents group shows while off", async () => {
+  it("is switched on in the Agents header, which is all Agents shows while off", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getRunBudget).mockResolvedValue({
       budget: { dailyRuns: 5, dailyCostUsd: 0, dailyTokens: 0 },
@@ -95,19 +103,26 @@ describe("agent workstation visibility", () => {
     render(<SettingsView />);
 
     const nav = screen.getByRole("navigation", { name: "Settings" });
-    expect(screen.getByRole("region", { name: "Agent workstation" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "Agent workstation" })).toHaveAttribute("aria-current", "page");
-    expect(within(nav).queryByRole("button", { name: "Runners" })).not.toBeInTheDocument();
-    expect(within(nav).queryByRole("button", { name: "Daily budget" })).not.toBeInTheDocument();
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(within(nav).getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
+    expect(within(agents).queryByRole("button", { name: "Add runner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Advanced" })).not.toBeInTheDocument();
+    // Search does not offer what is hidden.
+    await user.type(within(nav).getByRole("searchbox", { name: "Search settings" }), "budget");
+    expect(within(nav).getByText("Nothing found")).toBeInTheDocument();
+    await user.clear(within(nav).getByRole("searchbox", { name: "Search settings" }));
 
-    await user.click(screen.getByRole("button", { name: "Enable agent workstation" }));
+    const toggle = within(agents).getByRole("switch", { name: "Let agents work here" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
 
     expect(useApp.getState().preferences.agentWorkstation).toBe(true);
-    for (const part of ["Agent workstation", "Runners", "Usage", "Daily budget", "Routing rules"]) {
-      expect(within(nav).getByRole("button", { name: part })).toBeInTheDocument();
-    }
-    // The part that was asked for opens once it is offered.
+    expect(toggle).toBeChecked();
+    expect(within(agents).getByRole("button", { name: "Add runner" })).toBeInTheDocument();
+    // The part that was asked for opens once it is offered: Advanced, and
+    // its budget row in it.
     expect(await screen.findByText("1 / 5")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Daily budget" })).toBeInTheDocument();
   });
 
   it("cannot be hidden while it is in use", () => {
@@ -115,6 +130,7 @@ describe("agent workstation visibility", () => {
     useApp.getState().updateUIPreference("settingsSection", "workstation");
     render(<SettingsView />);
 
-    expect(screen.getByRole("button", { name: "Hide agent workstation" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Let agents work here" })).toBeDisabled();
+    expect(screen.getByText(/In use: this workspace has runners/)).toBeInTheDocument();
   });
 });

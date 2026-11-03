@@ -11,8 +11,8 @@ import (
 
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 var (
@@ -110,7 +110,7 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 	t.Helper()
 	h := &harness{t: t, model: &fakeProvider{t: t}, bridge: &fakeBridge{}}
 	opts := Options{
-		Database: dbtest.Open(t),
+		Database: testpg.New(t),
 		Defaults: Defaults{Enabled: true, Provider: "anthropic", Model: "claude-test", APIKey: "sk-test", AllowBypass: true},
 		NewProvider: func(cfg provider.Config) (provider.Provider, error) {
 			if cfg.APIKey != "sk-test" || cfg.Model != "claude-test" {
@@ -161,10 +161,20 @@ func (h *harness) start(req TurnRequest) *running {
 	return r
 }
 
-// until reads events up to and including the first of the given type.
+// reportMargin is the time left before the test run's deadline in which
+// until still reports what it saw, rather than leaving it to -timeout.
+const reportMargin = 10 * time.Second
+
+// until reads events up to and including the first of the given type. It
+// waits as long as the test run may (-timeout): a turn's events can be slow
+// on a busy machine, and one that never comes still fails with what the
+// stream did carry, just before the run's deadline.
 func (r *running) until(eventType string) Event {
 	r.t.Helper()
-	timeout := time.After(5 * time.Second)
+	var timeout <-chan time.Time
+	if deadline, ok := r.t.Deadline(); ok {
+		timeout = time.After(max(time.Until(deadline)-reportMargin, 0))
+	}
 	for {
 		select {
 		case event, ok := <-r.events:
@@ -315,6 +325,30 @@ func TestPlainAnswerStreamsAndStoresTheTranscript(t *testing.T) {
 	_, entries, _ := h.service.Conversation(context.Background(), alice, conversation.ID)
 	if len(entries) != 4 || entries[3].Seq != 4 || entries[2].Source != "text" {
 		t.Fatalf("entries = %+v", entries)
+	}
+}
+
+// slowStart is longer than a fixed wait for a turn's first event used to
+// be: how long a turn can take to start (bridge, transcript rows) on a
+// machine a parallel "go test ./..." saturates.
+const slowStart = 6 * time.Second
+
+// The harness waits for a turn that is slow to start instead of calling it
+// stuck.
+func TestATurnSlowToStartIsWaitedFor(t *testing.T) {
+	h := newHarness(t, func(opts *Options) {
+		open := opts.OpenBridge
+		opts.OpenBridge = func(ctx context.Context, options toolbridge.Options) (toolbridge.Bridge, error) {
+			time.Sleep(slowStart)
+			return open(ctx, options)
+		}
+	})
+	conversation := h.conversation(alice, ModeDefault)
+	h.model.steps = []step{answer("hello")}
+	turn := h.start(h.turn(conversation, ModeDefault))
+	turn.until(EventTurnStarted)
+	if last(turn.finish()).Type != EventTurnFinished {
+		t.Fatalf("events = %v", types(turn.seen))
 	}
 }
 

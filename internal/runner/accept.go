@@ -172,8 +172,13 @@ func (t *TerminalAccepter) AllowRemoteTyping(ctx context.Context, offer Offer) b
 	return false
 }
 
-// promptPreview is how much of the task the question shows.
-const promptPreview = 500
+// promptPreview is how much of the task the question shows, and
+// maxPreviewLines in how many lines at most: a task cannot push the lines
+// above it off the screen.
+const (
+	promptPreview   = 500
+	maxPreviewLines = 12
+)
 
 func describeOffer(o Offer) string {
 	var b strings.Builder
@@ -184,11 +189,18 @@ func describeOffer(o Offer) string {
 	} else {
 		b.WriteString("\n=== Run offered by the hub ===\n")
 	}
-	fmt.Fprintf(&b, "  requested by: %s\n", orDash(job.RequestedBy))
-	fmt.Fprintf(&b, "  project:      %s\n", orDash(job.Project))
-	fmt.Fprintf(&b, "  node:         %s  %s\n", job.NodeID, job.NodeTitle)
-	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
-	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
+	fmt.Fprintf(&b, "  requested by: %s\n", orDash(terminalText(job.RequestedBy)))
+	fmt.Fprintf(&b, "  project:      %s\n", orDash(terminalText(job.Project)))
+	fmt.Fprintf(&b, "  node:         %s  %s\n", terminalText(job.NodeID), terminalText(job.NodeTitle))
+	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", terminalText(o.Repo.Name), terminalText(o.Repo.Path))
+	if job.Kind == runnerwire.JobVerify {
+		b.WriteString("  agent:        none: runs this repository's test command (runner.json), no model\n")
+	} else {
+		fmt.Fprintf(&b, "  agent:        %s, model %s\n", terminalText(job.Agent), orDash(terminalText(job.Model)))
+	}
+	if job.Role != "" {
+		fmt.Fprintf(&b, "  role:         %s\n", terminalText(job.Role))
+	}
 	if interactive {
 		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine; the\n" +
 			"                dispatcher watches it, and types into it only if you allow that next\n")
@@ -198,9 +210,25 @@ func describeOffer(o Offer) string {
 	}
 	switch job.Kind {
 	case runnerwire.JobReview:
-		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", job.PRURL, job.Branch)
+		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", terminalText(job.PRURL), terminalText(job.Branch))
 	case runnerwire.JobRevise:
-		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
+		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", terminalText(job.PRURL), terminalText(job.Branch))
+	case runnerwire.JobVerify:
+		phase, head := "", ""
+		if job.Verify != nil {
+			phase, head = job.Verify.Phase, job.Verify.Head
+		}
+		fmt.Fprintf(&b, "  kind:         VERIFY (%s) %s at %s: runs the test command on code an agent wrote, in a throwaway worktree\n",
+			terminalText(phase), terminalText(job.PRURL), terminalText(short(head)))
+	case runnerwire.JobJudge:
+		fmt.Fprintf(&b, "  kind:         JUDGE: checks %d acceptance criteria; reads, changes no files\n", len(job.Acceptance))
+		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
+		if runsTests(job) {
+			b.WriteString("  tests:        first runs this repository's test command (runner.json) at that base,\n" +
+				"                outside the agent's sandbox, as you\n")
+		}
+	case runnerwire.JobTest:
+		b.WriteString("  kind:         TEST: writes failing tests only, opens a draft pull request\n")
 	case runnerwire.JobPlan:
 		if strings.TrimSpace(job.Review) != "" {
 			fmt.Fprintf(&b, "  kind:         REPLAN: reconciles the goal's tasks with a revised requirement; reads the code, changes no files\n")
@@ -208,36 +236,57 @@ func describeOffer(o Offer) string {
 			fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
 		}
 	default:
-		base := job.Base
-		if base == "" {
-			base = "(the repository's default branch)"
-		}
-		fmt.Fprintf(&b, "  base:         %s\n", base)
+		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
 	}
-	fmt.Fprintf(&b, "  run:          %s\n", job.RunID)
-	prompt := strings.TrimSpace(job.Prompt)
-	if utf8.RuneCountInString(prompt) > promptPreview {
-		prompt = string([]rune(prompt)[:promptPreview]) + " …"
-	}
+	fmt.Fprintf(&b, "  run:          %s\n", terminalText(job.RunID))
 	b.WriteString("  task:\n")
-	for _, line := range strings.Split(prompt, "\n") {
-		b.WriteString("    " + line + "\n")
-	}
+	writePreview(&b, job.Prompt)
 	if review := strings.TrimSpace(job.Review); review != "" &&
 		(job.Kind == runnerwire.JobRevise || job.Kind == runnerwire.JobPlan) {
-		if utf8.RuneCountInString(review) > promptPreview {
-			review = string([]rune(review)[:promptPreview]) + " …"
-		}
 		if job.Kind == runnerwire.JobPlan {
 			b.WriteString("  revision:\n")
 		} else {
 			b.WriteString("  review to address:\n")
 		}
-		for _, line := range strings.Split(review, "\n") {
-			b.WriteString("    " + line + "\n")
-		}
+		writePreview(&b, review)
 	}
 	return printable(b.String())
+}
+
+// writePreview writes the start of text, indented: at most promptPreview
+// characters in at most maxPreviewLines lines.
+func writePreview(b *strings.Builder, text string) {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r", ""))
+	cut := false
+	if utf8.RuneCountInString(text) > promptPreview {
+		text, cut = string([]rune(text)[:promptPreview]), true
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > maxPreviewLines {
+		lines, cut = lines[:maxPreviewLines], true
+	}
+	if cut {
+		lines[len(lines)-1] += " …"
+	}
+	for _, line := range lines {
+		b.WriteString("    " + line + "\n")
+	}
+}
+
+// terminalText is a hub-supplied string for one line of the runner's terminal:
+// line breaks and tabs become spaces and other control characters are
+// dropped, so no newline adds a line and no escape sequence redraws the
+// screen.
+func terminalText(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t' || r == '\u2028' || r == '\u2029':
+			return ' '
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0):
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // printable drops control characters but newlines and tabs: the offer comes
@@ -253,6 +302,15 @@ func printable(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// baseText is a job's base as the question shows it, as plain terminal text.
+func baseText(base string) string {
+	base = terminalText(base)
+	if base == "" {
+		return "(the repository's default branch)"
+	}
+	return base
 }
 
 func orDash(s string) string {

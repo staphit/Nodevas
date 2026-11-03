@@ -1,9 +1,10 @@
 package engine
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
+
+	"nodevas/internal/locale"
 )
 
 // ApplyEffects executes a node's effect statements against a flag map
@@ -13,6 +14,8 @@ import (
 //	set: name += 2   (numeric increment; -= too)
 //
 // Unparseable effects are ignored — effects are authored data, not code.
+// Only a journaled done applies them, so an automatic (Start/End) node's
+// effects never run; see deriveAutoStatuses.
 func ApplyEffects(n *Node, flags map[string]any) {
 	if n == nil || flags == nil {
 		return
@@ -26,28 +29,28 @@ func ApplyEffects(n *Node, flags map[string]any) {
 func ValidateEffect(stmt string) error {
 	stmt = strings.TrimSpace(stmt)
 	if stmt == "" {
-		return fmt.Errorf("effect is empty")
+		return locale.Errorf("effect is empty", "效果是空的")
 	}
 	for _, op := range []string{"+=", "-=", "="} {
 		if i := strings.Index(stmt, op); i > 0 {
 			name := strings.TrimSpace(stmt[:i])
 			value := strings.TrimSpace(stmt[i+len(op):])
 			if !ValidNodeID(name) {
-				return fmt.Errorf("invalid flag name %q", name)
+				return locale.Errorf("invalid flag name %q", "旗標名稱「%s」無效", name)
 			}
 			if value == "" {
-				return fmt.Errorf("effect value is empty")
+				return locale.Errorf("effect value is empty", "效果的值是空的")
 			}
 			if op != "=" {
 				if _, err := strconv.ParseFloat(value, 64); err != nil {
-					return fmt.Errorf("%s requires a numeric value", op)
+					return locale.Errorf("%s requires a numeric value", "%s 需要數值", op)
 				}
 			}
 			return nil
 		}
 	}
 	if !ValidNodeID(stmt) {
-		return fmt.Errorf("invalid flag name %q", stmt)
+		return locale.Errorf("invalid flag name %q", "旗標名稱「%s」無效", stmt)
 	}
 	return nil
 }

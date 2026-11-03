@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Graph } from "../types";
+import { graphCommandToOps } from "../state/graphOps";
 import { applyGraphCommand, describeGraphCommand } from "./commands";
 import { CommandError } from "./errors";
 import { milestoneTypeUsage } from "./usage";
@@ -153,15 +154,15 @@ describe("node commands", () => {
     const g = graph();
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "a", targetId: "a" }),
-    ).toThrow(/自身/);
+    ).toThrow(/depend on itself/);
 
     applyGraphCommand(g, { type: "node.addDependency", sourceId: "b", targetId: "a" });
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "b", targetId: "a" }),
-    ).toThrow(/已存在/);
+    ).toThrow(/already exists/);
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "a", targetId: "b" }),
-    ).toThrow(/循環/);
+    ).toThrow(/circular dependency/);
   });
 
   it("keeps existing edges when the expression could not be parsed", () => {
@@ -626,7 +627,7 @@ describe("bulk import", () => {
 describe("labels", () => {
   it("names every command for the undo stack", () => {
     expect(describeGraphCommand({ type: "plan.remove", nodeId: "a", milestoneType: "done" })).toBe(
-      "刪除預期里程碑",
+      "Delete planned milestone",
     );
   });
 });
@@ -651,5 +652,77 @@ describe("wire decoration cleanup", () => {
     });
     expect(g.edges ?? []).toEqual([]);
     expect(g.ui!.wireVertices?.["b->a"]).toBeUndefined();
+  });
+});
+
+describe("references", () => {
+  it("adds and removes a reference without touching dependencies", () => {
+    const g = graph();
+    applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "b" });
+    applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "b" });
+    expect(g.nodes![0].refs).toEqual(["b"]);
+    // A reference is not a prerequisite: no edge, no condition.
+    expect(g.edges).toEqual([]);
+    expect(g.nodes![0].requires).toBeUndefined();
+
+    applyGraphCommand(g, { type: "node.removeRef", nodeId: "a", ref: "b" });
+    expect(g.nodes![0].refs).toBeUndefined();
+    expect(describeGraphCommand({ type: "node.addRef", nodeId: "a", ref: "b" })).toBe("Add reference");
+    expect(describeGraphCommand({ type: "node.removeRef", nodeId: "a", ref: "b" })).toBe(
+      "Remove reference",
+    );
+  });
+
+  it("refuses itself, a missing node and more than 32", () => {
+    const g = graph();
+    expect(() => applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "a" })).toThrow(
+      CommandError,
+    );
+    expect(() =>
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "ghost" }),
+    ).toThrow(CommandError);
+    g.nodes!.push(
+      ...Array.from({ length: 33 }, (_, index) => ({ id: `n${index}`, title: `N${index}` })),
+    );
+    for (let index = 0; index < 32; index++) {
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: `n${index}` });
+    }
+    expect(() =>
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "n32" }),
+    ).toThrow(/32/);
+  });
+
+  it("removes a reference whose node is gone", () => {
+    const g = graph();
+    g.nodes![0].refs = ["gone"];
+    applyGraphCommand(g, { type: "node.removeRef", nodeId: "a", ref: "gone" });
+    expect(g.nodes![0].refs).toBeUndefined();
+  });
+
+  it("keeps imported references only when they name a node here", () => {
+    const g = graph();
+    applyGraphCommand(g, {
+      type: "graph.applyImport",
+      payload: {
+        nodes: [{ id: "a", position: { x: 0, y: 0 }, refs: ["b", "ghost", "a", "b"] }],
+        edges: [],
+      },
+    });
+    expect(g.nodes![0].refs).toEqual(["b"]);
+  });
+});
+
+describe("office style", () => {
+  it("sets the project's office style and clears it back to the layout's default", () => {
+    const g = graph();
+    applyGraphCommand(g, { type: "workflow.setOfficeStyle", style: "study" });
+    expect(g.officeStyle).toBe("study");
+    applyGraphCommand(g, { type: "workflow.setOfficeStyle", style: null });
+    expect(g).not.toHaveProperty("officeStyle");
+    expect(describeGraphCommand({ type: "workflow.setOfficeStyle", style: "cafe" })).toBe("Set office style");
+  });
+
+  it("is saved with the whole-file PUT: no graph op carries it", () => {
+    expect(graphCommandToOps({ type: "workflow.setOfficeStyle", style: "studio" })).toBeNull();
   });
 });

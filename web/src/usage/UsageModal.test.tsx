@@ -91,6 +91,8 @@ function report(over: Partial<UsageReport> = {}): UsageReport {
         ...bucket({ inputTokens: 90_000, costUsd: 4 }),
       },
     ],
+    byRole: [],
+    byNode: [],
     ...over,
   };
 }
@@ -133,6 +135,25 @@ afterEach(() => {
 });
 
 describe("UsageModal", () => {
+  // W-21: spend by the run's role.
+  it("shows usage by role", async () => {
+    vi.spyOn(api, "getUsage").mockResolvedValue(
+      report({
+        byRole: [
+          { key: "executor", ...bucket({ inputTokens: 900_000, costUsd: 7, runs: 2 }) },
+          { key: "reviewer", ...bucket({ inputTokens: 100_000, costUsd: 1.5, runs: 1 }) },
+          { key: "copilot", ...bucket({ inputTokens: 50_000, costUsd: 0.25 }) },
+        ],
+      }),
+    );
+    render(<UsageModal onClose={vi.fn()} />);
+    const roles = await screen.findByRole("region", { name: "By role" });
+    expect(within(roles).getByText("Executor")).toBeInTheDocument();
+    expect(within(roles).getByText("Reviewer")).toBeInTheDocument();
+    expect(within(roles).getByText("$7.00")).toBeInTheDocument();
+    expect(within(roles).getByText("copilot")).toBeInTheDocument();
+  });
+
   it("shows totals, the monthly projection and the tables", async () => {
     const get = vi.spyOn(api, "getUsage").mockResolvedValue(report());
     render(<UsageModal onClose={vi.fn()} />);
@@ -189,6 +210,32 @@ describe("UsageModal", () => {
     expect(screen.getByRole("tab", { name: "Prices" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText(/built-in as of 2026-10-06/)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Built-in prices" })).toHaveTextContent("claude-opus-5-5");
+  });
+
+  it("lists estimate prices with the built-in ones, marked as estimates", async () => {
+    vi.spyOn(api, "getUsage").mockResolvedValue(report());
+    vi.spyOn(api, "getUsagePrices").mockResolvedValue({
+      ...prices,
+      prices: [
+        ...prices.prices,
+        {
+          model: "gpt-5.5",
+          inputPerMTok: 1.25,
+          outputPerMTok: 10,
+          cacheReadPerMTok: 0.125,
+          cacheWritePerMTok: 0,
+          source: "estimate",
+        },
+      ],
+    });
+    render(<UsageModal onClose={vi.fn()} />);
+    await screen.findByText("2M");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Prices" }));
+    const builtin = await screen.findByRole("region", { name: "Built-in prices" });
+    const estimate = within(builtin).getByRole("rowheader", { name: /gpt-5\.5/ });
+    expect(estimate).toHaveTextContent("estimate");
+    expect(within(builtin).getByRole("rowheader", { name: /claude-opus-5-5/ })).not.toHaveTextContent("estimate");
   });
 
   it("hides the warning when everything is priced", async () => {

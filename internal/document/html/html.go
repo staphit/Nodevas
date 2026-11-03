@@ -62,7 +62,16 @@ func RenderHTML(doc *document.Doc, opts document.Options) string {
 	if title == "" {
 		title = "document"
 	}
-	b.WriteString("<!doctype html>\n<html lang=\"zh-Hant\">\n<head>\n")
+	// What the document is written in, whoever exports it: a screen reader
+	// and a spellchecker go by it.
+	lang := document.LanguageOf(title + "\n" + document.RenderText(doc))
+	if lang == "" {
+		lang = opts.Language
+	}
+	if lang == "" {
+		lang = "en"
+	}
+	b.WriteString("<!doctype html>\n<html lang=\"" + html.EscapeString(lang) + "\">\n<head>\n")
 	b.WriteString("<meta charset=\"utf-8\">\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
 	b.WriteString("<title>" + html.EscapeString(title) + "</title>\n")

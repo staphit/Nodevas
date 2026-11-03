@@ -9,7 +9,7 @@ async function openApp(page: Page) {
   await declineTour(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
 }
 
 async function createNode(page: Page, title: string) {

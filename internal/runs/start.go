@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -32,9 +33,36 @@ type StartRequest struct {
 	ActorID, ActorName string
 	// SteppedUpAt is the dispatcher's step-up (RFC3339Nano), or "".
 	SteppedUpAt string
-	// LoadNode returns the node's title and content; found false means the
-	// graph has no such node. It is called once the runner checks pass.
-	LoadNode func() (title, content string, found bool, err error)
+	// LoadNode returns the node's title, content and type; found false means
+	// the graph has no such node. It is called once the runner checks pass.
+	LoadNode func() (NodeInfo, bool, error)
+	// Agent roles: the project's resolved roles (tool allowlists for the
+	// job), and the hook that locks the node's acceptance when an Executor
+	// is dispatched (store.LockAcceptance). Roles nil is the built-ins.
+	Roles          []engine.AgentRole
+	LockAcceptance func() error
+}
+
+// NodeInfo is what a run needs to know about its node. Type is the node
+// type's id and AgentMode its agent mode, which decides whether the node may
+// be dispatched at all.
+type NodeInfo struct {
+	Title, Content, Type string
+	AgentMode            engine.AgentMode
+	// References are the notes the node uses as context (characters,
+	// setting), already summarized; ReferencesTruncated says more exist.
+	References          []Reference
+	ReferencesTruncated bool
+	// Agent roles: the node's acceptance criteria and its effective workflow
+	// (nil: legacy).
+	Acceptance *engine.Acceptance
+	Workflow   *engine.Workflow
+}
+
+// Reference is one reference note as a run's prompt shows it. It mirrors the
+// store's summary so this package stays free of the store.
+type Reference struct {
+	ID, Title, TypeLabel, Summary string
 }
 
 // Start-refusal codes (StartError.Code).
@@ -43,6 +71,8 @@ const (
 	StartNotFound     = "not_found"
 	StartPrecondition = "precondition"
 	StartBudget       = "budget"
+	// StartNodeType: the node's type does not let agents work it.
+	StartNodeType = "node_type"
 )
 
 // StartError is why Start refused a run, worded for a person.
@@ -50,12 +80,25 @@ type StartError struct {
 	Code string
 	// What is the missing thing for StartNotFound: "runner" or "node".
 	What string
-	Msg  string
+	// Msg is the refusal in English, as a run's or task's stored reason.
+	Msg string
+	// said is the refusal in both languages, for the reader of a response.
+	said error
 	// Budget is the owner's budget for StartBudget.
 	Budget runnerwire.BudgetStatus
+	// NodeType and AgentMode name the refusing type for StartNodeType.
+	NodeType  string
+	AgentMode engine.AgentMode
+	// Reason is the shared error code for a role or stage refusal
+	// (ACCEPTANCE_REQUIRED).
+	Reason string
 }
 
 func (e *StartError) Error() string { return e.Msg }
+
+// Unwrap is the refusal worded in both languages, so a handler gives it to
+// its reader in theirs (locale.Render).
+func (e *StartError) Unwrap() error { return e.said }
 
 // Is lets callers test a StartError against the store's sentinel errors.
 func (e *StartError) Is(target error) bool {
@@ -64,13 +107,31 @@ func (e *StartError) Is(target error) bool {
 		return target == ErrInvalid
 	case StartNotFound:
 		return target == ErrNotFound
-	case StartPrecondition, StartBudget:
+	case StartPrecondition, StartBudget, StartNodeType:
 		return target == ErrPrecondition
 	}
 	return false
 }
 
-func refuse(code, msg string) error { return &StartError{Code: code, Msg: msg} }
+// refuse is a refusal worded in both languages.
+func refuse(code, english, chinese string, args ...any) error {
+	return refused(code, locale.Errorf(english, chinese, args...))
+}
+
+// refused is a refusal of code saying said.
+func refused(code string, said error) error {
+	return &StartError{Code: code, Msg: said.Error(), said: said}
+}
+
+// stageRefusal is a precondition refusal carrying a shared error code.
+func stageRefusal(reason string, said error) error {
+	return &StartError{Code: StartPrecondition, Reason: reason, Msg: said.Error(), said: said}
+}
+
+var (
+	errRunnerNotFound = locale.Errorf("runner not found", "找不到 runner")
+	errNodeNotFound   = locale.Errorf("node not found", "找不到節點")
+)
 
 // Start validates a run request, resolves it against the runner's hello,
 // records the run (and its pipeline) and queues it. Refusals are
@@ -78,39 +139,62 @@ func refuse(code, msg string) error { return &StartError{Code: code, Msg: msg} }
 func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error) {
 	body := req.Body
 	if !engine.ValidNodeID(body.NodeID) {
-		return Record{}, refuse(StartInvalid, "nodeId is not a valid node id")
+		return Record{}, refuse(StartInvalid, "nodeId is not a valid node id", "nodeId 不是有效的節點代號")
 	}
 	if len(body.Prompt) > MaxExtraPrompt || !utf8.ValidString(body.Prompt) {
-		return Record{}, refuse(StartInvalid, "prompt must be valid text of at most 8192 bytes")
+		return Record{}, refuse(StartInvalid, "prompt must be valid text of at most 8192 bytes", "提示須為最多 8192 位元組的有效文字")
 	}
 	if !ValidBase(body.Base) {
-		return Record{}, refuse(StartInvalid, "base is not a valid branch name")
+		return Record{}, refuse(StartInvalid, "base is not a valid branch name", "base 不是有效的分支名稱")
 	}
 	if !ValidMode(body.Mode) {
-		return Record{}, refuse(StartInvalid, `mode must be "" or "`+runnerwire.ModeInteractive+`"`)
+		return Record{}, refuse(StartInvalid, `mode must be "" or %q`, `mode 須為 "" 或 %q`, runnerwire.ModeInteractive)
 	}
-	// A dispatch is an implement run or (W7) a plan run, which breaks the node
-	// into tasks on the board; review and revise runs are a pipeline's steps.
-	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan {
-		return Record{}, refuse(StartInvalid, `kind must be "" or "`+runnerwire.JobPlan+`"`)
+	// A dispatch is an implement run, (W7) a plan run, which breaks the node
+	// into tasks on the board, or (agent roles) a judge run, which checks
+	// acceptance criteria; review, revise, test and verify runs are a
+	// pipeline's steps.
+	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan && body.Kind != runnerwire.JobJudge {
+		return Record{}, refuse(StartInvalid, `kind must be "", %q or %q`, `kind 須為 ""、%q 或 %q`, runnerwire.JobPlan, runnerwire.JobJudge)
 	}
-	if body.Kind == runnerwire.JobPlan && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
-		return Record{}, refuse(StartInvalid, "a plan run is one headless run, not a pipeline")
+	if (body.Kind == runnerwire.JobPlan || body.Kind == runnerwire.JobJudge) && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
+		return Record{}, refuse(StartInvalid, "a %s run is one headless run, not a pipeline", "%s 執行是單次背景執行，不是管線", body.Kind)
+	}
+	body.Role = strings.TrimSpace(body.Role)
+	body.Override = strings.TrimSpace(body.Override)
+	if len(body.Override) > MaxOverrideBytes || !utf8.ValidString(body.Override) || strings.ContainsAny(body.Override, "\x00\r\n") {
+		return Record{}, refuse(StartInvalid, "override must be one line of at most 200 characters", "覆寫理由須為單行且最多 200 個字元")
+	}
+	if body.Override != "" && (body.Role != "" || body.Kind != runnerwire.JobImplement || body.Pipeline != nil) {
+		return Record{}, refuse(StartInvalid, "override dispatches one plain implement run: no role, kind or pipeline", "覆寫只派發一次單純的實作執行：不能指定角色、種類或管線")
+	}
+	roles := req.Roles
+	if len(roles) == 0 {
+		roles = engine.BuiltinAgentRoles()
+	}
+	var role *engine.AgentRole
+	if body.Role != "" {
+		if role = findRole(roles, body.Role); role == nil {
+			return Record{}, refuse(StartInvalid, "role %q is not a role of this project", "「%s」不是這個專案的角色", body.Role)
+		}
+	}
+	if body.Kind == runnerwire.JobJudge && role == nil {
+		return Record{}, refuse(StartInvalid, "a judge run needs a role (qa or reviewer)", "評審執行需要角色（qa 或 reviewer）")
 	}
 	// A replan's revision (runnerwire.ReconcileStart) rides on a plan run
 	// only, and is offered to the runner as the job's Review.
 	if body.Revision != "" && body.Kind != runnerwire.JobPlan {
-		return Record{}, refuse(StartInvalid, "revision is for plan runs only")
+		return Record{}, refuse(StartInvalid, "revision is for plan runs only", "revision 只用於計畫執行")
 	}
 	if len(body.Revision) > runnerwire.MaxRevisionBytes || !utf8.ValidString(body.Revision) {
-		return Record{}, refuse(StartInvalid, "revision must be valid text of at most 16384 bytes")
+		return Record{}, refuse(StartInvalid, "revision must be valid text of at most 16384 bytes", "revision 須為最多 16384 位元組的有效文字")
 	}
 	if err := ValidateChain(body.Fallbacks, false); err != nil {
-		return Record{}, refuse(StartInvalid, err.Error())
+		return Record{}, refused(StartInvalid, err)
 	}
 	if body.Pipeline != nil {
 		if err := ValidatePipeline(*body.Pipeline, false); err != nil {
-			return Record{}, refuse(StartInvalid, err.Error())
+			return Record{}, refused(StartInvalid, err)
 		}
 		// The pipeline's implement step is the first run.
 		body.Agent, body.Model = body.Pipeline.Implement.Agent, body.Pipeline.Implement.Model
@@ -121,28 +205,28 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	// else gets to put work there.
 	runner, err := d.reg.Get(ctx, body.RunnerID)
 	if err != nil || runner.OwnerID != req.ActorID {
-		return Record{}, &StartError{Code: StartNotFound, What: "runner", Msg: "runner not found"}
+		return Record{}, &StartError{Code: StartNotFound, What: "runner", Msg: "runner not found", said: errRunnerNotFound}
 	}
 	model, repo, problem := CheckAgainstHello(runner.Info, body)
-	if problem != "" {
-		return Record{}, refuse(StartInvalid, problem)
+	if problem != nil {
+		return Record{}, refused(StartInvalid, problem)
 	}
 	var pipeline *runnerwire.Pipeline
 	if body.Pipeline != nil {
 		p, err := ResolvePipeline(runner.Info, *body.Pipeline, model)
 		if err != nil {
-			return Record{}, refuse(StartInvalid, "pipeline "+err.Error())
+			return Record{}, refused(StartInvalid, locale.Errorf("pipeline %w", "管線 %w", err))
 		}
 		pipeline = &p
 	}
 	if body.Kind == runnerwire.JobPlan && !slices.Contains(runner.Info.Capabilities, runnerwire.CapPlan) {
-		return Record{}, refuse(StartPrecondition, "this runner cannot run plan jobs; update nodevas on it")
+		return Record{}, refuse(StartPrecondition, "this runner cannot run plan jobs; update nodevas on it", "這個 runner 不能執行計畫工作；請更新它的 nodevas")
 	}
 	if !Headless(runner.Info) {
-		return Record{}, refuse(StartPrecondition, "this runner does not take runs; update nodevas on it")
+		return Record{}, refuse(StartPrecondition, "this runner does not take runs; update nodevas on it", "這個 runner 不接受執行；請更新它的 nodevas")
 	}
 	if !ModeSupported(runner.Info, body.Mode) {
-		return Record{}, refuse(StartPrecondition, "this runner cannot run interactive sessions")
+		return Record{}, refuse(StartPrecondition, "this runner cannot run interactive sessions", "這個 runner 不能執行互動式工作階段")
 	}
 	// The budget is the runner owner's: runs spend their subscription.
 	budget, err := d.store.BudgetStatus(ctx, runner.OwnerID)
@@ -150,16 +234,83 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		return Record{}, err
 	}
 	if budget.Exceeded != "" {
-		return Record{}, &StartError{Code: StartBudget, Msg: BudgetMessage(budget), Budget: budget}
+		return Record{}, &StartError{Code: StartBudget, Msg: BudgetMessage(budget), said: BudgetSay(budget), Budget: budget}
 	}
 
-	title, content, found, err := req.LoadNode()
+	node, found, err := req.LoadNode()
 	if err != nil {
 		return Record{}, err
 	}
 	if !found {
-		return Record{}, &StartError{Code: StartNotFound, What: "node", Msg: "node not found"}
+		return Record{}, &StartError{Code: StartNotFound, What: "node", Msg: "node not found", said: errNodeNotFound}
 	}
+	if !AgentModeAllows(node.AgentMode, body.Kind) {
+		typeName := node.Type
+		if typeName == "" {
+			typeName = "task"
+		}
+		return Record{}, &StartError{
+			Code: StartNodeType, NodeType: node.Type, AgentMode: node.AgentMode,
+			Msg:  "a " + typeName + " node cannot be dispatched to an agent",
+			said: locale.Errorf("a %s node cannot be dispatched to an agent", "%s 節點不能派給 agent", typeName),
+		}
+	}
+
+	// Agent roles and workflow stages (spec 2.6). wf is the node's effective
+	// workflow; nil is legacy, today's behavior exactly.
+	wf := node.Workflow.Normalized()
+	if body.Override != "" && !wf.Staged() {
+		return Record{}, refuse(StartInvalid, "override: this node's workflow has no stages to override", "覆寫：這個節點的工作流程沒有可覆寫的階段")
+	}
+	// A staged project's Executor work runs headless (tests first, verify,
+	// review); working it interactively needs a person's override reason.
+	if wf.Staged() && body.Override == "" && body.Kind == runnerwire.JobImplement &&
+		body.Mode == runnerwire.ModeInteractive && (role == nil || role.Slot() == engine.RoleExecutor) {
+		return Record{}, stageRefusal(CodeStagedNeedsHeadless, locale.Errorf(
+			"this project's stages run headless; give an override reason to work interactively",
+			"這個專案的階段在背景執行；要互動式工作請提供覆寫理由"))
+	}
+	story := wf != nil && wf.Judge == engine.JudgeChecklist && storyType(node.Type)
+	staged := wf.Staged() && body.Override == "" && body.Kind == runnerwire.JobImplement &&
+		body.Mode == runnerwire.ModeHeadless && (role == nil || role.Slot() == engine.RoleExecutor)
+	if role == nil && wf != nil && body.Override == "" {
+		switch body.Kind {
+		case runnerwire.JobImplement:
+			role = findRole(roles, engine.RoleExecutor)
+		case runnerwire.JobPlan:
+			role = findRole(roles, engine.RolePlanner)
+		}
+	}
+	slot := ""
+	if role != nil {
+		slot = role.Slot()
+	}
+	worker := slot == engine.RoleExecutor || slot == engine.RoleTester
+	if body.Override == "" && engine.RequiresAcceptance(wf) && node.Acceptance.Empty() && (staged || worker) {
+		return Record{}, stageRefusal(CodeAcceptanceRequired, locale.Errorf(
+			"write the acceptance criteria first: this project's stages need them before a Tester or Executor runs",
+			"請先寫驗收條件：這個專案的階段在 Tester 或 Executor 執行前需要它們"))
+	}
+	caps := runner.Info.Capabilities
+	if staged {
+		missing := !slices.Contains(caps, runnerwire.CapRoles) ||
+			(story && !slices.Contains(caps, runnerwire.CapJudge)) ||
+			(!story && wf.Stages.Tester && !slices.Contains(caps, runnerwire.CapVerify))
+		if missing {
+			return Record{}, refuse(StartPrecondition, "this runner cannot run staged pipelines (tests first, verify, review); update nodevas on it", "這個 runner 不能執行分階段管線（先寫測試、驗證、審查）；請更新它的 nodevas")
+		}
+		if !story && wf.Stages.Tester && !repo.Verify {
+			return Record{}, refuse(StartPrecondition,
+				"configure a test command for %s on the runner, so it can verify red and green: nodevas runner repo set %s --test-command \"go test ./...\"",
+				"請在 runner 上替 %s 設定測試指令，讓它能驗證紅燈與綠燈：nodevas runner repo set %s --test-command \"go test ./...\"",
+				repo.Name, repo.Name)
+		}
+	}
+	if body.Kind == runnerwire.JobJudge && !slices.Contains(caps, runnerwire.CapJudge) {
+		return Record{}, refuse(StartPrecondition, "this runner cannot run judge jobs; update nodevas on it", "這個 runner 不能執行評審工作；請更新它的 nodevas")
+	}
+
+	title, content := node.Title, node.Content
 	if title == "" {
 		title = body.NodeID
 	}
@@ -167,26 +318,86 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if name == "" {
 		name = req.ActorID
 	}
-	jobPrompt := BuildPrompt(title, content, body.Prompt)
+	extra := body.Prompt
+	if role != nil && !role.Builtin && strings.TrimSpace(role.Instructions) != "" {
+		extra = strings.TrimSpace(extra + "\n\nProject policy for this role (" + role.Label + "):\n" + role.Instructions)
+	}
+	jobPrompt := BuildPrompt(title, content, ReferencesBlock(node.References, node.ReferencesTruncated), extra)
+	acceptance := acceptanceItems(node.Acceptance)
+	tools := roleTools(roles, node.Type)
+
+	// The first run's role: a staged pipeline starts with its Tester (or the
+	// writer, or a judge, for a story).
+	first := stagedFirst{kind: body.Kind, role: "", am: runnerwire.AgentModel{Agent: body.Agent, Model: model}}
+	if role != nil {
+		first.role = role.ID
+	}
+	if staged {
+		first = firstStagedStep(wf, story, content, pipeline, body.Agent, model)
+	}
+	if first.role != "" {
+		status, err := d.store.RoleBudgetStatus(ctx, runner.OwnerID, first.role)
+		if err != nil {
+			return Record{}, err
+		}
+		if status.Exceeded != "" {
+			return Record{}, &StartError{Code: StartBudget, Msg: RoleBudgetMessage(first.role, status), said: RoleBudgetSay(first.role, status), Budget: status}
+		}
+	}
+	lockCriteria := req.LockAcceptance != nil && body.Override == "" && body.Kind == runnerwire.JobImplement && (staged || worker)
+
 	pipelineID := ""
+	var config *StagedConfig
+	if wf != nil && body.Override == "" && (staged || pipeline != nil) {
+		config = &StagedConfig{Workflow: wf, Staged: staged, Story: story, Tools: tools, Acceptance: acceptance}
+	}
+	if staged && pipeline == nil {
+		synthesized := runnerwire.Pipeline{Implement: runnerwire.AgentModel{Agent: body.Agent, Model: model}, MaxRounds: 2}
+		pipeline = &synthesized
+	}
+	if staged {
+		if pipeline.Tester.Agent == "" {
+			pipeline.Tester = pipeline.Implement
+		}
+		if wf.Stages.Reviewer && len(runnerwire.ReviewersOf(*pipeline)) == 0 {
+			pipeline.Reviewers = []runnerwire.AgentModel{pipeline.Implement}
+		}
+		first = firstStagedStep(wf, story, content, pipeline, body.Agent, model)
+	}
 	if pipeline != nil {
 		p, err := d.store.CreatePipeline(ctx, NewPipeline{
 			OwnerID: runner.OwnerID, CreatedBy: req.ActorID, Project: req.Project, NodeID: body.NodeID,
 			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
+			Config: config, Phase: first.phase,
 		})
 		if err != nil {
 			return Record{}, err
 		}
 		pipelineID = p.ID
 	}
-	record, err := d.store.Create(ctx, New{
+	jobRoles := JobRoles{}
+	if first.role != "" {
+		jobRoles = JobRoles{Tools: tools[first.role], Acceptance: acceptance}
+	}
+	if body.Kind == runnerwire.JobJudge && slot == engine.RoleQA && (wf == nil || wf.Judge != engine.JudgeChecklist) && repo.Verify {
+		// Goal verification runs the repo's tests first (spec 3.3).
+		jobRoles.VerifySpec = &runnerwire.VerifySpec{Phase: runnerwire.VerifyGoal}
+	}
+	review := strings.TrimSpace(body.Revision)
+	createRun := d.createRun
+	if createRun == nil {
+		createRun = d.store.Create
+	}
+	record, err := createRun(ctx, New{
 		Project: req.Project, NodeID: body.NodeID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
-		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
+		Agent: first.am.Agent, Model: first.am.Model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: req.ActorID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: body.Kind, Review: strings.TrimSpace(body.Revision),
+		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
+		Role: first.role, Override: body.Override, JobRoles: jobRoles,
+		NodeType: node.Type, AcceptanceCount: len(acceptance),
 	})
 	if err != nil {
 		if pipelineID != "" {
@@ -194,22 +405,143 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		}
 		return Record{}, err
 	}
+	// The criteria an Executor works against do not change under it. They
+	// are locked only once the run exists; a failed lock cancels it.
+	if lockCriteria {
+		if err := req.LockAcceptance(); err != nil {
+			_, _ = d.store.Transition(ctx, record.ID, runnerwire.RunCancelled, Change{Error: "criteria lock failed: " + err.Error()})
+			if pipelineID != "" {
+				_, _ = d.store.EndPipeline(ctx, pipelineID, runnerwire.PipelineFailed, "criteria lock failed")
+			}
+			return Record{}, locale.Errorf("lock the acceptance criteria: %w", "鎖定驗收條件：%w", err)
+		}
+	}
+	if body.RoutePick != "" {
+		d.store.LinkRoutePick(ctx, body.RoutePick, req.ActorID, body.NodeID, record.ID)
+	}
+	if body.Override != "" {
+		if err := d.store.NoteFirst(ctx, record.ID, "stage override by "+name+": "+body.Override); err != nil {
+			return Record{}, err
+		}
+		d.record(AuditEntry{Project: req.Project, ActorID: req.ActorID, ActorName: name, Action: "run.override",
+			Target: record.ID, Detail: map[string]any{"node": body.NodeID, "reason": body.Override}})
+	}
 	return d.Submit(ctx, record), nil
+}
+
+// CodeAcceptanceRequired is StartError.Reason when the node needs acceptance
+// criteria first (shared with the web client and store.CodeAcceptanceRequired).
+const CodeAcceptanceRequired = "ACCEPTANCE_REQUIRED"
+
+// CodeStagedNeedsHeadless is StartError.Reason when a staged node's Executor
+// work is asked for interactively without an override reason.
+const CodeStagedNeedsHeadless = "STAGED_NEEDS_HEADLESS"
+
+// storyType reports whether a node type is a story's (its body is the work).
+func storyType(nodeType string) bool { return nodeType == "scene" || nodeType == "event" }
+
+// findRole is the role with id among roles, or nil.
+func findRole(roles []engine.AgentRole, id string) *engine.AgentRole {
+	for i := range roles {
+		if roles[i].ID == id {
+			role := roles[i]
+			return &role
+		}
+	}
+	return nil
+}
+
+// roleTools is each role's tools for a job on a node of nodeType: the
+// role's allowlist, plus update_node_body for an Executor whose node is a
+// scene or event (the prose is its work).
+func roleTools(roles []engine.AgentRole, nodeType string) map[string][]string {
+	out := make(map[string][]string, len(roles))
+	for _, role := range roles {
+		tools := slices.Clone(role.Tools)
+		if role.Slot() == engine.RoleExecutor && storyType(nodeType) && !slices.Contains(tools, "update_node_body") {
+			tools = append(tools, "update_node_body")
+		}
+		out[role.ID] = tools
+	}
+	return out
+}
+
+// acceptanceItems is a node's criteria as job data.
+func acceptanceItems(acc *engine.Acceptance) []runnerwire.AcceptanceItem {
+	if acc.Empty() {
+		return nil
+	}
+	out := make([]runnerwire.AcceptanceItem, 0, len(acc.Items))
+	for _, item := range acc.Items {
+		out = append(out, runnerwire.AcceptanceItem{ID: item.ID, Text: item.Text})
+	}
+	return out
+}
+
+// stagedFirst is the first run a dispatch records.
+type stagedFirst struct {
+	kind, role, phase string
+	am                runnerwire.AgentModel
+}
+
+// firstStagedStep is a staged pipeline's first run: the Tester, or for a
+// story the writer (an empty scene is red by definition) or a judge.
+func firstStagedStep(wf *engine.Workflow, story bool, content string, p *runnerwire.Pipeline, agent, model string) stagedFirst {
+	implement := runnerwire.AgentModel{Agent: agent, Model: model}
+	if p != nil {
+		implement = p.Implement
+	}
+	switch {
+	case story && strings.TrimSpace(content) == "":
+		return stagedFirst{kind: runnerwire.JobImplement, role: engine.RoleExecutor, phase: runnerwire.PhaseImplement, am: implement}
+	case story:
+		return stagedFirst{kind: runnerwire.JobJudge, role: engine.RoleReviewer, phase: runnerwire.PhaseJudge, am: judgeOf(p)}
+	case wf.Stages.Tester:
+		tester := implement
+		if p != nil && p.Tester.Agent != "" {
+			tester = p.Tester
+		}
+		return stagedFirst{kind: runnerwire.JobTest, role: engine.RoleTester, phase: runnerwire.PhaseTest, am: tester}
+	}
+	return stagedFirst{kind: runnerwire.JobImplement, role: engine.RoleExecutor, phase: runnerwire.PhaseImplement, am: implement}
+}
+
+// judgeOf is who judges a story's checklist: the first reviewer, else the
+// implementer.
+func judgeOf(p *runnerwire.Pipeline) runnerwire.AgentModel {
+	if p == nil {
+		return runnerwire.AgentModel{}
+	}
+	if reviewers := runnerwire.ReviewersOf(*p); len(reviewers) > 0 {
+		return reviewers[0]
+	}
+	return p.Implement
+}
+
+// AgentModeAllows is the node-type gate on a run: an implement run needs a
+// type agents are dispatched to; a plan run (breaking the node down) also
+// accepts an Autopilot type such as Goal. An empty mode allows nothing, so a
+// caller that forgets to resolve the type fails closed.
+func AgentModeAllows(mode engine.AgentMode, kind string) bool {
+	if kind == runnerwire.JobPlan || kind == runnerwire.JobJudge {
+		return mode == engine.AgentDispatch || mode == engine.AgentAutopilot
+	}
+	return mode == engine.AgentDispatch
 }
 
 // CheckAgainstHello resolves the request's agent, model and repo against
 // what the runner last reported. It returns the model to record and the
 // repo, or a reason the request does not fit.
-func CheckAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, string) {
+func CheckAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, error) {
 	model, err := ResolveAgentModel(info, runnerwire.AgentModel{Agent: body.Agent, Model: body.Model})
 	if err != nil {
-		return "", runnerwire.Repo{}, err.Error()
+		return "", runnerwire.Repo{}, err
 	}
 	r := slices.IndexFunc(info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == body.RepoID })
 	if body.RepoID == "" || r < 0 {
-		return "", runnerwire.Repo{}, "repoId is not one of the runner's repositories"
+		return "", runnerwire.Repo{}, locale.Errorf("repoId is not one of the runner's repositories", "repoId 不是這個 runner 的儲存庫")
 	}
-	return model, info.Repos[r], ""
+	return model, info.Repos[r], nil
 }
 
 // ValidBase accepts "" (the repository's default) or a plausible branch
@@ -246,19 +578,51 @@ func ModeSupported(info *runnerwire.Info, mode string) bool {
 const truncatedNote = "\n\n[node content truncated]"
 
 // BuildPrompt assembles the task a runner is offered: the node's title, its
-// content, and the dispatcher's extra instructions, within MaxPromptBytes.
-// The content gives way first, so the instructions typed for this run are
-// never the part that is cut.
-func BuildPrompt(title, content, extra string) string {
+// content, its reference notes (refs, from ReferencesBlock) and the
+// dispatcher's extra instructions, within MaxPromptBytes. The content gives
+// way first, so the instructions typed for this run, and the notes the
+// writing must agree with, are never the part that is cut.
+func BuildPrompt(title, content, refs, extra string) string {
 	head := "# " + strings.TrimSpace(title) + "\n\n"
 	tail := ""
 	if extra = strings.TrimSpace(extra); extra != "" {
 		tail = "\n\nAdditional instructions:\n" + extra
 	}
 	content = strings.TrimSpace(content)
-	room := runnerwire.MaxPromptBytes - len(head) - len(tail)
+	room := runnerwire.MaxPromptBytes - len(head) - len(refs) - len(tail)
 	if len(content) > room {
 		content = Truncate(content, max(room-len(truncatedNote), 0)) + truncatedNote
 	}
-	return Truncate(head+content+tail, runnerwire.MaxPromptBytes)
+	return Truncate(head+content+refs+tail, runnerwire.MaxPromptBytes)
+}
+
+// ReferencesBlock renders a node's reference notes for its run prompt, or ""
+// when it has none. The store caps the notes (8, 4000 runes of summary), so
+// the block stays near 12 KB at most.
+func ReferencesBlock(refs []Reference, truncated bool) string {
+	if len(refs) == 0 && !truncated {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Reference notes\n")
+	b.WriteString("Read these before writing; they are this project's source of truth (characters, setting). get_node <id> returns the full text.\n")
+	for _, ref := range refs {
+		label := ref.TypeLabel
+		if label == "" {
+			label = "Note"
+		}
+		b.WriteString("\n### " + oneLine(ref.Title) + " (" + ref.ID + ", " + label + ")\n")
+		if summary := strings.TrimSpace(ref.Summary); summary != "" {
+			b.WriteString(summary + "\n")
+		}
+	}
+	if truncated {
+		b.WriteString("\n(More references exist; get_node <node id> lists them.)\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// oneLine keeps a title on its heading line.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }

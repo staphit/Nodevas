@@ -47,9 +47,13 @@ const (
 
 // handoffEntry is one handoff branch this runner made.
 type handoffEntry struct {
-	Branch    string `json:"branch"`
-	RepoID    string `json:"repoId"`
-	RepoPath  string `json:"repoPath"`
+	Branch   string `json:"branch"`
+	RepoID   string `json:"repoId"`
+	RepoPath string `json:"repoPath"`
+	// NodeID is the node the run was for; a handoff is continued only for
+	// it. Records from before it was kept have none and are continued for
+	// no node; they expire like any other.
+	NodeID    string `json:"nodeId,omitempty"`
 	Commit    string `json:"commit"`
 	RunID     string `json:"runId"`
 	Note      string `json:"note"`
@@ -140,8 +144,9 @@ func registerHandoff(ctx context.Context, dataDir string, entry handoffEntry) er
 }
 
 // lookupHandoff checks a job's handoff branch: a handoff branch name, made
-// by this runner for this repository, still at the commit it was made at.
-func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, branch string) (handoffEntry, error) {
+// by this runner for this repository and node, still at the commit it was
+// made at.
+func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, nodeID, branch string) (handoffEntry, error) {
 	if !runnerwire.ValidHandoffBranch(branch) {
 		return handoffEntry{}, fmt.Errorf("handoff branch %q is not a handoff branch name", branch)
 	}
@@ -162,6 +167,14 @@ func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, br
 		if head != e.Commit {
 			return handoffEntry{}, fmt.Errorf("handoff branch %s moved since this runner made it", branch)
 		}
+		if e.NodeID == "" {
+			// Written before records named their node: it cannot be told
+			// apart from another node's, so it is continued for none.
+			return handoffEntry{}, fmt.Errorf("handoff branch %s has no node on record, so it is not continued", branch)
+		}
+		if e.NodeID != nodeID {
+			return handoffEntry{}, fmt.Errorf("handoff branch %s was made for another node, not %s", branch, nodeID)
+		}
 		return e, nil
 	}
 	return handoffEntry{}, fmt.Errorf("handoff branch %s is not one this runner made for %s", branch, repo.Name)
@@ -176,14 +189,14 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 		job.HandoffNote = ""
 		return ""
 	}
-	if job.Kind != runnerwire.JobImplement || job.Mode == runnerwire.ModeInteractive {
-		return "a handoff is only continued by a headless implement run"
+	if (job.Kind != runnerwire.JobImplement && job.Kind != runnerwire.JobTest) || job.Mode == runnerwire.ModeInteractive {
+		return "a handoff is only continued by a headless implement or test run"
 	}
 	dataDir, err := j.c.Config.RunDataDir()
 	if err != nil {
 		return "cannot read the handoff record: " + err.Error()
 	}
-	entry, err := lookupHandoff(ctx, dataDir, r.repo, job.HandoffBranch)
+	entry, err := lookupHandoff(ctx, dataDir, r.repo, job.NodeID, job.HandoffBranch)
 	if err != nil {
 		return err.Error()
 	}
@@ -197,13 +210,13 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 
 // handOff keeps a failed run's partial work: it commits the worktree, puts
 // the commit on the run's handoff branch, writes the note and removes the
-// worktree. With nothing changed there is no branch. result gets the branch
-// and note; the changes are reported as any run's are.
+// worktree (dropWorktree). With nothing changed there is no branch. result
+// gets the branch and note; the changes are reported as any run's are.
 func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runnerwire.RunChanges {
 	ctx := j.ctx
 	job := r.job
 	message := commitMessage(fmt.Sprintf("Partial work: the agent stopped (%s) before finishing.", result.FailureKind), job)
-	committed := commitRun(ctx, wt, message)
+	committed := j.commit(ctx, r, wt, message)
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the partial work: " + committed.Err.Error()})
 	}
@@ -217,10 +230,11 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 		j.c.logf("run %s: partial work not kept for a handoff; worktree kept at %s", job.RunID, wt.Path)
 		return &changes
 	case !committed.Changed || changes.Commit == "":
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "no changes to hand off; worktree removed"})
-		if err := removeWorktree(ctx, r.repo.Path, wt, true); err != nil {
-			j.c.logf("run %s: removing its worktree: %v", job.RunID, err)
+		text := "no changes to hand off; worktree removed"
+		if !j.dropWorktree(r, wt, committed, true) {
+			text = "no changes to hand off; worktree kept at " + wt.Path
 		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		return &changes
 	}
 	branch := runnerwire.HandoffBranchName(job.RunID)
@@ -232,7 +246,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 	dataDir, err := j.c.Config.RunDataDir()
 	if err == nil {
 		err = registerHandoff(ctx, dataDir, handoffEntry{
-			Branch: branch, RepoID: r.repo.ID, RepoPath: r.repo.Path, Commit: changes.Commit,
+			Branch: branch, RepoID: r.repo.ID, RepoPath: r.repo.Path, NodeID: job.NodeID, Commit: changes.Commit,
 			RunID: job.RunID, Note: note, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		})
 	}
@@ -242,9 +256,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 		j.c.logf("run %s: handoff not recorded: %v; worktree kept at %s", job.RunID, err, wt.Path)
 		return &changes
 	}
-	if err := removeWorktree(ctx, r.repo.Path, wt, true); err != nil {
-		j.c.logf("run %s: removing its worktree: %v", job.RunID, err)
-	}
+	j.dropWorktree(r, wt, committed, true)
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf(
 		"kept the partial work on local branch %s (%s: %d files, +%d −%d) for the next run; not pushed",
 		branch, short(changes.Commit), len(changes.Files), changes.Additions, changes.Deletions)})

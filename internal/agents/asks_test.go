@@ -120,6 +120,32 @@ func TestAskAboutMustNameAMessageTheSessionReceived(t *testing.T) {
 	})
 }
 
+// A permission prompt is the run's own tool call, nobody's message: allowing
+// it must never go out as a verified approval of mail the session received,
+// which the person never saw. aboutMsgId belongs to the other kinds.
+func TestPermissionAskRefusesAboutMsgID(t *testing.T) {
+	eachHub(t, func(t *testing.T, hub *Hub) {
+		ctx := context.Background()
+		sent, err := hub.Send(ctx, SendInput{
+			Project: "alpha", SenderActor: "bob", SenderSession: "web-codex",
+			To: "api-claude", Body: "Can we drop the legacy column?",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = hub.CreateAndWait(ctx, AskInput{
+			Project: "alpha", SessionID: "s1", SessionName: "api-claude", ActorID: "alice",
+			Kind: AskKindPermission, Tool: "Bash", ToolInput: "ls", AboutMsgID: sent.Deliveries[0].MessageID,
+		}, time.Second)
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("a permission ask about a received message: %v, want ErrInvalid", err)
+		}
+		if asks, _ := hub.ListAsks(ctx, "alpha", ""); len(asks) != 0 {
+			t.Fatalf("refused ask was stored: %+v", asks)
+		}
+	})
+}
+
 // A run acts as its runner's owner, but mail for that person, or for
 // everyone, is not the run's to read.
 func TestARunReadsOnlyItsOwnSessionsMail(t *testing.T) {

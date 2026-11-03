@@ -43,10 +43,24 @@ const (
 	CodeAlreadyClaimed    = "ALREADY_CLAIMED"
 	CodeLeaseExpired      = "LEASE_EXPIRED"
 	CodeConflict          = "CONFLICT"
-	CodeRateLimited       = "RATE_LIMITED"
-	CodeAuthRequired      = "AUTH_REQUIRED"
-	CodePermissionDenied  = "PERMISSION_DENIED"
-	CodeServerError       = "SERVER_ERROR"
+	// The agents network's other 409s: a thread at its agent-turn limit,
+	// and a held message someone already approved or rejected.
+	CodeLoopDetected     = "LOOP_DETECTED"
+	CodeNotHeld          = "NOT_HELD"
+	CodeRateLimited      = "RATE_LIMITED"
+	CodeAuthRequired     = "AUTH_REQUIRED"
+	CodePermissionDenied = "PERMISSION_DENIED"
+	CodeServerError      = "SERVER_ERROR"
+
+	// Node-type refusals (store.CodeNodeType*), and the rest of the codes the
+	// planning tools can meet.
+	CodeNodeTypePeopleOnly   = "NODE_TYPE_PEOPLE_ONLY"
+	CodeNodeTypeNoStatus     = "NODE_TYPE_NO_STATUS"
+	CodeNodeTypeForbidsAgent = "NODE_TYPE_FORBIDS_AGENT"
+	CodeUnknownNodeType      = "UNKNOWN_NODE_TYPE"
+	CodeAgentRestoreDenied   = "AGENT_RESTORE_DENIED"
+	CodeInvalidSubgraph      = "INVALID_SUBGRAPH"
+	CodeSubgraphTooLarge     = "SUBGRAPH_TOO_LARGE"
 )
 
 // APIError is a failed call to the Nodevas server, carrying whatever the agent
@@ -109,6 +123,7 @@ type Client struct {
 	project    string
 	actor      string
 	agentRole  string
+	role       string
 	http       *http.Client
 	customHTTP bool
 
@@ -162,13 +177,20 @@ type ClientOptions struct {
 	// reads as a human session. Like Actor it is fixed for the process, so a
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
-	Timeout   time.Duration
+	// Role is the agent role every request declares (auth.RoleHeaderName);
+	// empty sends no header. Fixed for the process, like AgentRole.
+	Role    string
+	Timeout time.Duration
 	// Model is the model the agent runs on, reported in heartbeats; empty
 	// falls back to NODEVAS_MODEL.
 	Model string
 	// WorkDir overrides the process's working directory (tests, hooks that
 	// are told the agent's cwd).
 	WorkDir string
+	// NoLocalFiles: the client reads and writes no file on this machine, not
+	// even to learn its git branch: it has no working directory, so
+	// attachments are refused both ways. See Options.NoLocalFiles.
+	NoLocalFiles bool
 	// OffNetwork names the excluded folder WorkDir is in; set, the client
 	// sends no heartbeats and refuses to send messages.
 	OffNetwork string
@@ -219,7 +241,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		httpClient = &http.Client{Timeout: timeout}
 	}
 	actor := strings.TrimSpace(opts.Actor)
-	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor)
+	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor, !opts.NoLocalFiles)
 	if strings.TrimSpace(opts.SessionID) != "" {
 		sessionID = strings.TrimSpace(opts.SessionID)
 	}
@@ -233,11 +255,19 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		branch = strings.TrimSpace(opts.Branch)
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
-	if workDir == "" {
+	switch {
+	case opts.NoLocalFiles:
+		workDir = ""
+	case workDir == "":
 		workDir, _ = os.Getwd()
 	}
 	if abs, err := filepath.Abs(workDir); err == nil && workDir != "" {
 		workDir = abs
+	}
+	follow := followMode(opts.SessionID, agentKind)
+	if opts.NoLocalFiles {
+		// Following Claude Code reads its session registry from disk.
+		follow = ""
 	}
 	model := strings.TrimSpace(opts.Model)
 	if model == "" {
@@ -254,6 +284,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		project:     strings.TrimSpace(opts.Project),
 		actor:       actor,
 		agentRole:   strings.TrimSpace(opts.AgentRole),
+		role:        strings.TrimSpace(opts.Role),
 		http:        httpClient,
 		customHTTP:  opts.HTTPClient != nil,
 		sessionID:   sessionID,
@@ -264,7 +295,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		cwd:         cwd,
 		state:       "idle",
 		names:       map[string]string{},
-		follow:      followMode(opts.SessionID, agentKind),
+		follow:      follow,
 	}, nil
 }
 
@@ -299,6 +330,9 @@ func (c *Client) Actor() string { return c.actor }
 // AgentRole is the write-permission class this client declares on every
 // request; empty means it presents as a human session.
 func (c *Client) AgentRole() string { return c.agentRole }
+
+// Role is the agent role this client declares on every request ("" none).
+func (c *Client) Role() string { return c.role }
 
 // BaseURL is the server this client talks to, for diagnostics.
 func (c *Client) BaseURL() string { return c.base.String() }
@@ -421,6 +455,9 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 	if c.agentRole != "" {
 		request.Header.Set(auth.AgentRoleHeaderName, c.agentRole)
 	}
+	if c.role != "" {
+		request.Header.Set(auth.RoleHeaderName, c.role)
+	}
 
 	response, err := c.httpFor(ctx).Do(request)
 	if err != nil {
@@ -462,6 +499,10 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 // process before anything gets a chance to trim it.
 const maxResponseBytes = 64 << 20
 
+// conflictAdvice is what decodeError adds to a 409: most are a revision
+// conflict. A call whose 409 means something else replaces it.
+const conflictAdvice = ". Someone changed this at the same time; re-read it and apply your change to the current version"
+
 // decodeError turns a non-2xx response into an APIError.
 func decodeError(status int, raw []byte) *APIError {
 	failure := &APIError{Code: codeFor(status), Status: status}
@@ -490,8 +531,11 @@ func decodeError(status int, raw []byte) *APIError {
 	}
 	switch failure.Code {
 	case CodeConflict:
-		failure.Message = failure.Message +
-			". Someone changed this at the same time; re-read it and apply your change to the current version"
+		failure.Message = failure.Message + conflictAdvice
+	case CodeLoopDetected:
+		failure.Message = failure.Message + ". Do not send again in this thread: a person has to reply before agents can continue it; wait in check_inbox"
+	case CodeNotHeld:
+		failure.Message = failure.Message + ". Someone already approved or rejected it; there is nothing to retry"
 	case CodeRateLimited:
 		failure.Message = failure.Message + ". Slow down and try again"
 	}

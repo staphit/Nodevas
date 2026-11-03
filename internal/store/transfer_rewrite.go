@@ -45,6 +45,19 @@ func rewriteRequires(requires string, selection map[string]bool, rename func(str
 	return expr.String(), true
 }
 
+// rewriteRefs keeps the references whose target travels with the selection,
+// under its new id. The rest are dropped: an old id could name an unrelated
+// node in the destination project.
+func rewriteRefs(refs []string, selection map[string]bool, rename func(string) string) []string {
+	var out []string
+	for _, ref := range refs {
+		if selection[ref] {
+			out = append(out, rename(ref))
+		}
+	}
+	return out
+}
+
 func renameWireKey(key string, rename func(string) string) string {
 	if target, ok := strings.CutPrefix(key, "gate:"); ok {
 		return "gate:" + rename(target)

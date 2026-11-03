@@ -1,5 +1,5 @@
 /**
- * Actual lifecycle slice [A-05].
+ * Actual lifecycle slice.
  *
  * The journal is the source of truth: every write is an append through the API,
  * and the store only mirrors the state the server replays back. Nothing here
@@ -13,7 +13,9 @@ import {
   describeFailure,
   operationScope,
 } from "./operations";
+import { translate } from "../i18n";
 import { coalesceRequest } from "./coalesce";
+import { nodeTypeErrorMessage } from "../nodeTypeErrors";
 import { generations } from "./internals";
 import { pushUndo } from "./undo";
 import type { AppSlice, RunSlice } from "./types";
@@ -24,7 +26,7 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
   stagedLifecycle: {},
 
   /**
-   * Holds a chosen status until somebody explicitly applies it [B-04].
+   * Holds a chosen status until somebody explicitly applies it.
    *
    * This is the one thing the drawer's auto-save deliberately does not carry.
    * A status is an append to `run/journal.jsonl`, which is history: writing one
@@ -88,13 +90,14 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
       get().settleOperation(scope, { status: "saved", operation: name });
       return commandSucceeded(name, scope, undefined);
     } catch (e) {
-      const message = describeFailure(e, "套用實際狀態失敗");
+      const message =
+        nodeTypeErrorMessage(e, nodeId) ?? describeFailure(e, translate("run.error.statusFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       return commandFailed(name, scope, message);
     }
   },
 
-  moveActualEvent: async (eventId, timestamp, note = "時間軸拖曳調整", options = {}) => {
+  moveActualEvent: async (eventId, timestamp, note = translate("run.note.timelineDrag"), options = {}) => {
     const target = get().runState?.history.find((event) => event.id === eventId);
     const nodeId = target?.node;
     const previousTimestamp = target?.t;
@@ -110,7 +113,7 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
       get().settleOperation(scope, { status: "saved", operation: name });
       return commandSucceeded(name, scope, undefined);
     } catch (e) {
-      const message = describeFailure(e, "調整實際時間失敗");
+      const message = describeFailure(e, translate("run.error.moveFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       return commandFailed(name, scope, message);
     }

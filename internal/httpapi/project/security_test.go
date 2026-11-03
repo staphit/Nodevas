@@ -181,3 +181,31 @@ func TestRemoteProjectOpenRedactsRootPath(t *testing.T) {
 		t.Fatalf("project open leaked host path: %s", response.Body)
 	}
 }
+
+type denyAllAccess struct{}
+
+func (denyAllAccess) Readable(*http.Request, string) bool     { return false }
+func (denyAllAccess) ReadableTree(*http.Request, string) bool { return false }
+
+// A caller who may read no project gets empty arrays, never JSON null: the
+// client iterates both lists without checking.
+func TestProjectCatalogListsAreNeverNull(t *testing.T) {
+	pm := securityTestManager(t)
+	api := New(pm)
+	api.UseMembers(denyAllAccess{}, nil)
+
+	response := httptest.NewRecorder()
+	api.GetProjects(securityTestContext(response, httptest.NewRequest(http.MethodGet, "/api/projects", nil)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /api/projects = %d %s", response.Code, response.Body)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"projects", "workspaces"} {
+		if raw := strings.TrimSpace(string(body[key])); !strings.HasPrefix(raw, "[") {
+			t.Errorf("%s = %s, want an array", key, raw)
+		}
+	}
+}

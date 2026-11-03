@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
+import { forgetBoardViews } from "./src/components/canvas/boardViewMemory";
 import { resetCoalescing } from "./src/state/coalesce";
 
 // jsdom has no layout engine and therefore no ResizeObserver. Components use it
@@ -63,6 +64,12 @@ beforeEach(() => {
 // leaves a trigger gathered would otherwise fire it during the next one.
 afterEach(() => {
   resetCoalescing();
+});
+
+// Each project's last pan and zoom live in module state for the session, so
+// a board one test scrolled would otherwise open there in the next.
+afterEach(() => {
+  forgetBoardViews();
 });
 
 afterEach(() => {

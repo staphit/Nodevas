@@ -15,6 +15,8 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
+	"nodevas/internal/safego"
 )
 
 // Two-factor authentication (an authenticator app, TOTP). See
@@ -33,8 +35,11 @@ import (
 // Every response carrying a secret or recovery codes is no-store.
 
 // signInTicketCookie carries a pending two-factor sign-in. HttpOnly: page
-// script never needs it, so an injected script cannot lift it either. Its
-// path is the one endpoint that reads it.
+// script never needs it, so an injected script cannot lift it either. Over
+// plain HTTP its path is the one endpoint that reads it; over TLS it is
+// __Host-nodevas_signin, which must have Path=/, so that a sibling subdomain
+// cannot set one for the parent domain and have the second step run on its
+// ticket instead of the person's.
 const (
 	signInTicketCookie = "nodevas_signin"
 	signInTicketPath   = "/api/auth/login/totp"
@@ -44,15 +49,7 @@ const (
 // authenticator code is next.
 func (a *API) answerPendingSignIn(c *gin.Context, result auth.SignInResult) {
 	a.recordAuthEvent(c, audit.ActionSignInPending, result.Actor, map[string]any{"secondFactor": auth.SecondFactorTOTP})
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     signInTicketCookie,
-		Value:    result.Pending.Ticket,
-		Path:     signInTicketPath,
-		HttpOnly: true,
-		Secure:   auth.RequestIsSecure(c.Request),
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(auth.SignInTicketTTL.Seconds()),
-	})
+	setSignInTicket(c, result.Pending.Ticket, int(auth.SignInTicketTTL.Seconds()))
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":           false,
@@ -62,22 +59,41 @@ func (a *API) answerPendingSignIn(c *gin.Context, result auth.SignInResult) {
 }
 
 func clearSignInTicket(c *gin.Context) {
+	setSignInTicket(c, "", -1)
+}
+
+// setSignInTicket sets (or, with a negative maxAge, clears) the sign-in
+// ticket cookie.
+func setSignInTicket(c *gin.Context, value string, maxAge int) {
+	name := auth.CookieNameFor(c.Request, signInTicketCookie)
+	path := signInTicketPath
+	if name != signInTicketCookie {
+		path = "/"
+	}
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     signInTicketCookie,
-		Value:    "",
-		Path:     signInTicketPath,
+		Name:     name,
+		Value:    value,
+		Path:     path,
 		HttpOnly: true,
 		Secure:   auth.RequestIsSecure(c.Request),
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
+		MaxAge:   maxAge,
 	})
+}
+
+// signInTicket is the request's sign-in ticket, or "" when it carries none
+// or more than one (auth.CookieValue); the second step then answers as for an
+// expired ticket.
+func signInTicket(r *http.Request) string {
+	ticket, _ := auth.CookieValue(r, signInTicketCookie)
+	return ticket
 }
 
 // postLoginTOTP finishes a two-factor sign-in.
 func (a *API) postLoginTOTP(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	var body struct {
@@ -86,10 +102,7 @@ func (a *API) postLoginTOTP(c *gin.Context) {
 	if !httpx.DecodeJSONLimit(c, &body, auth.MaxLoginBodyBytes) {
 		return
 	}
-	ticket := ""
-	if cookie, err := c.Request.Cookie(signInTicketCookie); err == nil {
-		ticket = cookie.Value
-	}
+	ticket := signInTicket(c.Request)
 	code := strings.TrimSpace(body.Code)
 	result, err := accounts.CompleteSignIn(c.Request, ticket, code)
 	if err != nil {
@@ -149,7 +162,7 @@ func (a *API) recordAuthEventAs(c *gin.Context, action, actorID, actorName strin
 func (a *API) totpAccounts(c *gin.Context) (*auth.SessionAuth, bool) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts, so there is no second factor to set up"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts, so there is no second factor to set up", "這個伺服器不使用帳號，所以沒有雙重驗證可設定"))
 		return nil, false
 	}
 	return accounts, true
@@ -310,6 +323,7 @@ func (a *API) noticeTOTPChange(c *gin.Context, accounts *auth.SessionAuth, what 
 		"\n\nIf this was not you, sign in, check Settings > Account, and ask an administrator to reset " +
 		"two-factor authentication (nodevas account totp-reset) if you are locked out.\n"
 	go func() {
+		defer safego.Recover("two-factor notice mail")
 		ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 		defer cancel()
 		if err := a.mailer.Send(ctx, to, "Nodevas: two-factor authentication changed", body); err != nil {

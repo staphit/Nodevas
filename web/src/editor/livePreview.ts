@@ -16,6 +16,7 @@ import {
   nodeLinkPattern,
   splitLinkTarget,
 } from "../domain/graph/nodeLink";
+import { translate } from "../i18n";
 import {
   RangeSetBuilder,
   StateField,
@@ -89,7 +90,7 @@ class TaskWidget extends WidgetType {
     box.type = "checkbox";
     box.className = "cm-live-task";
     box.checked = this.checked;
-    box.setAttribute("aria-label", this.checked ? "已完成" : "未完成");
+    box.setAttribute("aria-label", translate(this.checked ? "editor.task.done" : "editor.task.open"));
     box.addEventListener("mousedown", (event) => event.preventDefault());
     box.addEventListener("click", () => {
       // Toggling writes the markdown back, so the file stays the truth.

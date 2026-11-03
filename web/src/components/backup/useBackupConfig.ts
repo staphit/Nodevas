@@ -135,7 +135,7 @@ export function useBackupConfig() {
   const [note, setNote] = useState<Note>(null);
 
   // Two lanes, one disabled state: nothing in this dialog is safe to press
-  // while either of them is mid-flight [A-02].
+  // while either of them is mid-flight.
   const configBusy = useOperationPending(remoteScope.config());
   const bundleBusy = useOperationPending(remoteScope.bundle());
   const busy = configBusy || bundleBusy;

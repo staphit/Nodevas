@@ -4,14 +4,14 @@ package engine
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 var nodeIDPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
@@ -53,7 +53,17 @@ type Graph struct {
 	Nodes   []*Node        `yaml:"nodes" json:"nodes"`
 	Edges   []*Edge        `yaml:"edges,omitempty" json:"edges,omitempty"`
 	Flags   map[string]any `yaml:"flags,omitempty" json:"flags,omitempty"`
-	UI      *UIState       `yaml:"ui,omitempty" json:"ui,omitempty"`
+	// NodeTypes is the project's sparse type list: every custom type, plus a
+	// built-in only when its shape or colour is overridden (nodetypes.go).
+	NodeTypes []NodeTypeDef `yaml:"node_types,omitempty" json:"nodeTypes,omitempty"`
+	// AgentRoles is the project's sparse role list (roles.go); Workflow its
+	// stages (workflow.go), nil for legacy.
+	AgentRoles []AgentRoleDef `yaml:"agent_roles,omitempty" json:"agentRoles,omitempty"`
+	Workflow   *Workflow      `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	// OfficeStyle is how the project's office looks in Station
+	// (officestyle.go). Empty means the default for the layout.
+	OfficeStyle string   `yaml:"office_style,omitempty" json:"officeStyle,omitempty"`
+	UI          *UIState `yaml:"ui,omitempty" json:"ui,omitempty"`
 }
 
 // User is a project-level assignable person. ID stays stable when the display
@@ -67,7 +77,7 @@ type User struct {
 type Node struct {
 	ID       string `yaml:"id" json:"id"`
 	Title    string `yaml:"title,omitempty" json:"title,omitempty"`
-	Kind     string `yaml:"kind,omitempty" json:"kind,omitempty"`         // task|scene|choice|gate|start|end
+	Kind     string `yaml:"kind,omitempty" json:"kind,omitempty"`         // built-in type id, custom-type-*, or "" (task)
 	Priority string `yaml:"priority,omitempty" json:"priority,omitempty"` // urgent|high|medium|low
 	Assignee string `yaml:"assignee,omitempty" json:"assignee,omitempty"`
 	// Deadline is a local time "2006-01-02T15:04" or date "2006-01-02"
@@ -83,6 +93,15 @@ type Node struct {
 	// are not dependencies: nothing waits on them. Documents insert them by
 	// label with `/`, and the editor writes `[[…]]` into the markdown.
 	Links []NodeLinkRef `yaml:"links,omitempty" json:"links,omitempty"`
+	// Refs are the nodes this node uses as context — a Scene's character
+	// sheets, a chapter's setting notes. Stored on the node that uses them.
+	// They never block: readiness, requires, cycles, the critical path and
+	// Problems all ignore them.
+	Refs []string `yaml:"refs,omitempty" json:"refs,omitempty"`
+	// Acceptance is the node's acceptance criteria (acceptance.go); Workflow
+	// a Goal's stage override (workflow.go).
+	Acceptance *Acceptance `yaml:"acceptance,omitempty" json:"acceptance,omitempty"`
+	Workflow   *Workflow   `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 }
 
 // NodeLinkRef is one named reference. Project empty means this node's own
@@ -176,8 +195,9 @@ type NodeStyle struct {
 	// top/middle/bottom. Empty means the shape's default.
 	Align  string `yaml:"align,omitempty" json:"align,omitempty"`
 	VAlign string `yaml:"valign,omitempty" json:"valign,omitempty"`
-	// Shape is the drawn outline: rect (default), round, pill, ellipse,
-	// diamond or hexagon. Purely visual — layout still uses the box.
+	// Shape overrides the node type's outline: rect, round, pill, ellipse,
+	// diamond, hexagon, dashed or thick. Empty means the type's default.
+	// Purely visual — layout still uses the box.
 	Shape string `yaml:"shape,omitempty" json:"shape,omitempty"`
 }
 
@@ -293,16 +313,31 @@ func ParseGraph(data []byte) (*Graph, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&g); err != nil {
-		return nil, fmt.Errorf("graph.yaml: %w", err)
+		return nil, locale.Errorf("graph.yaml: %w", "graph.yaml：%w", err)
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("graph.yaml: multiple YAML documents are not supported")
+			return nil, locale.Errorf("graph.yaml: multiple YAML documents are not supported", "graph.yaml：不支援多個 YAML 文件")
 		}
-		return nil, fmt.Errorf("graph.yaml: %w", err)
+		return nil, locale.Errorf("graph.yaml: %w", "graph.yaml：%w", err)
 	}
+	NormalizeLogicGates(&g)
 	return &g, nil
+}
+
+// NormalizeLogicGates gives every logic gate a non-nil Inputs. A gate written
+// as "inputs:" with nothing after it, or sent without the field, decodes to
+// nil, which reaches the browser as JSON null where it iterates an array.
+func NormalizeLogicGates(g *Graph) {
+	if g == nil || g.UI == nil {
+		return
+	}
+	for i := range g.UI.LogicGates {
+		if g.UI.LogicGates[i].Inputs == nil {
+			g.UI.LogicGates[i].Inputs = []string{}
+		}
+	}
 }
 
 // MarshalGraph encodes a graph back to YAML.
@@ -318,6 +353,30 @@ func (g *Graph) NodeByID(id string) *Node {
 		}
 	}
 	return nil
+}
+
+// HasRef reports whether the node already uses id as a reference.
+func (n *Node) HasRef(id string) bool {
+	if n == nil {
+		return false
+	}
+	for _, ref := range n.Refs {
+		if ref == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ReferencedBy lists, in graph order, the nodes that use id as a reference.
+func (g *Graph) ReferencedBy(id string) []string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n != nil && n.HasRef(id) {
+			out = append(out, n.ID)
+		}
+	}
+	return out
 }
 
 // RequiresExpr parses the node's requires field. nil Expr = unconstrained.

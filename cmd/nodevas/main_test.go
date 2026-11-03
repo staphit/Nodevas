@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/auth"
+	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,12 +47,54 @@ func (writer *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
 func TestProtectHTTPTransportSetsAndClearsOrdinaryDeadlines(t *testing.T) {
 	handler := protectHTTPTransport(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	writer := &deadlineWriter{}
-	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/auth/login", nil))
+	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{}`)))
 	if len(writer.readCalls) != 2 || writer.readCalls[0].IsZero() || !writer.readCalls[1].IsZero() {
 		t.Fatalf("read deadlines = %v, want set then clear", writer.readCalls)
 	}
 	if len(writer.writeCalls) != 2 || writer.writeCalls[0].IsZero() || !writer.writeCalls[1].IsZero() {
 		t.Fatalf("write deadlines = %v, want set then clear", writer.writeCalls)
+	}
+
+	// Without a body there is nothing to read, so no read deadline; the
+	// response is still bounded.
+	writer = &deadlineWriter{}
+	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/api/projects/export", nil))
+	if len(writer.readCalls) != 0 {
+		t.Fatalf("read deadlines = %v on a request without a body, want none", writer.readCalls)
+	}
+	if len(writer.writeCalls) != 2 || writer.writeCalls[0].IsZero() || !writer.writeCalls[1].IsZero() {
+		t.Fatalf("write deadlines = %v, want set then clear", writer.writeCalls)
+	}
+}
+
+// The read deadline still does its job for a body: a client that sends part
+// of one and stalls does not hold the handler for longer than the timeout.
+func TestProtectHTTPTransportCutsOffAStalledBody(t *testing.T) {
+	shortReadTimeout(t, 200*time.Millisecond)
+	readErr := make(chan error, 1)
+	server := httptest.NewServer(protectHTTPTransport(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		_, err := io.ReadAll(request.Body)
+		readErr <- err
+	})))
+	defer server.Close()
+
+	conn, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// Ten bytes promised, three sent, and then nothing.
+	if _, err := io.WriteString(conn, "POST /api/nodes HTTP/1.1\r\nHost: 127.0.0.1\r\n"+
+		"Content-Type: application/json\r\nContent-Length: 10\r\n\r\n{\"a"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readErr:
+		if err == nil {
+			t.Fatal("a stalled body read to the end")
+		}
+	case <-time.After(10 * requestReadTimeout):
+		t.Fatal("a stalled body held the handler past the read timeout")
 	}
 }
 
@@ -71,6 +117,55 @@ func TestProtectHTTPTransportCapsLoginBody(t *testing.T) {
 	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/auth/login", body))
 	if readErr == nil {
 		t.Fatal("oversized login body was accepted")
+	}
+}
+
+// shortReadTimeout shortens requestReadTimeout for one test.
+func shortReadTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	original := requestReadTimeout
+	requestReadTimeout = timeout
+	t.Cleanup(func() { requestReadTimeout = original })
+}
+
+// A download is a request without a body, and nothing is read from it while
+// the response streams. The read deadline must not cancel it: an export over a
+// slow link takes longer than that deadline. Served over a real connection,
+// because that is where Go's server reads in the background and a deadline on
+// that read is what used to end the request.
+func TestProtectHTTPTransportLetsABodilessRequestOutliveTheReadTimeout(t *testing.T) {
+	shortReadTimeout(t, 200*time.Millisecond)
+	outlived := make(chan error, 1)
+	handler := protectHTTPTransport(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		done := time.NewTimer(5 * requestReadTimeout)
+		defer done.Stop()
+		tick := time.NewTicker(requestReadTimeout / 4)
+		defer tick.Stop()
+		for {
+			select {
+			case <-request.Context().Done():
+				outlived <- request.Context().Err()
+				return
+			case <-tick.C:
+				_, _ = writer.Write([]byte("x"))
+				http.NewResponseController(writer).Flush()
+			case <-done.C:
+				outlived <- nil
+				return
+			}
+		}
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/projects/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if err := <-outlived; err != nil {
+		t.Fatalf("a GET was cancelled while it streamed (%v): the read deadline ended a request with no body", err)
 	}
 }
 
@@ -162,29 +257,29 @@ func TestSecretEnvironmentReadsFileAndRejectsAmbiguousInput(t *testing.T) {
 // mistyped command line and a workspace on the open network, so each one is
 // asserted on its own rather than through a single "it errors" check.
 func TestValidateServeFlagsRefusesUnsafeDeployments(t *testing.T) {
-	if err := validateServeFlags("0.0.0.0", 5666, nil, "cert.pem", "key.pem", false, false); err == nil {
+	if err := validateServeFlags("0.0.0.0", 5666, nil, "cert.pem", "key.pem", false, false, false); err == nil {
 		t.Fatal("a wildcard bind without --hostname was accepted")
 	}
-	if err := validateServeFlags("0.0.0.0", 5666, []string{"nodes.example.com"}, "", "", false, false); err == nil {
+	if err := validateServeFlags("0.0.0.0", 5666, []string{"nodes.example.com"}, "", "", false, false, false); err == nil {
 		t.Fatal("a networked plaintext listener was accepted without --allow-plaintext")
 	}
-	if err := validateServeFlags("127.0.0.1", 5666, nil, "cert.pem", "", false, false); err == nil {
+	if err := validateServeFlags("127.0.0.1", 5666, nil, "cert.pem", "", false, false, false); err == nil {
 		t.Fatal("--tls-cert was accepted without --tls-key")
 	}
-	if err := validateServeFlags("127.0.0.1", 0, nil, "", "", false, false); err == nil {
+	if err := validateServeFlags("127.0.0.1", 0, nil, "", "", false, false, false); err == nil {
 		t.Fatal("port 0 was accepted")
 	}
 
 	// The safe shapes: loopback needs nothing, a named wildcard with TLS is a
 	// proper deployment, and a loopback listener behind a proxy that terminates
 	// TLS is plaintext on purpose.
-	if err := validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false); err != nil {
+	if err := validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false, false); err != nil {
 		t.Fatalf("loopback plaintext refused: %v", err)
 	}
-	if err := validateServeFlags("0.0.0.0", 443, []string{"nodes.example.com"}, "cert.pem", "key.pem", false, false); err != nil {
+	if err := validateServeFlags("0.0.0.0", 443, []string{"nodes.example.com"}, "cert.pem", "key.pem", false, false, false); err != nil {
 		t.Fatalf("a named TLS deployment was refused: %v", err)
 	}
-	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodes.example.com"}, "", "", true, false); err != nil {
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodes.example.com"}, "", "", true, false, false); err != nil {
 		t.Fatalf("a same-host reverse proxy deployment was refused: %v", err)
 	}
 }
@@ -217,8 +312,93 @@ func TestWildcardAndLoopbackClassification(t *testing.T) {
 	if !isWildcardHost("") || !isWildcardHost("0.0.0.0") || !isWildcardHost("::") || isWildcardHost("127.0.0.1") {
 		t.Fatal("wildcard classification is unsafe")
 	}
-	if !isRemoteDeployment("127.0.0.1", true) || isRemoteDeployment("127.0.0.1", false) {
+	if !isRemoteDeployment("127.0.0.1", true, nil, false) || isRemoteDeployment("127.0.0.1", false, nil, false) {
 		t.Fatal("same-host reverse proxy did not force remote authentication")
+	}
+}
+
+// A loopback listener is only private while nothing on this machine forwards
+// to it. A public --hostname, or Cloudflare Access in front, says something
+// does: a tunnel or a proxy brings other people's requests in over loopback,
+// and a hub without accounts would take each of them for the person at the
+// keyboard.
+func TestALoopbackHubReachedFromElsewhereIsRemote(t *testing.T) {
+	if !isRemoteDeployment("127.0.0.1", false, []string{"nodevas.example.com"}, false) {
+		t.Error("a loopback hub answering on a public --hostname was classed as local")
+	}
+	if !isRemoteDeployment("127.0.0.1", false, []string{"localhost", "nodevas.example.com"}, false) {
+		t.Error("a public name after a loopback one was not noticed")
+	}
+	if !isRemoteDeployment("127.0.0.1", false, nil, true) {
+		t.Error("a loopback hub behind Cloudflare Access was classed as local")
+	}
+	// Loopback names add nobody.
+	if isRemoteDeployment("127.0.0.1", false, []string{"localhost", "127.0.0.1", "::1"}, false) {
+		t.Error("loopback --hostname values made a standalone hub remote")
+	}
+}
+
+// Without --behind-proxy such a hub would not trust the proxy's scheme
+// header and would get no accounts, so serve refuses it and says what to pass.
+func TestValidateServeFlagsRefusesAForwardedLoopbackHubWithoutAProxy(t *testing.T) {
+	err := validateServeFlags("127.0.0.1", 5666, []string{"nodevas.example.com"}, "", "", false, false, false)
+	if err == nil {
+		t.Fatal("a public --hostname on a loopback listener was accepted without --behind-proxy")
+	}
+	if !strings.Contains(err.Error(), "--behind-proxy") {
+		t.Errorf("the refusal %q does not say to pass --behind-proxy", err)
+	}
+	err = validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false, true)
+	if err == nil {
+		t.Fatal("Cloudflare Access on a loopback listener was accepted without --behind-proxy")
+	}
+	if !strings.Contains(err.Error(), "--behind-proxy") {
+		t.Errorf("the refusal %q does not say to pass --behind-proxy", err)
+	}
+
+	// The shapes that stay: behind the proxy it names, and loopback names on
+	// a standalone hub.
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodevas.example.com"}, "", "", true, false, true); err != nil {
+		t.Fatalf("a same-host proxy with Access was refused: %v", err)
+	}
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"localhost"}, "", "", false, false, false); err != nil {
+		t.Fatalf("a loopback --hostname on a standalone hub was refused: %v", err)
+	}
+}
+
+// serve itself applies the refusal: it ends before it opens the workspace's
+// database, which this environment does not have.
+func TestServeRefusesAPublicHostnameOnLoopbackWithoutAProxy(t *testing.T) {
+	root := t.TempDir()
+	out, code := runNodevas(t, isolatedEnv(t, "NODEVAS_REQUIRE_DATABASE_URL=1", db.URLEnv+"=", db.URLFileEnv+"="), "",
+		"serve", "--project", root, "--port", fmt.Sprint(freePort(t)), "--no-runner", "--hostname", "nodevas.example.com")
+	if code == 0 {
+		t.Fatalf("serve exited 0:\n%s", out)
+	}
+	if !strings.Contains(out, "--behind-proxy") {
+		t.Fatalf("serve went on past a public --hostname on loopback without --behind-proxy:\n%s", out)
+	}
+}
+
+// The nodevas.yaml serve finds in the workspace is workspace content: serve
+// refuses one that sets a public hostname, and points to --config. The same
+// file named with NODEVAS_CONFIG is the operator's and is applied.
+func TestServeRefusesTrustSettingsFromTheWorkspaceConfig(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "nodevas.yaml")
+	if err := os.WriteFile(file, []byte("hostname: rebind.attacker.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"serve", "--project", root, "--port", fmt.Sprint(freePort(t)), "--no-runner"}
+	noDB := []string{"NODEVAS_REQUIRE_DATABASE_URL=1", db.URLEnv + "=", db.URLFileEnv + "="}
+	out, code := runNodevas(t, isolatedEnv(t, append(noDB, "NODEVAS_CONFIG=")...), "", args...)
+	if code == 0 || !strings.Contains(out, "hostname") || !strings.Contains(out, "--config") {
+		t.Fatalf("serve took hostname from the workspace nodevas.yaml (exit %d):\n%s", code, out)
+	}
+	out, code = runNodevas(t, isolatedEnv(t, append(noDB, "NODEVAS_CONFIG="+file)...), "", args...)
+	// Applied, the public name on loopback now needs --behind-proxy.
+	if code == 0 || !strings.Contains(out, "--behind-proxy") {
+		t.Fatalf("serve ignored the hostname in the file NODEVAS_CONFIG named (exit %d):\n%s", code, out)
 	}
 }
 
@@ -242,11 +422,7 @@ func TestProtectHTTPTransportCapsEverySignInBody(t *testing.T) {
 // so its shape is pinned: name, role and address, tab-separated, with the
 // address empty rather than missing for an account that cannot sign in.
 func TestUserListPrintsNameRoleAndEmail(t *testing.T) {
-	users, err := auth.NewUserStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = users.Close() })
+	users := auth.NewUserStoreDB(testpg.New(t))
 	ctx := context.Background()
 	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "Ann@Example.test"); err != nil {
 		t.Fatal(err)

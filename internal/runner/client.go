@@ -45,6 +45,10 @@ type Client struct {
 	// http.DefaultClient for the socket and a client without a timeout for
 	// the proxy.
 	HTTPClient *http.Client
+	// ServeManaged is true for the runner `nodevas serve` started for itself
+	// (NODEVAS_RUNNER_UNDER_SERVE): serve holds the hub's port for as long
+	// as this runner runs.
+	ServeManaged bool
 
 	// Accepter asks whether to take an offer the auto-accept policy does not
 	// cover; nil declines those.
@@ -56,6 +60,10 @@ type Client struct {
 	FlushInterval time.Duration
 	// RunTimeout overrides the config's run timeout; tests shorten it.
 	RunTimeout time.Duration
+	// runTimer starts the timer that ends a run at its timeout; nil means
+	// time.NewTimer. Tests fire it themselves once the run is where they
+	// want it to time out, instead of racing a short timeout.
+	runTimer func(time.Duration) (expired <-chan time.Time, stop func() bool)
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
@@ -90,6 +98,9 @@ func (c *Client) Run(ctx context.Context) error {
 		return err
 	}
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
+		return err
+	}
+	if err := c.Config.PlainLocalHubRefusal(c.ServeManaged); err != nil {
 		return err
 	}
 	if c.Config.LegacyAutoAccept() {
@@ -217,6 +228,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	// Copilot model calls on this connection (llm.go); stopped with it.
 	llm := c.newLLMSession(ctx, ownerID)
 	defer llm.stop()
+	// Repo browsing answers (repobrowse.go) go out on this connection.
+	repoOut := make(chan runnerwire.Envelope, 8)
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
@@ -266,8 +279,23 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				llm.cancel(msg.LLMID)
 			case runnerwire.TypeDecideRequest:
 				llm.decide(msg.Decide)
+			case runnerwire.TypeRepoRequest:
+				if msg.Repo != nil {
+					req := *msg.Repo
+					go func() {
+						done := BrowseRepo(ctx, c.Config, ownerID, req)
+						select {
+						case repoOut <- runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &done}:
+						case <-ctx.Done():
+						}
+					}()
+				}
 			}
 		case env := <-llm.out:
+			if err := c.write(ctx, conn, env); err != nil {
+				return true, err
+			}
+		case env := <-repoOut:
 			if err := c.write(ctx, conn, env); err != nil {
 				return true, err
 			}
@@ -392,7 +420,9 @@ func (c *Client) logf(format string, args ...any) {
 	if c.Config.Name != "" {
 		prefix = "runner " + c.Config.Name + ": "
 	}
-	fmt.Fprintf(c.Log, prefix+format+"\n", args...)
+	// One line, whatever it quotes: run ids, names and errors come from the
+	// hub or an agent, and reach the terminal next to the accept question.
+	fmt.Fprintln(c.Log, prefix+terminalText(fmt.Sprintf(format, args...)))
 }
 
 func (c *Client) pingInterval() time.Duration {
@@ -414,6 +444,15 @@ func (c *Client) flushInterval() time.Duration {
 		return c.FlushInterval
 	}
 	return defaultFlush
+}
+
+// startRunTimer starts the timer that ends a run after timeout.
+func (c *Client) startRunTimer(timeout time.Duration) (<-chan time.Time, func() bool) {
+	if c.runTimer != nil {
+		return c.runTimer(timeout)
+	}
+	timer := time.NewTimer(timeout)
+	return timer.C, timer.Stop
 }
 
 func (c *Client) runTimeout(kind string) time.Duration {

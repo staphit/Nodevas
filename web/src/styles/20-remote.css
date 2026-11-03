@@ -12,17 +12,17 @@
   flex-direction: column;
   gap: 8px;
   padding: 0 18px 16px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .stepup-body label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 .stepup-text {
   margin: 0;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.5;
 }
 /* The field and its resend button are one step, as on the sign-in form. */
@@ -53,7 +53,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .stepup-row button:disabled,
@@ -63,7 +63,7 @@
 }
 .stepup-code {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   letter-spacing: 0.3em;
 }
 .stepup-done {
@@ -78,7 +78,7 @@
 .stepup-error {
   margin: 0;
   color: var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* Dispatch dialog: what the runner will do with this run. */
@@ -161,7 +161,7 @@
 .runner-policy dt {
   min-width: 72px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .runner-policy dd {
   min-width: 0;
@@ -243,17 +243,17 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .session-top time {
   flex: 0 0 auto;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .session-files > summary {
   color: var(--text-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .session-files ul {
   display: flex;
@@ -270,26 +270,26 @@
 .session-files li {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .session-none {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .session-diff {
   align-self: flex-start;
 }
 .session-snapshot-note {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 
 @media (max-width: 640px) {
   .stepup-row input {
     /* 16px keeps iOS from zooming the page on focus. */
-    font-size: 16px;
+    font-size: calc(16px * var(--font-scale, 1));
   }
   .stepup-row input,
   .stepup-row button,

@@ -191,7 +191,7 @@ describe("redo", () => {
     expect(api.restoreTrash).toHaveBeenCalledWith("trash/new-1.md");
     // And the undo stack now holds the creation again, one gesture from gone.
     expect(useApp.getState().canUndo).toBe(true);
-    expect(useApp.getState().undoLabel).toBe("新增節點");
+    expect(useApp.getState().undoLabel).toBe("Add node");
   });
 
   // README rule (redo) 2: an edit after an undo branches the history. The redo

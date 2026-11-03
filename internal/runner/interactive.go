@@ -48,9 +48,16 @@ const (
 // capabilities is the hello's Capabilities: headless always, interactive when
 // this machine has a pseudo-terminal and the owner has not turned it off.
 func capabilities(cfg *Config) []string {
-	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan}
+	// Roles, verify and judge (agent roles): the runner understands role
+	// jobs and their toolsets, runs a repo's test command for verify jobs
+	// (only where the owner configured one; Repo.Verify says where), and
+	// runs judge jobs.
+	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan, runnerwire.CapRoles, runnerwire.CapVerify, runnerwire.CapJudge}
 	if (cfg == nil || cfg.InteractiveOn()) && ptySupported() {
 		caps = append(caps, runnerwire.CapInteractive)
+	}
+	if cfg.RepoBrowseOn() {
+		caps = append(caps, runnerwire.CapRepoBrowse)
 	}
 	if _, _, reason := cfg.CopilotLLM(); reason == "" {
 		caps = append(caps, runnerwire.CapLLM)
@@ -108,7 +115,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
-	tmp, err := os.MkdirTemp("", "nodevas-run-")
+	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail("could not make a temporary directory: %v", err)
 	}
@@ -118,13 +125,18 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		return fail("cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
+	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+	if err != nil {
+		return fail("could not write the MCP server's address: %v", err)
+	}
+
 	cfg := j.c.Config
 	cmd, err := ia.InteractiveCommand(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
+		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(serverFile, job, r.repo)},
 		PermissionMode: cfg.PermissionModeFor(job.Agent),
 		AllowedTools:   cfg.AllowedTools,
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
@@ -146,8 +158,10 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 			Text: "view only: the runner's owner did not allow typing into this terminal from the hub"})
 	}
+	// modeText, not permissionText: the person at the terminal answers the
+	// CLI's permission prompts, which are never relayed here.
 	text := fmt.Sprintf("started %s interactively in a %dx%d terminal (model %s, %s)",
-		job.Agent, initialCols, initialRows, orDash(job.Model), permissionText(cfg, job.Agent))
+		job.Agent, initialCols, initialRows, orDash(job.Model), modeText(cfg, job.Agent))
 	if job.Agent == "codex" && cfg.CodexIgnoreUserConfig {
 		text += "; codexIgnoreUserConfig does not apply to the interactive CLI"
 	}
@@ -171,8 +185,8 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		done <- err
 	}()
 	timeout := j.c.runTimeout(job.Kind)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	expired, stopTimer := j.c.startRunTimer(timeout)
+	defer stopTimer()
 	var waitErr error
 	stopped := ""
 	select {
@@ -181,7 +195,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		stopped = "cancel"
 		term.Kill()
 		waitErr = <-done
-	case <-timer.C:
+	case <-expired:
 		stopped = "timeout"
 		term.Kill()
 		waitErr = <-done

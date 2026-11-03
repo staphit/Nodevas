@@ -8,7 +8,7 @@ import (
 
 	"nodevas/internal/agents"
 	"nodevas/internal/auth"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 	"nodevas/internal/usage"
 )
 
@@ -32,7 +32,7 @@ func TestSessionUsageBelongsToItsActor(t *testing.T) {
 	})
 	api := New(nil, agents.NewHub(nil, nil))
 	var notified []string
-	api.UseUsage(usage.NewStore(dbtest.Open(t)), func(key string) { notified = append(notified, key) })
+	api.UseUsage(usage.NewStore(testpg.New(t)), func(key string) { notified = append(notified, key) })
 	api.Register(router.Group("/api"))
 
 	heartbeat(t, router, "alice-agent", "claude:a1", "alice-bot")

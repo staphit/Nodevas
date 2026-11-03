@@ -41,6 +41,40 @@ func (c *Client) CreateNode(ctx context.Context, node NewNode) (string, error) {
 	return response.ID, nil
 }
 
+// SubgraphResult is what create_subgraph's server call answers: the new ids by
+// the caller's keys, and what was made.
+type SubgraphResult struct {
+	IDs          map[string]string       `json:"ids"`
+	Created      []store.SubgraphCreated `json:"created"`
+	Rev          string                  `json:"rev"`
+	Issues       []engine.Issue          `json:"issues"`
+	Dependencies int                     `json:"dependencies"`
+	References   int                     `json:"references"`
+}
+
+// CreateSubgraph creates many nodes and their wiring in one all-or-nothing
+// call.
+func (c *Client) CreateSubgraph(ctx context.Context, spec store.SubgraphSpec) (*SubgraphResult, error) {
+	result := &SubgraphResult{}
+	if err := c.post(ctx, "/api/graph/subgraph", nil, spec, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// SetAcceptance replaces a node's acceptance criteria and returns what the
+// server stored (ids filled in, lock and attribution its own).
+func (c *Client) SetAcceptance(ctx context.Context, id string, items []engine.AcceptanceItem, baseRev string) (*engine.Acceptance, error) {
+	var response struct {
+		Acceptance *engine.Acceptance `json:"acceptance"`
+	}
+	body := map[string]any{"items": items, "baseRev": baseRev}
+	if err := c.post(ctx, "/api/nodes/"+url.PathEscape(id)+"/acceptance", nil, body, &response); err != nil {
+		return nil, err
+	}
+	return response.Acceptance, nil
+}
+
 // WriteNodeBody replaces a node's markdown, refusing if somebody changed it
 // since baseRev.
 func (c *Client) WriteNodeBody(ctx context.Context, id, content, baseRev string) (string, error) {
@@ -73,6 +107,8 @@ type OutlineNode struct {
 	Status   string `json:"status"`
 	Priority string `json:"priority,omitempty"`
 	Assignee string `json:"assignee,omitempty"`
+	// Refs are the notes this node uses as context; they never block.
+	Refs []string `json:"refs,omitempty"`
 }
 
 // OutlineEdge is one dependency.
@@ -83,11 +119,23 @@ type OutlineEdge struct {
 	Relation string `json:"relation,omitempty"`
 }
 
+// OutlineNodeType is one node type the board offers, as a planner needs it.
+type OutlineNodeType struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	AgentMode  string `json:"agentMode"`
+	Completion string `json:"completion"`
+}
+
 // Outline is the graph with everything visual removed.
 type Outline struct {
-	Nodes []OutlineNode `json:"nodes"`
-	Edges []OutlineEdge `json:"edges"`
-	Total int           `json:"total"`
+	// Layout is the board's layout (workflow or story); NodeTypes are the
+	// types a node's kind may name, built-in and the project's own.
+	Layout    string            `json:"layout,omitempty"`
+	NodeTypes []OutlineNodeType `json:"nodeTypes,omitempty"`
+	Nodes     []OutlineNode     `json:"nodes"`
+	Edges     []OutlineEdge     `json:"edges"`
+	Total     int               `json:"total"`
 	// Cursor continues the node listing; edges connect nodes on this page only.
 	Cursor  string `json:"cursor,omitempty"`
 	Summary string `json:"summary,omitempty"`
@@ -110,7 +158,13 @@ func (c *Client) GraphOutline(ctx context.Context, filter OutlineFilter) (*Outli
 	if err != nil {
 		return nil, err
 	}
-	outline := &Outline{}
+	outline := &Outline{Layout: snapshot.Layout}
+	for _, nodeType := range snapshot.NodeTypes {
+		outline.NodeTypes = append(outline.NodeTypes, OutlineNodeType{
+			ID: nodeType.ID, Label: nodeType.Label,
+			AgentMode: string(nodeType.AgentMode), Completion: string(nodeType.Completion),
+		})
+	}
 	known := map[string]bool{}
 	for _, node := range snapshot.Graph.Nodes {
 		status := string(statusOrReady(snapshot.Statuses, node.ID))
@@ -125,6 +179,7 @@ func (c *Client) GraphOutline(ctx context.Context, filter OutlineFilter) (*Outli
 			Status:   status,
 			Priority: node.Priority,
 			Assignee: node.Assignee,
+			Refs:     node.Refs,
 		})
 	}
 	sort.Slice(outline.Nodes, func(a, b int) bool {

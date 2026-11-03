@@ -12,18 +12,30 @@ on:
         required: true
         default: "testflight-v1.0"
 
+# build-windows runs npm, esbuild's installer, vite, go and electron-builder,
+# and any step of a job can read that job's token from the runner's memory
+# (steps run as an administrator), so its token only reads.
+# publish-windows, the one job whose token can write, runs none of that
+# code: it checks the tag, downloads what build-windows made and uploads it
+# to the release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 35
     # Protected environment: the user's required reviewer approves a release
-    # before the job (and its contents:write token) runs.
+    # before it is built. publish-windows only runs after this job, so the
+    # same approval covers it.
     environment: release
-    # The token is handed only to the step that publishes; builds and
-    # dependency installs never see it.
+    # The tag and commit the provenance step verified, before any dependency
+    # code ran. publish-windows still works the tag out again from the event.
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      target_sha: ${{ steps.release.outputs.target_sha }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      release_label: ${{ steps.release.outputs.release_label }}
     env:
       GH_OWNER: ${{ github.repository_owner }}
       ELECTRON_REPO_NAME: ${{ github.event.repository.name }}
@@ -39,6 +51,8 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
           fetch-tags: true
+          # Nothing in this job needs the token in the clone's git config.
+          persist-credentials: false
 
       - name: Verify release provenance
         id: release
@@ -104,8 +118,8 @@ jobs:
       - name: Build web interface
         shell: bash
         # No dependency runs an install script (a compromised package's
-        # postinstall would run with this job's token); esbuild's, the one the
-        # build needs, runs explicitly from the lockfile's own copy.
+        # postinstall would run inside the release build); esbuild's, the one
+        # the build needs, runs explicitly from the lockfile's own copy.
         run: |
           npm ci --ignore-scripts --prefix web
           node web/node_modules/esbuild/install.js
@@ -121,6 +135,17 @@ jobs:
           mkdir -p desktop/resources/bin
           go build -tags nomsgpack -trimpath -ldflags="-s -w" \
             -o desktop/resources/bin/nodevas.exe ./cmd/nodevas
+
+      # The embedded PostgreSQL ships inside the installer, so a desktop user
+      # never downloads it. The same Go code serve uses fetches the pinned
+      # archive, refuses it unless its SHA-256 matches the manifest compiled
+      # into the binary, extracts the allowlist and stamps it.
+      - name: Bundle the pinned PostgreSQL
+        shell: bash
+        run: |
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target windows-amd64 --out desktop/resources/pg/win32-x64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/win32-x64 windows-amd64
 
       # electron-builder downloads the Electron it packages itself, and the
       # nsis/zip targets need no package's install script.
@@ -140,6 +165,8 @@ jobs:
           test -n "${zip_path}"
           unpacked="desktop/dist/win-unpacked/resources/bin/nodevas.exe"
           test -f "${unpacked}"
+          node desktop/scripts/verify-pg-bundle.mjs desktop/dist/win-unpacked/resources/pg/win32-x64 windows-amd64
+          test -f desktop/dist/win-unpacked/resources/pg/win32-x64/bin/postgres.exe
           echo "::warning::Installer is unsigned. Configure Windows code signing for SmartScreen-friendly releases."
 
       - name: Create release checksums
@@ -149,18 +176,64 @@ jobs:
           sha256sum *.exe *.zip > SHA256SUMS-windows.txt
           cat SHA256SUMS-windows.txt
 
-      # Release assets are uploaded directly by gh below. Keeping a second
-      # copy as an Actions artifact wastes the account's small artifact quota.
+      # Kept for one day: long enough for publish-windows, short enough not
+      # to fill the account's small artifact quota.
+      - name: Hand the release files to publish-windows
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+            desktop/dist/*.blockmap
+            desktop/dist/*.yml
+            desktop/dist/SHA256SUMS-windows.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-windows:
+    # Runs no project or dependency code and checks nothing out: the token
+    # that can write reaches only the tag checks, git ls-remote and gh.
+    # build-windows's approval in the release environment covers this job.
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-release
+          path: dist
+
       - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_TARGET_SHA: ${{ steps.release.outputs.target_sha }}
-          RELEASE_PRERELEASE: ${{ steps.release.outputs.prerelease }}
-          RELEASE_LABEL: ${{ steps.release.outputs.release_label }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.build-windows.outputs.tag }}
+          RELEASE_TARGET_SHA: ${{ needs.build-windows.outputs.target_sha }}
+          RELEASE_PRERELEASE: ${{ needs.build-windows.outputs.prerelease }}
+          RELEASE_LABEL: ${{ needs.build-windows.outputs.release_label }}
         run: |
-          tag="${RELEASE_TAG}"
+          # The tag is worked out again from the event: everything build-windows
+          # hands over comes from a job that ran dependency code.
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${INPUT_TAG}"
+          fi
+          if [[ ! "${tag}" =~ ^(testflight-)?v[0-9.]+$ || "${tag}" != "${RELEASE_TAG}" ]]; then
+            echo "refusing to publish: event tag '${tag}' is not the built tag '${RELEASE_TAG}'" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_REF}" != "refs/tags/${tag}" ]]; then
+            echo "refusing to publish: event ref '${EVENT_REF}' does not identify 'refs/tags/${tag}'" >&2
+            exit 1
+          fi
           resolve_remote_tag_commit() {
             local release_tag="$1"
             local release_ref="refs/tags/${release_tag}"
@@ -176,7 +249,8 @@ jobs:
             # Capture first so ls-remote's exit status cannot be hidden by a
             # pipeline or process substitution. Request only the exact tag and
             # its annotated-tag peel; branch names and tag prefixes never count.
-            if ! remote_rows="$(git ls-remote --exit-code --tags origin \
+            if ! remote_rows="$(git ls-remote --exit-code --tags \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
               "${release_ref}" "${release_ref}^{}")"; then
               printf 'refusing to publish: remote tag %q is missing or unreadable\n' \
                 "${release_ref}" >&2
@@ -228,15 +302,19 @@ jobs:
             echo "refusing to publish: remote tag commit (${remote_release_sha}) does not match verified release SHA (${RELEASE_TARGET_SHA})" >&2
             exit 1
           fi
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_SHA}" != "${remote_release_sha}" ]]; then
+            echo "refusing to publish: event SHA '${EVENT_SHA}' does not match remote tag commit '${remote_release_sha}'" >&2
+            exit 1
+          fi
 
           prerelease_args=()
           if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
             prerelease_args+=(--prerelease)
           fi
           notes="Nodevas ${RELEASE_LABEL} Windows 安裝檔。"
-          files=(desktop/dist/*.exe desktop/dist/*.zip desktop/dist/*.blockmap desktop/dist/SHA256SUMS-windows.txt)
+          files=(dist/*.exe dist/*.zip dist/*.blockmap dist/SHA256SUMS-windows.txt)
           shopt -s nullglob
-          yml_files=(desktop/dist/*.yml)
+          yml_files=(dist/*.yml)
           shopt -u nullglob
           files+=("${yml_files[@]}")
           if existing_tag="$(gh release view "${tag}" --json tagName --jq '.tagName' 2>/dev/null)"; then

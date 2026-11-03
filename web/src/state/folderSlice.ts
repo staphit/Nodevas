@@ -1,5 +1,5 @@
 /**
- * Node folder slice [B-06].
+ * Node folder slice.
  *
  * Folders organise the explorer, nothing else. The server moves files inside
  * nodes/ and never opens graph.yaml, so this slice deliberately holds no graph

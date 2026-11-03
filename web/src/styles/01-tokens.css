@@ -100,14 +100,28 @@ html[data-theme="dark"] {
   color-scheme: dark;
 }
 
+/* A control takes its font size from the user agent (13.33px), not its
+   parent; this one follows Settings › Text size. A class that sizes its own
+   control still wins. */
+button,
+input,
+select,
+textarea {
+  font-size: calc(13px * var(--font-scale, 1));
+}
 button {
   font-family: inherit;
   color: inherit;
   transition: background 160ms var(--ease-out), color 160ms var(--ease-out),
-    border-color 160ms var(--ease-out), transform 120ms var(--ease-out);
+    border-color 160ms var(--ease-out), transform 120ms var(--ease-out),
+    scale 120ms var(--ease-out);
 }
+/* The press shrinks by the scale property, which composes with whatever
+   transform places a button (a centring translate, say) instead of replacing
+   it: a transform here would drop that placement mid-click and move the
+   button out from under the pointer. */
 button:active {
-  transform: scale(0.97);
+  scale: 0.97;
 }
 button:focus-visible,
 input:focus-visible,
@@ -120,7 +134,7 @@ select:focus-visible {
 }
 kbd {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
@@ -136,7 +150,7 @@ kbd {
   color: var(--text);
   border-radius: 6px;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .icon-btn:hover {

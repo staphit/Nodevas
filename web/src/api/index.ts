@@ -17,10 +17,10 @@ import { lifecycleApi } from "./lifecycle";
 import { membersApi } from "./members";
 import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
-import { packsApi } from "./packs";
 import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
+import { stationApi } from "./station";
 import { usageApi } from "./usage";
 import { workspaceApi } from "./workspace";
 
@@ -28,13 +28,14 @@ export {
   AuthError,
   ConflictError,
   getProjectOverride,
+  isNetworkFailure,
+  NetworkError,
   onUnauthorized,
   RequestError,
   setProjectOverride,
   UnauthorizedError,
 } from "./http";
 export { ApiShapeError } from "./verify";
-export type { ViewPack, ViewPackLayout } from "./packs";
 export type { GraphOp, GraphOpsResponse, GraphResponse } from "./graph";
 export type {
   NodePageInfo,
@@ -61,6 +62,7 @@ export type {
 } from "./auth";
 export {
   COPILOT_MODES,
+  CopilotBusyError,
   NdjsonParser,
   parseTurnEventLine,
   readTurnEvents,
@@ -117,6 +119,10 @@ export type {
 } from "./remote";
 export type {
   AgentAsk,
+  AgentAskAnswerRequest,
+  AgentAskDecision,
+  AgentAskKind,
+  AgentAskStatus,
   AgentFileUpload,
   AgentInbound,
   AgentMessage,
@@ -142,6 +148,7 @@ export {
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
   runCancellable,
+  runWaitsForLimit,
   runFinal,
 } from "./runs";
 export type {
@@ -152,6 +159,8 @@ export type {
   MergeStatus,
   PRState,
   Run,
+  RunAsk,
+  RunAsksResponse,
   RunBudget,
   RunBudgetLimit,
   RunBudgetStatus,
@@ -178,6 +187,11 @@ export type {
   RoutingConfig,
   RunKind,
   RunPipeline,
+  CheckResult,
+  GuardReport,
+  RoleSettings,
+  RoleSettingsResponse,
+  VerifyResult,
 } from "./runs";
 export {
   FAILURE_KINDS,
@@ -185,6 +199,7 @@ export {
   MAX_PIPELINE_ROUNDS,
   MAX_ROUTE_RULES,
   pipelineEnded,
+  ROUTE_AUTO,
   ROUTE_MATCHES,
 } from "./runs";
 export { MAX_USAGE_DAYS, USAGE_RANGES } from "./usage";
@@ -240,6 +255,16 @@ export type {
   PauseAllRequest,
   PauseAllResponse,
 } from "./control";
+export type {
+  BuildingAsk,
+  BuildingProject,
+  BuildingResponse,
+  BuildingReview,
+  BuildingRun,
+  BuildingSession,
+  BuildingWaiting,
+  WaitingRunLike,
+} from "./station";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -272,8 +297,8 @@ export const api = {
   ...usageApi,
   ...membersApi,
   ...accountsApi,
-  ...packsApi,
   ...autopilotApi,
   ...planApi,
   ...controlApi,
+  ...stationApi,
 };

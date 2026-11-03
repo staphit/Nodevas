@@ -204,6 +204,40 @@ func TestGraphOpsRelationRemovalLeavesRequiresAlone(t *testing.T) {
 	}
 }
 
+// A hand-written graph.yaml can state a dependency only in `requires`, with
+// no wire drawn for it. The board draws the wire from the expression, so
+// removing that wire must remove the condition it stands for; otherwise the
+// prerequisite could never be taken away from the board.
+func TestGraphOpsRemoveEdgePrunesRequiresOnlyDependency(t *testing.T) {
+	_, st := opsTestServer(t)
+	graph, rev, err := st.LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph.Nodes = append(graph.Nodes, &engine.Node{ID: "gamma", Title: "Gamma"})
+	graph.NodeByID("beta").Requires = "alpha and gamma"
+	graph.Edges = []*engine.Edge{{From: "gamma", To: "beta"}}
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
+		Kind: "remove-edge", From: "alpha", To: "beta",
+	}}); err != nil {
+		t.Fatalf("remove requires-only dependency: %v", err)
+	}
+	graph, _, err = st.LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requires := graph.NodeByID("beta").Requires; requires != "gamma" {
+		t.Fatalf("beta requires = %q, want gamma", requires)
+	}
+	if len(graph.Edges) != 1 || graph.Edges[0].From != "gamma" {
+		t.Fatalf("edges = %+v, want the gamma wire kept", graph.Edges)
+	}
+}
+
 func TestGraphOpsRejectDirectChangesToGateOwnedEdges(t *testing.T) {
 	_, st := opsTestServer(t)
 	graph, rev, err := st.LoadGraph()

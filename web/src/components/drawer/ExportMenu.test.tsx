@@ -39,7 +39,7 @@ describe("ExportMenu", () => {
 
     await user.click(screen.getByRole("radio", { name: /Word/ }));
     expect(exportMocks.downloadExport).not.toHaveBeenCalled();
-    expect(screen.getByText(/這一頁「Alpha › Notes」匯出為 Word \(\.docx\)/)).toBeInTheDocument();
+    expect(screen.getByText(/這一頁「Alpha › Notes」匯出為 Word（\.docx）/)).toBeInTheDocument();
 
     await user.click(confirm);
     expect(exportMocks.downloadExport).toHaveBeenCalledWith({

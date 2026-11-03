@@ -377,7 +377,7 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 			ID string `json:"id"`
 		}
 		err := env.do(ctx, http.MethodPost, "/api/nodes", map[string]any{
-			"title": title, "kind": "task", "tags": []string{"goal"}, "body": in.Requirement,
+			"title": title, "kind": "goal", "tags": []string{"goal"}, "body": in.Requirement,
 		}, &node)
 		if err != nil {
 			return toolError("Could not create the goal node: %v", err)

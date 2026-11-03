@@ -2,11 +2,10 @@ package runs
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -16,15 +15,25 @@ import (
 
 // ErrPrecondition is a request the run's current state does not allow, such
 // as approving a merge while CI is red. Its message is meant for people.
-var ErrPrecondition = errors.New("precondition failed")
+var ErrPrecondition = locale.Errorf("precondition failed", "前提條件不符")
 
-type preconditionError struct{ msg string }
+type preconditionError struct{ msg *locale.Message }
 
-func (e *preconditionError) Error() string        { return e.msg }
+func (e *preconditionError) Error() string        { return e.msg.Error() }
 func (e *preconditionError) Is(target error) bool { return target == ErrPrecondition }
 
-// Precondition is an ErrPrecondition whose message is msg alone.
-func Precondition(msg string) error { return &preconditionError{msg: msg} }
+// Unwrap is the message in both languages, for the reader of a response.
+func (e *preconditionError) Unwrap() error { return e.msg }
+
+// Precondition is an ErrPrecondition whose message is msg alone: one of the
+// Msg refusals below, which a Chinese reader reads in Chinese.
+func Precondition(msg string) error {
+	chinese, ok := preconditionChinese[msg]
+	if !ok {
+		chinese = msg
+	}
+	return &preconditionError{msg: locale.Say(strings.ReplaceAll(msg, "%", "%%"), strings.ReplaceAll(chinese, "%", "%%"))}
+}
 
 // Refusals of a merge approval, as the API returns them.
 const (
@@ -35,6 +44,15 @@ const (
 	MsgMergePending  = "a merge for this run is already waiting for its runner"
 	ReasonMergeStale = "the runner did not answer in time"
 )
+
+// preconditionChinese is each Msg refusal for a Chinese reader.
+var preconditionChinese = map[string]string{
+	MsgNoOpenPR:     "沒有開啟中的 PR",
+	MsgCINotGreen:   "CI 尚未通過",
+	MsgHeadMoved:    "你看過之後 PR 有變更；請重新載入",
+	MsgNoHead:       "runner 還沒回報 PR 的 head 提交；請更新它的 nodevas",
+	MsgMergePending: "這次執行已有一個合併在等它的 runner",
+}
 
 // MergeTTL is runnerwire.MergeRequestTTLSeconds as a duration.
 const MergeTTL = time.Duration(runnerwire.MergeRequestTTLSeconds) * time.Second
@@ -183,7 +201,7 @@ func (s *Store) ExpireMerges(ctx context.Context) ([]string, error) {
 // approval waits per run; a second is refused with MsgMergePending.
 func (s *Store) CreateMerge(ctx context.Context, runID, headSHA, byID, byName string) (runnerwire.MergeRequest, error) {
 	if runID == "" || headSHA == "" || byID == "" {
-		return runnerwire.MergeRequest{}, fmt.Errorf("%w: missing field", ErrInvalid)
+		return runnerwire.MergeRequest{}, locale.Errorf("%w: missing field", "%w：缺少欄位", ErrInvalid)
 	}
 	// A stale approval must not block a fresh one.
 	if _, err := s.ExpireMerges(ctx); err != nil {
@@ -262,7 +280,7 @@ WHERE id = ? AND status IN (?, ?)`,
 	if n, err := result.RowsAffected(); err != nil {
 		return Record{}, runnerwire.MergeRequest{}, err
 	} else if n == 0 {
-		return r, m, fmt.Errorf("%w: merge %s is already %s", ErrTransition, m.ID, m.Status)
+		return r, m, locale.Errorf("%w: merge %s is already %s", "%w：合併 %s 已經是 %s", ErrTransition, m.ID, m.Status)
 	}
 	r, err = s.Get(ctx, m.RunID)
 	if err != nil {

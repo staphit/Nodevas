@@ -245,10 +245,17 @@ function FileView({
 }) {
   const { t } = useI18n();
   let body: React.ReactNode;
-  if (changes.patchTruncated || !changes.patch) {
+  // The hub says why a patch is missing: history retention cleared it
+  // (patchPruned) or it was too big to keep (patchTruncated).
+  if (changes.patchPruned || changes.patchTruncated) {
+    const why = changes.patchPruned
+      ? t("diff.cleared")
+      : prHref
+        ? t("diff.truncated")
+        : t("diff.truncatedNoPr");
     body = (
       <p className="run-diff-note">
-        {prHref ? t("diff.truncated") : t("diff.truncatedNoPr")}
+        {why}
         {prHref && (
           <>
             {" "}
@@ -351,7 +358,7 @@ export function DiffDialog({
 
   const held = changes ?? null;
   const parsed = useMemo(
-    () => (held?.patch && !held.patchTruncated ? parsePatch(held.patch) : []),
+    () => (held?.patch && !held.patchTruncated && !held.patchPruned ? parsePatch(held.patch) : []),
     [held],
   );
   const files = useMemo(() => (held ? changedFiles(held, parsed) : []), [held, parsed]);

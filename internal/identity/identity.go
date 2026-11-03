@@ -33,7 +33,45 @@ type Actor struct {
 	Name  string     `json:"name"`
 	Role  Role       `json:"role,omitempty"`
 	Agent AgentClass `json:"agent,omitempty"`
+	// AgentRole is the agent role (engine roles: planner, qa, tester,
+	// executor, reviewer, researcher or custom-role-*) the request acts in;
+	// "" is legacy, the behavior before roles. A human ignores it.
+	AgentRole string `json:"agentRole,omitempty"`
+	// RunID and RunNodeID name the hub-dispatched run a runner-proxied
+	// request comes from, and that run's node; "" otherwise.
+	RunID     string `json:"runId,omitempty"`
+	RunNodeID string `json:"runNodeId,omitempty"`
 }
+
+// HasRole reports whether the actor is an agent acting in a role.
+func (a Actor) HasRole() bool { return a.IsAgent() && a.AgentRole != "" }
+
+// LowerClass is the lower-ranked of two agent classes (worker below
+// orchestrator); a role never raises what the request declared. Human ("")
+// ranks highest, so LowerClass("", c) is c.
+func LowerClass(a, b AgentClass) AgentClass {
+	if classRank(b) < classRank(a) {
+		return b
+	}
+	return a
+}
+
+// classRank orders classes: worker below orchestrator below human. An
+// unknown class ranks as a worker so it can never raise anything.
+func classRank(c AgentClass) int {
+	switch c {
+	case AgentHuman:
+		return 2
+	case AgentOrchestrator:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// System is the hub acting on its own behalf (locking acceptance at Executor
+// dispatch). Only server code constructs it; no request can.
+var System = Actor{ID: "hub", Name: "hub"}
 
 // IsAgent reports whether the actor is automation rather than a person.
 func (a Actor) IsAgent() bool { return a.Agent != "" }

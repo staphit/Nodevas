@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -591,5 +592,45 @@ func TestGitHistoryKeepsWhereASessionStartedAtOnce(t *testing.T) {
 	out, err := repoOf(t, root).Run(context.Background(), nil, "log", "--format=%s", "-p", "-n1")
 	if err != nil || strings.Contains(string(out), "second edit") {
 		t.Fatalf("the session's later saves committed early: %s %v", out, err)
+	}
+}
+
+// The history panel asks for a file's versions right after a save. A
+// session's start is committed in the background, and on a busy machine that
+// commit can still be waiting when the list is read: the list must include it
+// all the same. Here the start is content the window has not committed yet,
+// as for a page made and then edited within one window.
+func TestGitHistoryListsASessionsStartWhileItsCommitIsHeldBack(t *testing.T) {
+	s, _ := newGitStore(t, time.Hour)
+	held := make(chan struct{})
+	var release sync.Once
+	hold := func() { <-held }
+	segmentsCommitHook.Store(&hold)
+	t.Cleanup(func() {
+		release.Do(func() { close(held) })
+		// Close waits for the background commits, which read the hook.
+		_ = s.Close(context.Background())
+		segmentsCommitHook.Store(nil)
+	})
+	saveNode(t, s, ann, "alpha", "starter\n")
+	// The next save starts a session of its own.
+	s.mu.Lock()
+	for path, mark := range s.historyMarks {
+		mark.snapshotAt = time.Time{}
+		s.historyMarks[path] = mark
+	}
+	s.mu.Unlock()
+	saveNode(t, s, ann, "alpha", "first edit\n")
+
+	versions, err := s.ListHistory("nodes/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) == 0 {
+		t.Fatal("no version listed")
+	}
+	data, err := s.ReadHistory("nodes/alpha.md", versions[0].Name)
+	if err != nil || !strings.Contains(string(data), "starter") {
+		t.Fatalf("newest version = %q, %v; want the session's start, \"starter\"", data, err)
 	}
 }

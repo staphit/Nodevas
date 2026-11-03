@@ -4,6 +4,8 @@
 // without React and a component only decides how it looks.
 
 import type { AgentAsk, AgentMessage, Run } from "../api";
+import { askQuestionText } from "../agents/AskCard";
+import { isAutoAllowedAsk } from "../agents/askList";
 import { agentWho } from "../game/labels";
 
 export const ACTIVITY_WINDOW_MS = 60 * 60 * 1000;
@@ -49,6 +51,8 @@ export interface ActivityInput {
   messages: AgentMessage[];
   now: number;
   titleOf: (nodeId: string) => string;
+  /** Translates, for an ask's text as the viewer reads it. */
+  t: (key: string, values?: Record<string, string | number>) => string;
   windowMs?: number;
 }
 
@@ -67,6 +71,7 @@ export function buildActivity({
   messages,
   now,
   titleOf,
+  t,
   windowMs = ACTIVITY_WINDOW_MS,
 }: ActivityInput): ActivityLane[] {
   const from = now - windowMs;
@@ -112,11 +117,13 @@ export function buildActivity({
   }
 
   for (const ask of asks) {
+    // The hub allowed it on an earlier "allow for this run": nothing new.
+    if (isAutoAllowedAsk(ask)) continue;
     const created = millis(ask.createdAt);
     if (!Number.isFinite(created) || created < from || created > now) continue;
     const key = ask.agent || ask.sessionName || "agent";
     const target = lane(key, key);
-    target.marks.push({ kind: "ask", at: at(created), text: ask.question, nodeId: ask.nodeId });
+    target.marks.push({ kind: "ask", at: at(created), text: askQuestionText(t, ask), nodeId: ask.nodeId });
     target.latest = Math.max(target.latest, created);
   }
 

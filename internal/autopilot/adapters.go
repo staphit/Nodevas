@@ -122,6 +122,28 @@ func (b ProjectBoard) Content(name, nodeID string) (string, error) {
 	return file.Body, nil
 }
 
+func (b ProjectBoard) References(name, nodeID string) ([]runs.Reference, bool, error) {
+	st, err := b.PM.StoreFor(name)
+	if err != nil {
+		return nil, false, err
+	}
+	g, _, err := st.LoadGraph()
+	if err != nil {
+		return nil, false, err
+	}
+	summaries, truncated, err := st.ReferenceSummaries(g, nodeID)
+	if err != nil {
+		return nil, false, err
+	}
+	var refs []runs.Reference
+	for _, summary := range summaries {
+		refs = append(refs, runs.Reference{
+			ID: summary.ID, Title: summary.Title, TypeLabel: summary.TypeLabel, Summary: summary.Summary,
+		})
+	}
+	return refs, truncated, nil
+}
+
 func (b ProjectBoard) SetStatus(name, nodeID string, status engine.Status, by, note string) error {
 	st, err := b.PM.StoreFor(name)
 	if err != nil {
@@ -129,4 +151,23 @@ func (b ProjectBoard) SetStatus(name, nodeID string, status engine.Status, by, n
 	}
 	_, err = st.SetStatus(nodeID, status, by, note)
 	return err
+}
+
+// CreatedByRun is the run whose agent created a node, or "".
+func (b ProjectBoard) CreatedByRun(name, nodeID string) string {
+	st, err := b.PM.StoreFor(name)
+	if err != nil {
+		return ""
+	}
+	return st.CreatedByRun(nodeID)
+}
+
+// LockAcceptance locks a node's acceptance criteria as the hub, when an
+// Executor starts on it.
+func (b ProjectBoard) LockAcceptance(name, nodeID string) error {
+	st, err := b.PM.StoreFor(name)
+	if err != nil {
+		return err
+	}
+	return st.LockAcceptance(nodeID)
 }

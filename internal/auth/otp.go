@@ -33,6 +33,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -75,15 +77,15 @@ const (
 // address is not one at all. Handlers must not pass it to the client:
 // answering "that address is not registered" turns the request endpoint into a
 // directory of who has an account.
-var ErrNoSuchAccount = errors.New("no account for that email address")
+var ErrNoSuchAccount = locale.Errorf("no account for that email address", "沒有帳號使用這個電子郵件地址")
 
 // ErrNoMailer is returned when passcodes cannot be delivered because the
 // operator has not configured outgoing mail. It is safe to show: it describes
 // the server, not the account.
-var ErrNoMailer = errors.New("this server cannot send passcodes: outgoing mail is not configured")
+var ErrNoMailer = locale.Errorf("this server cannot send passcodes: outgoing mail is not configured", "這個伺服器無法寄送驗證碼：沒有設定外寄郵件")
 
 // ErrTooManyOTPRequests is returned when the passcode request budget is spent.
-var ErrTooManyOTPRequests = errors.New("too many passcode requests; wait before trying again")
+var ErrTooManyOTPRequests = locale.Errorf("too many passcode requests; wait before trying again", "驗證碼請求太多；請稍候再試")
 
 // pendingOTP is the one live passcode an account may have.
 //
@@ -211,6 +213,13 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 		// address alike, and the client still gets the same 202.
 		return Challenge{}, err
 	}
+	// The lookup's collation ignores invisible and full-width characters; the
+	// budgets above do not. Only the spelling whose budget was charged may
+	// reach the account, or every variant would be a fresh budget on one
+	// mailbox.
+	if !sameEmailKey(registered, address) {
+		return Challenge{}, ErrNoSuchAccount
+	}
 
 	code, err := newOTP()
 	if err != nil {
@@ -308,6 +317,11 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 		// 500 says nothing about this one.
 		return SignInResult{}, err
 	}
+	// As in RequestOTP: a spelling the collation folds onto an account but
+	// the budget keyed apart is an address nobody registered.
+	if !sameEmailKey(found.email, address) {
+		return SignInResult{Refusal: SignInRefusal{Reason: RefusedUnknownAccount}}, ErrBadCredentials
+	}
 	actor, revision, needsSecondFactor := found.actor, found.revision, found.secondFactor
 	// From here a refusal is a refusal for this account, and the log may say
 	// so: the address is the one registered on it, not the one typed.
@@ -367,16 +381,19 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 	return SignInResult{Actor: actor, Token: token, CSRF: csrf}, nil
 }
 
-// allowOTPRequest charges the global and per-source budgets for a passcode
-// request. It reuses the login buckets so the two endpoints cannot be played
-// off against each other.
+// allowOTPRequest charges the per-source budget for a passcode request.
+//
+// There is no hub-wide budget: one would let a stranger asking for passcodes
+// for made-up addresses from a handful of sources keep everybody else from
+// getting one. Mail stays bounded without it, since an unknown address gets
+// none and a registered one is under its own budgets (allowOTPForAddress).
 func (a *SessionAuth) allowOTPRequest(source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepAttemptsLocked(now)
 
-	charges := []rateCharge{{key: "otp-global", window: otpRequestWindow, limit: loginGlobalLimit}}
+	var charges []rateCharge
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "otp-ip:" + source, window: otpRequestWindow, limit: otpRequestLimit})
 	}
@@ -395,7 +412,7 @@ func (a *SessionAuth) allowOTPForAddress(key string) bool {
 	defer a.mu.Unlock()
 	// Anyone can put an address in this map now, so it is swept rather than
 	// trusted to stay small. An entry older than the cooldown decides nothing,
-	// and the global request budget bounds how many younger ones can exist.
+	// and the per-source request budgets bound how fast younger ones arrive.
 	for seen, last := range a.lastOTPRequest {
 		if now.Sub(last) >= otpResendCooldown {
 			delete(a.lastOTPRequest, seen)

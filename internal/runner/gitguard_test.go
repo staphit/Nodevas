@@ -114,6 +114,41 @@ func TestCommitRunRefusesSwappedGitDir(t *testing.T) {
 	}
 }
 
+// core.hooksPath names somewhere nobody can put a hook. A Codex run's
+// default sandbox may write anywhere under TMPDIR; a hook it left in a
+// directory there would run as the owner, outside the sandbox, at the
+// runner's next git command.
+func TestNoHooksPathCannotHoldHooks(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	wt, err := CreateWorktree(ctx, repo, t.TempDir(), "run-nohooks", "n", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What an agent would try: fill whatever core.hooksPath names.
+	dir := filepath.FromSlash(noHooksPath())
+	marker := filepath.Join(t.TempDir(), "marker")
+	script := []byte("#!/bin/sh\necho ran > '" + filepath.ToSlash(marker) + "'\n")
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		for _, name := range []string{"pre-commit", "prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction"} {
+			hook := filepath.Join(dir, name)
+			if err := os.WriteFile(hook, script, 0o755); err == nil {
+				t.Cleanup(func() { _ = os.Remove(hook) })
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "x.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := commitRun(ctx, wt, "agent work")
+	if res.Err != nil || res.Commit == "" {
+		t.Fatalf("commit: %+v", res)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("a hook put in core.hooksPath %s ran during the runner's commit", dir)
+	}
+}
+
 // gh runs git itself; the environment it gets keeps hooks off there too.
 func TestGitConfigEnvSkipsHooks(t *testing.T) {
 	repo := newTestRepo(t)

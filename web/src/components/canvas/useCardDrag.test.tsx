@@ -1,8 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { manualFrames } from "./boardTestKit";
 import { type Col } from "./geometry";
 import { snapBoxesOfColumns, type SnapBox } from "./snapping";
-import { useCardDrag } from "./useCardDrag";
+import { useCardDrag, type CardDragState } from "./useCardDrag";
 
 const columns: Col[] = [
   {
@@ -323,5 +324,82 @@ describe("useCardDrag", () => {
     });
 
     expect(onOpen).toHaveBeenCalledWith("a");
+  });
+
+  describe("live motion", () => {
+    let flushFrame: () => void = () => undefined;
+    function stubFrames() {
+      flushFrame = manualFrames().flush;
+    }
+
+    function setup() {
+      stubFrames();
+      const onMove = vi.fn();
+      const onFrame = vi.fn<(live: CardDragState) => void>();
+      let renders = 0;
+      const hook = renderHook(() => {
+        renders++;
+        return useCardDrag({
+          zoom: 1,
+          columns,
+          selectedIds: new Set(["a"]),
+          onSelect: vi.fn(),
+          onOpen: vi.fn(),
+          onMove,
+          onReject: vi.fn(),
+          onFrame,
+        });
+      });
+      return { ...hook, onMove, onFrame, renders: () => renders };
+    }
+
+    it("moves the card by frame rather than re-rendering on every pointermove", () => {
+      const { result, onFrame, renders } = setup();
+      act(() => {
+        result.current.handlers.onPointerDown(event(), "a");
+        result.current.handlers.onPointerMove(event({ clientX: 10, clientY: 0 }));
+      });
+      const afterLift = renders();
+      expect(result.current.state?.moved).toBe(true);
+
+      act(() => {
+        for (let step = 2; step <= 12; step++) {
+          result.current.handlers.onPointerMove(event({ clientX: step * 10, clientY: step }));
+        }
+      });
+      // The pointer kept moving; React did not hear about it.
+      expect(renders()).toBe(afterLift);
+
+      onFrame.mockClear();
+      act(() => flushFrame());
+      // Eleven moves, one frame: the frame paints only where the pointer is now.
+      expect(onFrame).toHaveBeenCalledTimes(1);
+      expect(onFrame.mock.calls[0][0]).toMatchObject({ ids: ["a"], dx: 120, dy: 12, moved: true });
+      expect(result.current.live()).toMatchObject({ dx: 120, dy: 12 });
+    });
+
+    it("commits once, on pointerup, where the pointer last was", () => {
+      const { result, onMove, onFrame } = setup();
+      act(() => {
+        result.current.handlers.onPointerDown(event(), "a");
+        for (let step = 1; step <= 10; step++) {
+          result.current.handlers.onPointerMove(event({ clientX: step * 16.4, clientY: step * 8 }));
+        }
+      });
+      expect(onMove).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.handlers.onPointerUp(event({ clientX: 164, clientY: 80 }), "a");
+      });
+      expect(onMove).toHaveBeenCalledTimes(1);
+      expect(onMove).toHaveBeenCalledWith({ a: { x: 1, y: 1 }, b: { x: 4, y: 0 } }, 1);
+      expect(result.current.state).toBeNull();
+
+      // A frame still queued from the last move must not paint a finished drag.
+      onFrame.mockClear();
+      act(() => flushFrame());
+      expect(onFrame).not.toHaveBeenCalled();
+      expect(result.current.live()).toBeNull();
+    });
   });
 });

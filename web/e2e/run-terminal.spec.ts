@@ -103,7 +103,7 @@ for (const [name, viewport] of Object.entries({
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     await expect(drawer.getByRole("tab", { name: "終端機" })).toHaveAttribute("aria-selected", "true");
     const terminal = drawer.getByTestId("run-terminal");
@@ -140,7 +140,8 @@ for (const [name, viewport] of Object.entries({
     mock.socket()!.send(JSON.stringify({ type: "status", status: "succeeded" }));
     await expect(drawer.getByText("工作階段已結束 · 成功")).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await drawer.getByRole("tab", { name: "活動" }).click();
+    // The run's own 活動 tab, inside the panel's Activity tab of the same name.
+    await drawer.getByRole("region", { name: "執行詳情" }).getByRole("tab", { name: "活動" }).click();
     await expect(terminal).toBeHidden();
     await expect(drawer.getByRole("list", { name: "執行過程" })).toBeVisible();
 

@@ -1,7 +1,7 @@
 /**
  * Store facade.
  *
- * The implementation lives in `state/*Slice.ts` [A-05]; this file composes them
+ * The implementation lives in `state/*Slice.ts`; this file composes them
  * into the single `useApp` hook every component already imports, and exports the
  * selectors UI should prefer over reaching into state by hand.
  */
@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { RemoteCaret } from "./editor/remoteCarets";
+import { connectLanguageSource, translate } from "./i18n";
 import {
   readPreferences,
   subscribePreferences,
@@ -48,12 +49,29 @@ export const useApp = create<AppState>((...args) => ({
   ...createUndoSlice(...args),
 }));
 
+// The catalog reads the reader's language from here (i18n.ts stays clear of
+// the store so non-component modules can import it without a cycle).
+connectLanguageSource({
+  get: () => useApp.getState().preferences.language,
+  subscribe: (listener) => useApp.subscribe(listener),
+  set: (language) => useApp.getState().updateUIPreference("language", language),
+});
+
+// Why graph.yaml cannot be read is the hub's sentence, worded in the language
+// the request asked in; a reader who changes language asks again rather than
+// keep reading the old one until Reload.
+useApp.subscribe((state, previous) => {
+  if (state.preferences.language === previous.preferences.language) return;
+  if (state.graphUnreadable === null) return;
+  void state.loadAll().catch(() => undefined);
+});
+
 // Undo depth lives outside the store (it holds graph snapshots); mirror just
-// the summary the UI needs [A-05].
+// the summary the UI needs.
 observeUndo(() => useApp.setState(undoMirror()));
 
 // Preferences can also change in another tab or in the popout editor window.
-// Adopt those writes instead of letting the two windows drift apart [A-03].
+// Adopt those writes instead of letting the two windows drift apart.
 subscribePreferences(() => {
   const values = readPreferences();
   if (preferencesEqual(useApp.getState().preferences, values)) return;
@@ -65,13 +83,13 @@ subscribePreferences(() => {
 // Selectors
 // ---------------------------------------------------------------------------
 
-/** One local preference value [A-03]. */
+/** One local preference value. */
 export function usePreference<K extends PreferenceKey>(key: K): PreferenceValue<K> {
   return useApp((state) => state.preferences[key]);
 }
 
 /**
- * Current state of one mutation scope [A-02]. Returns the shared idle value
+ * Current state of one mutation scope. Returns the shared idle value
  * when the scope has not been touched, so components need no busy/error flags
  * of their own. `scope` comes from `operationScope.*`.
  */
@@ -90,7 +108,7 @@ export function useOperationPending(scope: OperationScope): boolean {
 }
 
 /**
- * Whether Ctrl/⌘+Z would do something [A-06]. False also means "do not show an
+ * Whether Ctrl/⌘+Z would do something. False also means "do not show an
  * undo affordance" — an operation that cannot be reverted never enters the
  * stack, so this is never optimistic.
  */
@@ -103,7 +121,7 @@ export function useUndoLabel(): string | null {
   return useApp((state) => state.undoLabel);
 }
 
-/** Whether Ctrl/⌘+Shift+Z would re-apply an undone step [A-06]. */
+/** Whether Ctrl/⌘+Shift+Z would re-apply an undone step. */
 export function useCanRedo(): boolean {
   return useApp((state) => state.canRedo);
 }
@@ -113,7 +131,7 @@ export function useRedoLabel(): string | null {
   return useApp((state) => state.redoLabel);
 }
 
-/** The lock on a document, or null when nobody holds it [P2]. */
+/** The lock on a document, or null when nobody holds it. */
 export function useNodeLock(nodeId: string | null) {
   return useApp((state) =>
     nodeId ? (state.locks.find((lock) => lock.nodeId === nodeId) ?? null) : null,
@@ -121,7 +139,7 @@ export function useNodeLock(nodeId: string | null) {
 }
 
 /**
- * Who else has this document on screen [P2].
+ * Who else has this document on screen.
  *
  * The filter builds a fresh array on every read, so it goes through
  * `useShallow`: without it each store read looks like a change to
@@ -174,7 +192,7 @@ export function useRemoteCarets(nodeId: string | null, pageId: string | null) {
 
 export function reportError(error: unknown): void {
   useApp.setState({
-    error: error instanceof Error ? error.message : "發生未預期的錯誤",
+    error: error instanceof Error ? error.message : translate("app.error.unexpected"),
   });
 }
 
@@ -183,7 +201,7 @@ export function nodeById(graph: Graph | null, id: string): GraphNode | undefined
 }
 
 // Expression helpers moved to the domain layer; re-exported so the components
-// that already import them from the store keep working [A-04].
+// that already import them from the store keep working.
 export { editableGateOperator, topLevelOp } from "./domain";
 
 // ---------------------------------------------------------------------------

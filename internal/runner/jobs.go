@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +82,11 @@ type run struct {
 	// remoteTyping: the dispatcher may type into this interactive run's
 	// terminal (auto-accepted under AllowRemoteTyping, or a yes here).
 	remoteTyping bool
+	// noRelay: auto-accepted without AllowShell, so the run's permission
+	// prompts are not relayed to the hub (denied headless) whatever
+	// permissionRelay says: a person there could otherwise approve a shell
+	// command the auto-accept policy keeps from the agent.
+	noRelay bool
 
 	// Outbound, unsent, in this order. events is bounded: a run that talks a
 	// lot while the socket is down loses its oldest events, never its finish.
@@ -270,6 +277,25 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if !found {
 		return repo, fmt.Sprintf("repository %q is not on this runner's allowlist", job.RepoID)
 	}
+	// A verify job runs no agent: the repo's own test command (verify.go).
+	if job.Kind == runnerwire.JobVerify {
+		if job.Mode != runnerwire.ModeHeadless {
+			return repo, "a verify job is headless"
+		}
+		if reason := checkKind(job, cfg); reason != "" {
+			return repo, reason
+		}
+		busy := 0
+		for _, r := range j.runs {
+			if r.finish == nil {
+				busy++
+			}
+		}
+		if limit := cfg.MaxConcurrentRuns(); busy >= limit {
+			return repo, fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
+		}
+		return repo, ""
+	}
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
@@ -307,6 +333,11 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	}
 	if reason := checkKind(job, cfg); reason != "" {
 		return repo, reason
+	}
+	if job.Kind == runnerwire.JobRevise {
+		if reason := j.ownBranchLocked(job, repo); reason != "" {
+			return repo, reason
+		}
 	}
 	busy := 0
 	for _, r := range j.runs {
@@ -352,7 +383,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	// repository's, open, and on the branch the job names, before anyone is
 	// asked to accept.
 	var check prCheck
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise {
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise || job.Kind == runnerwire.JobVerify {
 		var reason string
 		check, reason = j.checkPR(ctx, r)
 		if ctx.Err() != nil {
@@ -391,6 +422,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	case runnerwire.JobPlan:
 		j.executePlan(ctx, r)
+		return
+	case runnerwire.JobVerify:
+		j.executeVerify(ctx, r, check)
+		return
+	case runnerwire.JobJudge:
+		j.executeJudge(ctx, r)
 		return
 	}
 
@@ -459,6 +496,13 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 		j.c.logf("run %s: auto-accepted: %s", r.job.RunID, why)
 		if interactive {
 			j.setRemoteTyping(r, policy.AllowRemoteTyping)
+		}
+		if !policy.AllowShell {
+			// Nobody here said yes: a prompt relayed to the hub must not be
+			// how the agent gets the shell the policy leaves to a person.
+			j.mu.Lock()
+			r.noRelay = true
+			j.mu.Unlock()
 		}
 		return true, ""
 	}
@@ -542,7 +586,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
-	tmp, err := os.MkdirTemp("", "nodevas-run-")
+	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
 	}
@@ -553,31 +597,39 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 
 	cfg := j.c.Config
-	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
-		// A plan reads the code as a review does; what it writes goes on the
-		// board, through MCP, not into files.
-		mode, modeText = reviewPermission(cfg, job.Agent)
-		if job.Kind == runnerwire.JobPlan {
-			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
-		}
-	}
+	j.mu.Lock()
+	relay := cfg.PermissionRelay && !r.noRelay
+	j.mu.Unlock()
+	mode, modeText := runPermission(cfg, job, note == "")
 	runEnv := adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
+		MCP:            adapter.MCPServer{Command: exe},
 		PermissionMode: mode,
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
+		PermissionRelay:  relay,
 	}
-	cmd, err := ad.Command(job, runEnv)
+	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+	if err != nil {
+		return fail(runnerwire.FailureTask, "could not write the MCP server's address: %v", err)
+	}
+	runEnv.MCP.Args = mcpArgs(serverFile, job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
+	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
+	}
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && !relay {
+		modeText = claimed + autoAcceptedNotRelayedText
+	} else if ok && relayOff {
+		// The adapter could not set the relay up (agy: no session settings,
+		// no hook that runs nodevas): the log says what the run really does.
+		modeText = claimed + notRelayedText
 	}
 	parser := ad.NewParser()
 	// An ACP agent is spoken to while it runs (adapter/acp.go).
@@ -615,8 +667,8 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	timeout := j.c.runTimeout(job.Kind)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	expired, stopTimer := j.c.startRunTimer(timeout)
+	defer stopTimer()
 	var waitErr error
 	stopped := ""
 	select {
@@ -625,12 +677,16 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		stopped = "cancel"
 		tree.kill()
 		waitErr = <-done
-	case <-timer.C:
+	case <-expired:
 		stopped = "timeout"
 		tree.kill()
 		waitErr = <-done
 	}
 	stdout.flush()
+	if ender, ok := conv.(interface{ End() }); ok {
+		// Permission requests still waiting for a person stop waiting.
+		ender.End()
+	}
 
 	outcome := parser.Outcome()
 	exitCode := -1
@@ -681,11 +737,38 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	return result, outcome.Text
 }
 
+// runPermission is how freely job's agent may act under this runner's
+// settings, and how its start line says so. acp is false when an OpenCode run
+// set to go over ACP goes through `opencode run` instead (withoutOpenCode2ACP).
+func runPermission(cfg *Config, job runnerwire.Job, acp bool) (mode, text string) {
+	if !adapter.ReadOnly(job) {
+		text = permissionText(cfg, job.Agent)
+		if claimed, ok := strings.CutSuffix(text, relayedText); ok && job.Agent == "opencode" && !acp {
+			text = claimed + notRelayedText
+		}
+		return cfg.PermissionModeFor(job.Agent), text
+	}
+	// A plan or a judge reads the code as a review does; what a plan writes
+	// goes on the board, through MCP, not into files.
+	mode, text = reviewPermission(cfg, job.Agent)
+	switch job.Kind {
+	case runnerwire.JobPlan:
+		text = strings.Replace(text, "for a review", "for a plan", 1)
+	case runnerwire.JobJudge:
+		text = strings.Replace(text, "for a review", "for a judge", 1)
+	}
+	return mode, text
+}
+
 // reviewPermission is how freely a review's agent may act: read only where
 // the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
 // approval mode, under which an edit needs an approval nobody can give
-// headless; OpenCode with edits and the shell denied; agy's plan mode), the
-// owner's setting otherwise. The prompt forbids edits either way, and the
+// headless; OpenCode with edits and the shell denied; agy's plan mode). Claude
+// Code keeps the owner's mode, with its writing, shell and web tools denied
+// (adapter.ClaudeReadOnlyDeny), except a mode that skips its prompts
+// (bypassPermissions, auto): that would leave reads anywhere on this machine
+// open, so the run gets acceptEdits instead, where such a read needs a yes
+// nobody gives headless. The prompt forbids edits either way, and the
 // review's worktree is thrown away after.
 func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	switch kind {
@@ -697,12 +780,40 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 		return "read-only", "permission read-only for a review"
 	case "antigravity":
 		return "plan", "mode plan for a review"
+	case "claude":
+		mode = cfg.ClaudePermissionMode()
+		if mode == "bypassPermissions" || mode == "auto" {
+			mode = adapter.DefaultClaudePermissionMode
+		}
+		text = "permission mode " + mode + " for a review"
+		if cfg.PermissionRelay && adapter.PermissionRelayApplies(kind, mode, false) {
+			text += relayedText
+		}
+		return mode, text
 	}
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
 
+// relayedText ends the start line of a run whose permission prompts are
+// relayed; notRelayedText that of one whose adapter could not relay them.
+const (
+	relayedText    = ", permission prompts relayed to Nodevas"
+	notRelayedText = ", permission prompts not relayed (denied headless)"
+	// autoAcceptedNotRelayedText ends that of a run auto-accepted without
+	// allow-shell (run.noRelay).
+	autoAcceptedNotRelayedText = ", permission prompts not relayed: auto-accepted without allow-shell (denied headless)"
+)
+
 // permissionText says how freely the agent may act, for the run's log.
 func permissionText(cfg *Config, kind string) string {
+	text := modeText(cfg, kind)
+	if cfg.RelaysPermissions(kind) {
+		text += relayedText
+	}
+	return text
+}
+
+func modeText(cfg *Config, kind string) string {
 	switch kind {
 	case "codex":
 		text := "sandbox " + cfg.CodexSandboxMode()
@@ -725,10 +836,10 @@ func permissionText(cfg *Config, kind string) string {
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
-// runner's proxy, as a worker, under a session name that says which run it is,
-// with only the tools a run uses: each definition is paid for on every model
-// call.
-func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
+// runner's proxy (its URL in serverFile, see writeMCPServerFile), as a worker,
+// under a session name that says which run it is, with only the tools a run
+// uses: each definition is paid for on every model call.
+func mcpArgs(serverFile string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
 	model := job.Model
 	if model == "" {
 		model = "default"
@@ -741,15 +852,44 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 	if repoName == "" {
 		repoName = "repo"
 	}
-	return []string{
+	args := []string{
 		"mcp",
-		"--server", server,
+		"--server-file", serverFile,
 		"--project", job.Project,
-		"--agent-role", "worker",
+		"--agent-role", roleAgentClass(job),
 		"--actor", "run:" + job.Agent,
 		"--session-name", repoName + "-" + job.Agent + "-" + slug(model) + "-" + runID,
-		"--toolset", "run",
 	}
+	// A role job is served its role's tools only (the hub's allowlist); a
+	// legacy job keeps the run toolset, exactly as before.
+	if role := roleArgs(job, relayTools...); role != nil {
+		return append(args, role...)
+	}
+	return append(args, "--toolset", "run")
+}
+
+// writeMCPServerFile puts the run's proxy URL in its private temp dir, owner
+// only, for `nodevas mcp --server-file`: the URL carries the run's proxy
+// secret, and every user on the machine can read a command line.
+func writeMCPServerFile(tmp, url string) (string, error) {
+	path := filepath.Join(tmp, "mcp-server")
+	return path, os.WriteFile(path, []byte(url), 0o600)
+}
+
+// runTempDir makes a run's private directory for the files programs outside
+// any sandbox read (the MCP config, agy's hooks): under the runner's data
+// dir, owner-only, never the system's temp dir, which a Codex run's default
+// sandbox may write. The caller removes it when the run ends.
+func (j *jobs) runTempDir() (string, error) {
+	dataDir, err := j.c.Config.RunDataDir()
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Join(dataDir, "tmp")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(parent, "run-")
 }
 
 func (j *jobs) proxyFor() (*Proxy, error) {
@@ -786,8 +926,8 @@ func minutesText(d time.Duration) string {
 // emit stamps an event and queues it.
 func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 	// Whatever the agent read or printed, a key does not reach the hub.
-	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
-	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
+	ev.Text = adapter.Truncate(redact.Output(ev.Text), runnerwire.MaxEventText)
+	ev.Input = adapter.Truncate(redact.Output(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
 	r.trail.see(ev)
 	r.seq++
@@ -816,9 +956,24 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	// Every failed run says why in a word the hub can route on; a failure
 	// nothing recognised (a worktree git refused, a push) is the task's.
-	result.Summary, result.Error = redact.String(result.Summary), redact.String(result.Error)
+	// Every text in the result goes through redaction here, whatever its
+	// source already did.
+	result.Summary, result.Error = redact.Output(result.Summary), redact.Output(result.Error)
+	result.HandoffNote = redact.Output(result.HandoffNote)
+	if result.Verify != nil {
+		v := *result.Verify
+		v.Output = redact.Output(v.Output)
+		result.Verify = &v
+	}
+	if len(result.Checks) > 0 {
+		checks := slices.Clone(result.Checks)
+		for i := range checks {
+			checks[i].Note = redact.Output(checks[i].Note)
+		}
+		result.Checks = checks
+	}
 	if pr != nil {
-		pr.Error = redact.String(pr.Error)
+		pr.Error = redact.Output(pr.Error)
 	}
 	switch {
 	case result.Status != runnerwire.RunFailed:

@@ -8,14 +8,15 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -24,7 +25,25 @@ func (a *API) GetProjectOrder(c *gin.Context) {
 	if order == nil {
 		order = []string{}
 	}
-	c.JSON(http.StatusOK, map[string]any{"projectOrder": order})
+	c.JSON(http.StatusOK, map[string]any{"projectOrder": a.readableOrder(c.Request, order)})
+}
+
+// readableOrder leaves out the projects the caller may not read. The order
+// is the administrators' arrangement of the whole tree, restricted projects
+// included, and a name is what a non-member must not learn. Folders, readable
+// projects and names that no longer exist stay.
+func (a *API) readableOrder(r *http.Request, order []string) []string {
+	if a.access == nil {
+		return order
+	}
+	workspace := a.pm.Workspace()
+	out := make([]string, 0, len(order))
+	for _, name := range order {
+		if a.readable(r, filepath.Join(workspace, filepath.FromSlash(name))) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // PutProjectOrder replaces the whole arrangement, which keeps the client's
@@ -43,21 +62,21 @@ func (a *API) PutProjectOrder(c *gin.Context) {
 		return
 	}
 	if len(body.ProjectOrder) > store.MaxExplorerOrderEntries {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf(
-			"排序項目過多（上限 %d）", store.MaxExplorerOrderEntries))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf(
+			"too many entries in the order (at most %d)", "排序項目過多（上限 %d）", store.MaxExplorerOrderEntries))
 		return
 	}
 	seen := make(map[string]bool, len(body.ProjectOrder))
 	for _, name := range body.ProjectOrder {
 		if !engine.ValidProjectRef(name) {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("專案路徑無效：%q", name))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid project path: %q", "專案路徑無效：%q", name))
 			return
 		}
 		// Case matters nowhere else in the tree, so two entries differing only
 		// in case would be one project listed twice.
 		lowered := strings.ToLower(name)
 		if seen[lowered] {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("重複的專案路徑：%q", name))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("duplicate project path: %q", "重複的專案路徑：%q", name))
 			return
 		}
 		seen[lowered] = true

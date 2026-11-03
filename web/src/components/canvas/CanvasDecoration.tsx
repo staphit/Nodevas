@@ -1,4 +1,4 @@
-/** Canvas groups and sticky notes [B-06]: background decoration, not data. */
+/** Canvas groups and sticky notes: background decoration, not data. */
 
 import { useState, useEffect, useRef } from "react";
 import type { CanvasAnnotation, CanvasGroup } from "../../types";

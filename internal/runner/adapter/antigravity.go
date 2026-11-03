@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,7 +18,7 @@ import (
 //
 //	agy --input-format=stream-json --output-format=stream-json --mode=<mode>
 //	    [--dangerously-skip-permissions] [--model=<id>] --add-dir=<root>
-//	    --disable-slash-commands -p=
+//	    --disable-slash-commands [--settings=<file>] -p=
 //
 // with the prompt on stdin as one stream-json message,
 // {"event":"user","message":{"content":"…"}}. -p takes the prompt as its own
@@ -36,7 +37,9 @@ import (
 // Headless, a tool that needs permission is denied without asking, MCP tools
 // included, unless the owner's ~/.gemini/antigravity-cli/settings.json allows
 // it: the runner's detection requires "mcp(nodevas/*)" there (setup-agent
-// adds it) and never writes that file itself.
+// adds it) and never writes that file itself. With permissionRelay, the
+// session's --settings grant shell commands to the gate that asks Nodevas
+// (writeAntigravityRelaySettings).
 type Antigravity struct{}
 
 // AntigravityModes are the runner's settings for agy runs: agy's own --mode
@@ -53,53 +56,101 @@ const DefaultAntigravityMode = "accept-edits"
 // it is set.
 const RunMCPEnv = "NODEVAS_RUN_MCP"
 
+// RunNodeEnv carries a run's node id to the agent's hooks (the agy gate).
+const RunNodeEnv = "NODEVAS_RUN_NODE"
+
 // antigravityRootDir is the customization root inside the run's temp dir.
 const antigravityRootDir = "agyroot"
+
+// antigravitySettingsFile is the relay's session settings in the run's temp
+// dir (writeAntigravityRelaySettings).
+const antigravitySettingsFile = "agysettings.json"
+
+// antigravityToolTimeoutSeconds bounds one nodevas MCP tool call. agy's own
+// default cuts a call off after three minutes ("MCP tool call to server
+// \"nodevas\" timed out after 3m0s"); ask_user waits up to ten for a person.
+// timeoutSeconds is the server entry's key agy 1.4.x reads for it (checked
+// against agy 1.4.12: 5 cut a 20 s call at 5 s, 240 let a 200 s call
+// finish). Gemini CLI and OpenCode get the same 15 minutes.
+const antigravityToolTimeoutSeconds = 900
+
+// AntigravityCommandRule is agy's permission rule for every shell command.
+const AntigravityCommandRule = "command(*)"
 
 func (Antigravity) Kind() string { return "antigravity" }
 
 func (Antigravity) NewParser() Parser { return &antigravityParser{} }
 
-func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+func (a Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+	cmd, _, err := a.CommandRelay(job, env)
+	return cmd, err
+}
+
+// CommandRelay is Command, and whether the run's gate relays shell commands
+// to Nodevas: only with the relay gate and the session settings that grant
+// what it allows (RelayLauncher).
+func (Antigravity) CommandRelay(job runnerwire.Job, env RunEnv) (*exec.Cmd, bool, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
-		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
+		return nil, false, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
 	}
 	// Headless, nobody can approve a command: the gate turns what agy would
 	// refuse, ending the turn, into a denial the agent can work around.
 	readOnly := ReadOnly(job)
-	root, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode) || readOnly, readOnly)
+	relay := env.PermissionRelay && !readOnly && PermissionRelayApplies("antigravity", env.PermissionMode, false)
+	var settings string
+	if relay {
+		var err error
+		if settings, err = writeAntigravityRelaySettings(env.TempDir); err != nil {
+			return nil, false, err
+		}
+		// Without session settings there is no allow rule, and agy refuses
+		// a command even after a person allowed it: nobody is asked in vain,
+		// the plain gate denies it instead.
+		relay = settings != ""
+	}
+	root, relayGate, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode) || readOnly, readOnly, relay)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if !relayGate && settings != "" {
+		// The grant goes only with the gate that asks about every command
+		// (none when no hook can run the nodevas binary).
+		_ = os.Remove(settings)
+		settings = ""
 	}
 	modeArgs, err := antigravityModeArgs(env.PermissionMode)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	args := []string{"--input-format=stream-json", "--output-format=stream-json"}
 	args = append(args, modeArgs...)
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "--model="+job.Model)
 	}
-	args = append(args, "--add-dir="+root, "--disable-slash-commands", "-p=")
+	args = append(args, "--add-dir="+root, "--disable-slash-commands")
+	if settings != "" {
+		args = append(args, "--settings="+settings)
+	}
+	args = append(args, "-p=")
 	input, err := json.Marshal(map[string]any{
 		"event":   "user",
 		"message": map[string]string{"content": Prompt(job, env.Branch)},
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	extra, err := antigravityEnv(env)
+	extra, err := antigravityEnv(job, env)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = bytes.NewReader(append(input, '\n'))
 	cmd.Env = jobEnv(job, extra...)
 	if err := wrapBatch(cmd); err != nil {
-		return nil, fmt.Errorf("antigravity: %w", err)
+		return nil, false, fmt.Errorf("antigravity: %w", err)
 	}
-	return cmd, nil
+	return cmd, settings != "", nil
 }
 
 // antigravityModeArgs are the flags for the owner's mode setting.
@@ -116,23 +167,29 @@ func antigravityModeArgs(mode string) ([]string, error) {
 	return nil, fmt.Errorf("antigravity: unknown mode %q (want one of %s)", mode, strings.Join(AntigravityModes, ", "))
 }
 
-// antigravityEnv is what the agy process gets on top of jobEnv.
-func antigravityEnv(env RunEnv) ([]string, error) {
+// antigravityEnv is what the agy process gets on top of jobEnv: the run's MCP
+// arguments and its node, which agy hands its hooks too (the gate's asks name
+// the node), and the session id its `nodevas mcp` reports (RunSessionEnv),
+// which the gate's asks carry too.
+func antigravityEnv(job runnerwire.Job, env RunEnv) ([]string, error) {
 	args, err := json.Marshal(env.MCP.Args)
 	if err != nil {
 		return nil, err
 	}
-	return []string{RunMCPEnv + "=" + string(args)}, nil
+	return append([]string{RunMCPEnv + "=" + string(args), RunNodeEnv + "=" + job.NodeID}, runSessionEnv(env)...), nil
 }
 
 // writeAntigravityRoot writes the run's customization root, which defines the
 // nodevas MCP server (and, with gate, the PreToolUse gate in
-// antigravity_gate.go), into the temp dir and returns its path.
-func writeAntigravityRoot(env RunEnv, gate, readOnly bool) (string, error) {
-	root := filepath.Join(env.TempDir, antigravityRootDir)
+// antigravity_gate.go; relay has it ask Nodevas about shell commands), into
+// the temp dir and returns its path. relayGate reports whether the gate that
+// asks Nodevas is in it (relay outside a read-only run, and a hook path for
+// the nodevas binary).
+func writeAntigravityRoot(env RunEnv, gate, readOnly, relay bool) (root string, relayGate bool, err error) {
+	root = filepath.Join(env.TempDir, antigravityRootDir)
 	dir := filepath.Join(root, ".agents")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("making the Antigravity config dir: %w", err)
+		return "", false, fmt.Errorf("making the Antigravity config dir: %w", err)
 	}
 	config, err := json.MarshalIndent(map[string]any{
 		"mcpServers": map[string]any{
@@ -140,25 +197,96 @@ func writeAntigravityRoot(env RunEnv, gate, readOnly bool) (string, error) {
 				"command": env.MCP.Command,
 				"args":    env.MCP.Args,
 				"env":     map[string]string{"NODEVAS_AGENT": "antigravity"},
+				// agy's three minutes would cut ask_user's wait short.
+				"timeoutSeconds": antigravityToolTimeoutSeconds,
 			},
 		},
 	}, "", "  ")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "mcp_config.json"), config, 0o600); err != nil {
-		return "", fmt.Errorf("writing the Antigravity MCP config: %w", err)
+		return "", false, fmt.Errorf("writing the Antigravity MCP config: %w", err)
 	}
-	if hooks := antigravityGateHooks(env.MCP.Command, readOnly); gate && hooks != nil {
+	if hooks := antigravityGateHooks(env.MCP.Command, readOnly, relay); gate && hooks != nil {
 		data, err := json.MarshalIndent(hooks, "", "  ")
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if err := os.WriteFile(filepath.Join(dir, "hooks.json"), data, 0o600); err != nil {
-			return "", fmt.Errorf("writing the Antigravity hooks: %w", err)
+			return "", false, fmt.Errorf("writing the Antigravity hooks: %w", err)
+		}
+		relayGate = relay && !readOnly
+	}
+	return root, relayGate, nil
+}
+
+// antigravityOwnerSettingsPath is the owner's agy settings file, whose
+// permission rules the relay's session settings carry over. Tests point it
+// elsewhere.
+var antigravityOwnerSettingsPath = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), nil
+}
+
+// writeAntigravityRelaySettings writes the session settings of a run whose
+// gate asks Nodevas about shell commands, and returns their path, or "" for
+// none. Headless, agy refuses a command that needs permission even after a
+// PreToolUse hook said "allow" (agy 1.4.10: "user denied permission to run
+// command"), and only an allow rule grants it; so the session gets
+// AntigravityCommandRule and the gate, which sees every run_command and
+// send_command_input first, is the only say: its own denials, then the
+// person's answer, a denial for anything else (agy also refuses the call when
+// the hook fails, times out or prints nothing it can read). --settings
+// replaces the owner's permissions for the session, so their rules (the
+// nodevas MCP allow rule, any deny rules) are carried over; an owner file
+// whose permissions do not read as such gets no grant, which leaves the
+// owner's rules to agy as they are and the run to the plain gate.
+func writeAntigravityRelaySettings(tempDir string) (string, error) {
+	perms := map[string]any{}
+	if path, err := antigravityOwnerSettingsPath(); err == nil {
+		raw, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			var owner struct {
+				Permissions json.RawMessage `json:"permissions"`
+			}
+			if json.Unmarshal(bytes.TrimPrefix(raw, utf8BOM), &owner) != nil {
+				return "", nil
+			}
+			if len(owner.Permissions) > 0 && string(owner.Permissions) != "null" {
+				if json.Unmarshal(owner.Permissions, &perms) != nil || perms == nil {
+					return "", nil
+				}
+			}
+		case !os.IsNotExist(err):
+			return "", nil
 		}
 	}
-	return root, nil
+	var allow []any
+	if v, ok := perms["allow"]; ok && v != nil {
+		list, ok := v.([]any)
+		if !ok {
+			return "", nil
+		}
+		allow = list
+	}
+	if !slices.Contains(allow, any(AntigravityCommandRule)) {
+		allow = append(allow, AntigravityCommandRule)
+	}
+	perms["allow"] = allow
+	data, err := json.MarshalIndent(map[string]any{"permissions": perms}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(tempDir, antigravitySettingsFile)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("writing the Antigravity session settings: %w", err)
+	}
+	return path, nil
 }
 
 // antigravityParser reads `--output-format stream-json`: one JSON object per

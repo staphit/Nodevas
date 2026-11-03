@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +127,7 @@ func TestOpenListsToolsWithPermissionKinds(t *testing.T) {
 		"search_nodes":      KindRead,
 		"validate_graph":    KindRead,
 		"create_node":       KindWrite,
+		"create_subgraph":   KindWrite,
 		"link_nodes":        KindWrite,
 		"update_node_meta":  KindWrite,
 		"set_node_status":   KindWrite,
@@ -206,6 +208,55 @@ func TestKindOf(t *testing.T) {
 	} {
 		if got := KindOf(tc.name, tc.readOnly); got != tc.want {
 			t.Errorf("KindOf(%q, %v) = %q, want %q", tc.name, tc.readOnly, got, tc.want)
+		}
+	}
+}
+
+// A tool the copilot can only ever be refused is not offered: acceptance
+// criteria are a person's or a planner/QA run's, a verdict is a review or QA
+// run's, and the copilot has no folder to save an attachment into. Each
+// would cost the model a call and the person a permission prompt for an
+// error.
+func TestOpenOffersNoToolTheCopilotCannotUse(t *testing.T) {
+	bridge, err := Open(context.Background(), Options{Handler: &stubServer{}, Project: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close()
+	listed := map[string]bool{}
+	for _, tool := range bridge.Tools() {
+		listed[tool.Name] = true
+	}
+	if !listed["send_message"] || !listed["get_node"] {
+		t.Fatalf("tools = %v, want the usable ones still listed", listed)
+	}
+	// The copilot has no folder to attach files from, so send_message's
+	// files are always refused it.
+	for _, tool := range bridge.Tools() {
+		if tool.Name != "send_message" {
+			continue
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(tool.Schema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema.Properties["files"]; ok {
+			t.Errorf("send_message offers the copilot files to attach: %s", tool.Schema)
+		}
+		if _, ok := schema.Properties["message"]; !ok || !slices.Contains(schema.Required, "message") {
+			t.Errorf("send_message lost its other inputs: %s", tool.Schema)
+		}
+	}
+	for _, name := range []string{"set_acceptance", "submit_verdict", "save_attachment"} {
+		if listed[name] {
+			t.Errorf("%s offered to the copilot, which is always refused it", name)
+		}
+		result, err := bridge.Call(context.Background(), name, json.RawMessage(`{}`))
+		if err != nil || !result.IsError || !strings.Contains(result.Output, "unknown tool") {
+			t.Errorf("calling %s = %+v, %v; want unknown tool", name, result, err)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"nodevas/internal/runner"
+	"nodevas/internal/runnerwire"
 )
 
 // gitCommands answers `git rev-parse --show-toplevel` with the directory it
@@ -75,7 +76,7 @@ func TestPlanLocalRunner(t *testing.T) {
 	// Today's refusal of --with-runner on a networked hub, word for word.
 	if _, _, err := planLocalRunner(true, false, nil, true, false, false); err == nil ||
 		err.Error() != "--with-runner is for a server on this machine only (a loopback --listen, no proxy); "+
-			"on a networked hub, link each runner from the Runners page" {
+			"on a networked hub, link each runner under Settings → Agents → Link a new device" {
 		t.Fatalf("networked --with-runner: %v", err)
 	}
 }
@@ -104,9 +105,10 @@ func TestPrepareLocalRunnerWritesTokenAndReposOnce(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "local-runners", "w.json")
 	repo := t.TempDir()
-	var seen []string
+	var seen, names []string
 	mint := func(_ context.Context, existing, name string) (string, bool, error) {
 		seen = append(seen, existing)
+		names = append(names, name)
 		if existing != "" {
 			return existing, false, nil
 		}
@@ -120,6 +122,12 @@ func TestPrepareLocalRunnerWritesTokenAndReposOnce(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != "" || seen[1] != cliTestToken {
 		t.Fatalf("mint saw %q: the stored token is not offered back", seen)
+	}
+	// The web translates the local runner by this fixed id.
+	for _, name := range names {
+		if name != runnerwire.LocalRunnerName {
+			t.Fatalf("local runner registered as %q, not the fixed id %q", name, runnerwire.LocalRunnerName)
+		}
 	}
 	cfg, err := runner.LoadConfig(path)
 	if err != nil {

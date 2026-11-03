@@ -1,5 +1,5 @@
 /**
- * Project picker [B-06].
+ * Project picker.
  *
  * Imperative like {@link confirmAction}, because the callers are a toolbar
  * button and a keyboard shortcut — neither of which owns a place to hang

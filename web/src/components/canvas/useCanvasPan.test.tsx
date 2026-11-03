@@ -16,9 +16,10 @@ function board() {
     scrollLeft: 0,
     scrollTop: 0,
   });
-  Object.defineProperty(element, "clientWidth", { value: 800 });
-  Object.defineProperty(element, "clientHeight", { value: 600 });
+  Object.defineProperty(element, "clientWidth", { configurable: true, value: 800 });
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 600 });
   Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
     value: () => ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }),
   });
   return element as HTMLDivElement;
@@ -215,5 +216,39 @@ describe("useCanvasPan", () => {
     });
 
     expect(result.current.state.zoom).toBe(MAX_ZOOM);
+  });
+
+  // A pan frame that measures the board after the last frame's writes forces
+  // the browser to lay the whole board out again on the spot. The board is
+  // measured once when the gesture starts; every move after that works from
+  // the scroll the pan itself wrote.
+  it("does not read getBoundingClientRect during pan move frames", () => {
+    const element = board();
+    const inner = element.querySelector<HTMLElement>(".board-inner")!;
+    const boardRect = vi.spyOn(element, "getBoundingClientRect");
+    const innerRect = vi.spyOn(inner, "getBoundingClientRect");
+    const { result } = panHook(element);
+
+    act(() => {
+      result.current.handlers.onPointerDown(event(element, 1, 200, 200));
+    });
+    boardRect.mockClear();
+    innerRect.mockClear();
+
+    let point: ReturnType<typeof result.current.pointFromClient> = null;
+    act(() => {
+      for (let i = 1; i <= 10; i++) {
+        result.current.handlers.onPointerMove(event(element, 1, 200 - i * 20, 200 - i * 10));
+        point = result.current.pointFromClient(200 - i * 20, 200 - i * 10);
+      }
+    });
+
+    expect(boardRect).not.toHaveBeenCalled();
+    expect(innerRect).not.toHaveBeenCalled();
+    // Still the board point under the pointer: the content started at the
+    // board's top left and has scrolled 200 left and 100 up under it.
+    expect(element.scrollLeft).toBe(200);
+    expect(element.scrollTop).toBe(100);
+    expect(point).toEqual({ x: 200, y: 200 });
   });
 });

@@ -3,13 +3,13 @@ package autopilot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"nodevas/internal/copilot/provider"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -50,7 +50,7 @@ const (
 )
 
 // ErrAdvisorAnswer: the advisor model answered, but not with a usable choice.
-var ErrAdvisorAnswer = errors.New("the advisor model's answer is not a usable choice")
+var ErrAdvisorAnswer = locale.Errorf("the advisor model's answer is not a usable choice", "顧問模型的回答不是可用的選擇")
 
 // LLMAdvisor is an Advisor backed by the owner's advisor model.
 type LLMAdvisor struct {
@@ -134,18 +134,18 @@ func advisorPrompt(in ChooseInput, candidates []advisorCandidate) string {
 // Choose asks the owner's advisor model who should implement the task.
 func (a *LLMAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error) {
 	if a == nil || a.relay == nil {
-		return Choice{}, errors.New("no advisor model is reachable from this server")
+		return Choice{}, locale.Errorf("no advisor model is reachable from this server", "這個伺服器連不到任何顧問模型")
 	}
 	candidates := advisorCandidates(in.Agents)
 	if len(candidates) == 0 {
-		return Choice{}, errors.New("the advisor has no installed agent to choose from")
+		return Choice{}, locale.Errorf("the advisor has no installed agent to choose from", "顧問沒有已安裝的 agent 可選")
 	}
 	runner, err := a.relay.TargetFor(ctx, in.OwnerID, runnerwire.LLMPurposeAdvisor)
 	if err != nil {
 		return Choice{}, err
 	}
 	if runner.Info == nil || runner.Info.Advisor == nil {
-		return Choice{}, errors.New("your runner reports no advisor model")
+		return Choice{}, locale.Errorf("your runner reports no advisor model", "你的 runner 回報沒有顧問模型")
 	}
 	model := *runner.Info.Advisor
 	messages, err := json.Marshal([]provider.Message{{Role: provider.RoleUser,
@@ -165,11 +165,11 @@ func (a *LLMAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error)
 		Effort: "low", System: advisorSystem, Messages: messages, MaxTokens: advisorMaxTokens,
 	}, nil)
 	if err != nil {
-		return Choice{}, fmt.Errorf("asking the advisor model: %w", err)
+		return Choice{}, locale.Errorf("asking the advisor model: %w", "詢問顧問模型：%w", err)
 	}
 	var answer provider.Message
 	if err := json.Unmarshal(done.Message, &answer); err != nil {
-		return Choice{}, fmt.Errorf("%w: unreadable message", ErrAdvisorAnswer)
+		return Choice{}, locale.Errorf("%w: unreadable message", "%w：訊息無法讀取", ErrAdvisorAnswer)
 	}
 	var text strings.Builder
 	for _, block := range answer.Blocks {
@@ -190,7 +190,7 @@ func (a *LLMAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error)
 func parseAdvisorAnswer(text string, candidates []advisorCandidate) (Choice, error) {
 	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
 	if start < 0 || end < start {
-		return Choice{}, fmt.Errorf("%w: no JSON object", ErrAdvisorAnswer)
+		return Choice{}, locale.Errorf("%w: no JSON object", "%w：沒有 JSON 物件", ErrAdvisorAnswer)
 	}
 	var raw struct {
 		Implement []runnerwire.AgentModel `json:"implement"`
@@ -200,14 +200,14 @@ func parseAdvisorAnswer(text string, candidates []advisorCandidate) (Choice, err
 		return Choice{}, fmt.Errorf("%w: %v", ErrAdvisorAnswer, err)
 	}
 	if len(raw.Implement) == 0 {
-		return Choice{}, fmt.Errorf("%w: no agent chosen", ErrAdvisorAnswer)
+		return Choice{}, locale.Errorf("%w: no agent chosen", "%w：沒有選擇 agent", ErrAdvisorAnswer)
 	}
 	var chain []runnerwire.AgentModel
 	seen := map[string]bool{}
 	for _, pick := range raw.Implement {
 		match, ok := findAdvisorCandidate(candidates, pick)
 		if !ok {
-			return Choice{}, fmt.Errorf("%w: %q/%q is not one of the candidates", ErrAdvisorAnswer,
+			return Choice{}, locale.Errorf("%w: %q/%q is not one of the candidates", "%w：「%s/%s」不是候選之一", ErrAdvisorAnswer,
 				advisorOneLine(pick.Agent, 40), advisorOneLine(pick.Model, 80))
 		}
 		key := match.agent + "\x00" + match.model

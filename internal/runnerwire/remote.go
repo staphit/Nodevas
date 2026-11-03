@@ -29,6 +29,9 @@ type AutoAcceptPolicy struct {
 	// AllowRemoteTyping: the dispatcher may type into an auto-accepted
 	// interactive run's terminal. Default false: view only.
 	AllowRemoteTyping bool `json:"allowRemoteTyping,omitempty"`
+	// AllowVerify: auto-accept verify jobs (the repo's own test command, no
+	// agent) for the listed repos. Default false: asked at the terminal.
+	AllowVerify bool `json:"allowVerify,omitempty"`
 }
 
 // StepUpWindowSeconds is how long a step-up lasts by default; the server's

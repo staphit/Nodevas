@@ -75,6 +75,10 @@ type RunChanges struct {
 	// Patch is the unified diff, at most MaxPatchBytes.
 	Patch          string `json:"patch,omitempty"`
 	PatchTruncated bool   `json:"patchTruncated,omitempty"`
+	// PatchPruned says history retention cleared a run's patch on the hub;
+	// the files and counts are what is left. The hub ignores it in a
+	// runner's report.
+	PatchPruned bool `json:"patchPruned,omitempty"`
 }
 
 // PRInfo is a run's pull request as the runner last saw it.

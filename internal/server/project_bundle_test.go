@@ -23,7 +23,7 @@ func bundleWorkspaceForTest(t *testing.T) *project.ProjectManager {
 		t.Fatalf("create grouping root: %v", err)
 	}
 	for _, name := range []string{"Stellaris/Story", "Stellaris/Notes"} {
-		if err := pm.Activate(name, true, ""); err != nil {
+		if err := pm.Activate(name, true, "", ""); err != nil {
 			t.Fatalf("create %s: %v", name, err)
 		}
 	}

@@ -88,3 +88,50 @@ func TestMiniLMMissingPythonIsActionable(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 }
+
+// TestMiniLMEmbedsChinese runs the real helper on text a Big5/cp950 console
+// cannot encode. Under mojibake both words arrive as "??" and embed alike.
+func TestMiniLMEmbedsChinese(t *testing.T) {
+	python := os.Getenv("NODEVAS_TEST_RAG_PYTHON")
+	if python == "" {
+		t.Skip("set NODEVAS_TEST_RAG_PYTHON to run the MiniLM helper")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	worker := MiniLM(python, os.Stderr)
+	defer worker.Close()
+	distinct, err := worker.Embed(ctx, []string{"这个", "简体"})
+	if err != nil && strings.Contains(err.Error(), "rag-requirements") {
+		t.Skipf("helper dependencies missing: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := worker.Embed(ctx, []string{"林曉怕水", "林曉怕水"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, vector := range append(distinct, same...) {
+		if len(vector) != 384 {
+			t.Fatalf("dimension: %d", len(vector))
+		}
+	}
+	if cosine(distinct[0], distinct[1]) >= 0.999 {
+		t.Fatal("这个 and 简体 embed alike: the helper is not reading UTF-8")
+	}
+	for i := range same[0] {
+		if same[0][i] != same[1][i] {
+			t.Fatal("identical inputs gave different vectors")
+		}
+	}
+}
+
+func cosine(a, b []float64) float64 {
+	var dot, na, nb float64
+	for i := range a {
+		dot += a[i] * b[i]
+		na += a[i] * a[i]
+		nb += b[i] * b[i]
+	}
+	return dot / math.Sqrt(na*nb)
+}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"nodevas/internal/identity"
 	"sync"
 	"sync/atomic"
@@ -29,7 +31,9 @@ type Hub struct {
 	actorConns map[string]int
 	ipConns    map[string]int
 	reserved   int
-	closed     bool
+	// limits caps reserved, actorConns and ipConns; see ConnectionLimits.
+	limits ConnectionLimits
+	closed bool
 	// removals counts connection cleanups after a client has left conns but
 	// before leaveAllDocs has durably handed its last document to the sidecar.
 	// Close waits for it so a workspace is never torn down underneath that I/O.
@@ -50,6 +54,9 @@ type Hub struct {
 	// buckets bound sidecar encodes/fsyncs even for one-byte snapshots.
 	snapshotActorCadence map[string]*snapshotCadence
 	snapshotDocCadence   map[docPersistenceKey]*snapshotCadence
+	// relayBudgets is each account's allowance for the frames relayed to its
+	// whole room (cursors, drag ghosts), shared by all of its connections.
+	relayBudgets map[string]*relayBudget
 	// Large sidecar encoding duplicates the immutable strings into one output
 	// buffer. Serializing those copies prevents several 24 MiB documents from
 	// multiplying process memory at the same instant.
@@ -89,6 +96,11 @@ type wsClient struct {
 	ip       string
 	queueMu  sync.Mutex
 	removed  bool
+	// stale is the tables this reader skipped while it was behind (offerTable),
+	// and staleDragEnds the peers whose drag end it skipped (offerDrag), sent
+	// once it has caught up (catchUp). Guarded by queueMu.
+	stale         staleTables
+	staleDragEnds map[string]struct{}
 
 	mu         sync.Mutex
 	actor      identity.Actor
@@ -121,6 +133,14 @@ type docOutboundSnapshot struct {
 	tailBytes       int
 }
 
+// staleTables says which of a room's tables a reader is owed.
+type staleTables uint8
+
+const (
+	stalePresence staleTables = 1 << iota
+	staleLocks
+)
+
 type clientOutbound struct {
 	payload  []byte
 	snapshot *docOutboundSnapshot
@@ -134,6 +154,21 @@ type docSnapshotBlob struct {
 type snapshotCadence struct {
 	tokens float64
 	at     time.Time
+}
+
+// relayBudget is a frame count and a byte volume, refilled from one clock.
+type relayBudget struct {
+	tokens float64
+	bytes  float64
+	at     time.Time
+}
+
+func (budget *relayBudget) refill(now time.Time) {
+	if elapsed := now.Sub(budget.at).Seconds(); elapsed > 0 {
+		budget.tokens = min(float64(wsRelayBurst), budget.tokens+elapsed*wsRelayPerSecond)
+		budget.bytes = min(float64(wsRelayByteBurst), budget.bytes+elapsed*wsRelayBytesPerSec)
+		budget.at = now
+	}
 }
 
 type docPersistence struct {
@@ -166,13 +201,75 @@ func NewHub() *Hub {
 		docEncode:            make(chan struct{}, 1),
 		snapshotActorCadence: map[string]*snapshotCadence{},
 		snapshotDocCadence:   map[docPersistenceKey]*snapshotCadence{},
+		relayBudgets:         map[string]*relayBudget{},
+		limits:               DefaultConnectionLimits(),
 	}
 }
 
+// ConnectionLimits caps live WebSocket connections: in all, per account (an
+// unauthenticated loopback client counts by name), and per client IP.
+//
+// A connection is cheap to keep (broadcasts are small and fan out from one
+// goroutine), so the caps are about runaway clients, not load. A person with
+// several tabs, devices and the desktop app open can hold a dozen, and behind
+// a proxy every user arrives from a few addresses, hence the generous per-IP
+// cap.
+type ConnectionLimits struct {
+	Total      int
+	PerAccount int
+	PerIP      int
+}
+
+// DefaultConnectionLimits is what a hub enforces unless told otherwise.
+func DefaultConnectionLimits() ConnectionLimits {
+	return ConnectionLimits{
+		Total:      maxWSConnections,
+		PerAccount: maxWSConnectionsPerActor,
+		PerIP:      maxWSConnectionsPerIP,
+	}
+}
+
+// SetConnectionLimits replaces the caps. A zero or negative field keeps its
+// default. Connections already open stay open; the caps apply to new ones.
+func (h *Hub) SetConnectionLimits(limits ConnectionLimits) {
+	defaults := DefaultConnectionLimits()
+	if limits.Total <= 0 {
+		limits.Total = defaults.Total
+	}
+	if limits.PerAccount <= 0 {
+		limits.PerAccount = defaults.PerAccount
+	}
+	if limits.PerIP <= 0 {
+		limits.PerIP = defaults.PerIP
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.limits = limits
+}
+
+// ConnectionLimits reports the caps in force.
+func (h *Hub) ConnectionLimits() ConnectionLimits {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.limits
+}
+
+// ConnectionCount is the number of live websocket connections, for
+// /api/metrics. A nil hub has none.
+func (h *Hub) ConnectionCount() int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.conns)
+}
+
 const (
-	maxWSConnections         = 128
-	maxWSConnectionsPerActor = 8
-	maxWSConnectionsPerIP    = 16
+	// Default connection caps (ConnectionLimits); serve can change them.
+	maxWSConnections         = 512
+	maxWSConnectionsPerActor = 16
+	maxWSConnectionsPerIP    = 32
 	wsMessageBurst           = 20
 	wsMessagesPerSecond      = 2
 	wsPingInterval           = 30 * time.Second
@@ -199,6 +296,25 @@ const (
 	maxSnapshotActorCadences = 1024
 	maxAwarenessBytes        = 16 << 10
 	maxDragIDs               = 200
+
+	// Cursors and drag ghosts are relayed to the whole room, so the hub sends
+	// what one account streams once per reader. The account's connections
+	// share one allowance for them: more connections buy no bigger share of
+	// the uplink. Twice one connection's frames, because a second window still
+	// reports its caret; one connection's bytes, because only the window under
+	// the pointer sends anything large. A frame past it is dropped rather than
+	// refused, since the next one supersedes it anyway.
+	wsRelayBurst       = 2 * wsPayloadBurst
+	wsRelayPerSecond   = 2 * wsPayloadPerSecond
+	wsRelayByteBurst   = wsPayloadByteBurst
+	wsRelayBytesPerSec = wsPayloadBytesPerSec
+	maxRelayBudgets    = 1024
+
+	// A window holds one soft lock, on the document its editor shows, and an
+	// account may open maxWSConnectionsPerActor windows: twice that is far
+	// past what a person holds. The lock table goes whole to everybody in the
+	// room on every change, which is why it needs a bound at all.
+	maxLocksPerActor = 2 * maxWSConnectionsPerActor
 	// One frame's ceiling. Big enough for an awareness update carrying a
 	// selection in a long document, small enough that 128 connections cannot
 	// each park a megabyte in the read buffer.
@@ -219,9 +335,9 @@ func (h *Hub) reserveConnection(actor identity.Actor, ip string) bool {
 	actorKey := actorConnectionKey(actor)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || h.reserved >= maxWSConnections ||
-		h.actorConns[actorKey] >= maxWSConnectionsPerActor ||
-		h.ipConns[ip] >= maxWSConnectionsPerIP {
+	if h.closed || h.reserved >= h.limits.Total ||
+		h.actorConns[actorKey] >= h.limits.PerAccount ||
+		h.ipConns[ip] >= h.limits.PerIP {
 		return false
 	}
 	h.reserved++
@@ -252,6 +368,11 @@ func (h *Hub) releaseReservationLocked(actorKey, ip string) {
 	}
 }
 
+// ErrLookupFault, wrapped in a project resolver's error, says the project
+// could not be looked up (the disk could not be read): a passing fault, not
+// an unknown or a forbidden project.
+var ErrLookupFault = errors.New("project lookup failed")
+
 // SetProjectResolver teaches the hub how to turn a project name into a room.
 func (h *Hub) SetProjectResolver(resolve func(name string) (string, error)) {
 	h.mu.Lock()
@@ -262,6 +383,10 @@ func (h *Hub) SetProjectResolver(resolve func(name string) (string, error)) {
 type Event struct {
 	Type string `json:"type"` // graph-changed | node-changed | state-changed | presence | locks | awareness | graph-drag | graph-ops
 	ID   string `json:"id,omitempty"`
+	// agent-ask: the new ask's kind (approval, question, choice,
+	// permission) and the run asking, if any.
+	Kind  string `json:"kind,omitempty"`
+	RunID string `json:"runId,omitempty"`
 
 	Project string          `json:"project,omitempty"`
 	Peers   []Peer          `json:"peers,omitempty"`
@@ -345,7 +470,13 @@ type Lock struct {
 
 // Broadcast queues an event for every client, whatever project they watch. Use
 // it for workspace-level news; project changes belong in BroadcastRoom.
+//
+// Every broadcast method is safe on a nil *Hub, which is what a store or a
+// watcher running without a server (tests, the remote package) hands in.
 func (h *Hub) Broadcast(evType, id string) {
+	if h == nil {
+		return // no hub (tests, tools): nobody to tell
+	}
 	h.send(Event{Type: evType, ID: id}, func(*wsClient) bool { return true })
 }
 
@@ -353,6 +484,9 @@ func (h *Hub) Broadcast(evType, id string) {
 // whatever project they watch: news that is that person's alone, such as
 // their current project moving, which nobody else should be pulled along by.
 func (h *Hub) BroadcastActor(actorID, evType, id string) {
+	if h == nil {
+		return
+	}
 	if actorID == "" {
 		return
 	}
@@ -369,6 +503,35 @@ func (h *Hub) BroadcastActor(actorID, evType, id string) {
 // the popout editor) do not send a subscription, and going silent on them
 // would look like the server stopped noticing their edits.
 func (h *Hub) BroadcastRoom(room, evType, id string) {
+	h.BroadcastRoomEvent(room, Event{Type: evType, ID: id})
+}
+
+// BroadcastRoomEvent is BroadcastRoom for an event with more than an id;
+// an empty room reaches every client, as Broadcast does.
+func (h *Hub) BroadcastRoomEvent(room string, event Event) {
+	if h == nil {
+		return
+	}
+	if room == "" {
+		h.send(event, func(*wsClient) bool { return true })
+		return
+	}
+	h.send(event, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+	})
+}
+
+// BroadcastReaders queues an event for every client that may read a project,
+// whatever room it watches: the room's own watchers, and anyone else the
+// access check lets watch it. It is for views that span projects (Station's
+// building), which must hear about a project they are not in, and only from
+// projects they may read. Keep the id free of anything about the project.
+func (h *Hub) BroadcastReaders(room, evType, id string) {
+	if h == nil {
+		return
+	}
 	if room == "" {
 		h.Broadcast(evType, id)
 		return
@@ -376,7 +539,7 @@ func (h *Hub) BroadcastRoom(room, evType, id string) {
 	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
 		client.mu.Lock()
 		defer client.mu.Unlock()
-		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+		return client.room == room || h.mayWatch(client.actor, room)
 	})
 }
 
@@ -385,25 +548,82 @@ func (h *Hub) BroadcastRoom(room, evType, id string) {
 // The sender is left out rather than filtering on `From` in the browser: it
 // already has what it sent, and the round trip is the one thing that would
 // make a live cursor lag behind the pointer drawing it.
+//
+// Every frame here is superseded by the sender's next one, so neither limit
+// below ever costs anybody a connection: a frame past the sender account's
+// allowance goes nowhere, and a reader that is behind skips it (offer).
 func (h *Hub) relay(from *wsClient, event Event) {
 	from.mu.Lock()
 	room := from.room
+	actorKey := actorConnectionKey(from.actor)
 	from.mu.Unlock()
 	event.From = from.id
-	h.send(event, func(client *wsClient) bool {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("ws marshal: %v", err)
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.allowRelayLocked(actorKey, time.Now(), len(payload)) {
+		return
+	}
+	for client := range h.conns {
 		if client == from {
-			return false
+			continue
 		}
 		client.mu.Lock()
-		defer client.mu.Unlock()
-		return client.room == room
-	})
+		inRoom := client.room == room
+		client.mu.Unlock()
+		if !inRoom {
+			continue
+		}
+		if event.Drag != nil {
+			client.offerDrag(from.id, event.Drag.Active, clientOutbound{payload: payload})
+		} else {
+			client.offer(clientOutbound{payload: payload})
+		}
+	}
+}
+
+// allowRelayLocked charges one relayed frame of size bytes to its sender's
+// account. Caller holds h.mu.
+func (h *Hub) allowRelayLocked(actorKey string, now time.Time, size int) bool {
+	budget := h.relayBudgets[actorKey]
+	if budget == nil {
+		if len(h.relayBudgets) >= maxRelayBudgets {
+			// A full allowance is what a new entry starts with, so forgetting
+			// one loses nothing. Pruned only at the bound, which keeps the
+			// common path constant-time and the map bounded.
+			for key, other := range h.relayBudgets {
+				other.refill(now)
+				if other.tokens >= wsRelayBurst && other.bytes >= wsRelayByteBurst {
+					delete(h.relayBudgets, key)
+				}
+			}
+			if len(h.relayBudgets) >= maxRelayBudgets {
+				return false
+			}
+		}
+		budget = &relayBudget{tokens: wsRelayBurst, bytes: wsRelayByteBurst, at: now}
+		h.relayBudgets[actorKey] = budget
+	}
+	budget.refill(now)
+	if budget.tokens < 1 || budget.bytes < float64(size) {
+		return false
+	}
+	budget.tokens--
+	budget.bytes -= float64(size)
+	return true
 }
 
 // BroadcastOps tells a room which ops just landed, so a client can apply them
 // where it stands instead of reloading the graph. `from` is the peer that made
 // the change, echoed back so it can ignore its own.
 func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
+	if h == nil {
+		return
+	}
 	if len(ops) == 0 {
 		h.BroadcastRoom(room, "graph-changed", "")
 		return
@@ -421,6 +641,9 @@ func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
 }
 
 func (h *Hub) send(event Event, want func(*wsClient) bool) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)
@@ -445,6 +668,9 @@ func (h *Hub) send(event Event, want func(*wsClient) bool) {
 
 // sendTo delivers one event to a single client.
 func (h *Hub) sendTo(client *wsClient, event Event) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)
@@ -487,9 +713,7 @@ func (h *Hub) releaseSnapshotBlobLocked(blob *docSnapshotBlob) {
 	blob.refs--
 	if blob.refs == 0 {
 		h.snapshotBytes -= len(blob.payload)
-		if h.snapshotBytes < 0 {
-			panic("realtime snapshot accounting underflow")
-		}
+		h.clampSnapshotBytesLocked("snapshot blob release")
 	}
 }
 
@@ -499,15 +723,27 @@ func (h *Hub) releaseSnapshotJobLocked(snapshot *docOutboundSnapshot) {
 	}
 	h.releaseSnapshotBlobLocked(snapshot.blob)
 	h.snapshotBytes -= snapshot.tailBytes
-	if h.snapshotBytes < 0 {
-		panic("realtime snapshot accounting underflow")
+	h.clampSnapshotBytesLocked("snapshot job release")
+}
+
+// clampSnapshotBytesLocked repairs a negative snapshot byte count. Releasing
+// more than was charged is a bug, but not one worth the hub: it used to panic
+// here, with h.mu held, and the writer's recover then deadlocked on h.mu in
+// remove. Logging and clamping keeps the cap working (a count too low lets
+// through at most one cap's worth more) and every other client connected.
+func (h *Hub) clampSnapshotBytesLocked(where string) {
+	if h.snapshotBytes >= 0 {
+		return
 	}
+	slog.Error("realtime snapshot accounting underflow; clamping to zero",
+		slog.String("where", where), slog.Int("bytes", h.snapshotBytes))
+	h.snapshotBytes = 0
 }
 
 func (h *Hub) releaseSnapshotJob(snapshot *docOutboundSnapshot) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.releaseSnapshotJobLocked(snapshot)
-	h.mu.Unlock()
 }
 
 // queueSnapshotLocked enqueues one logical snapshot job. It must be called
@@ -553,6 +789,104 @@ func (client *wsClient) enqueue(out clientOutbound) bool {
 	}
 }
 
+// offer queues a frame that the sender's next one supersedes. Unlike a full
+// enqueue, which costs the connection, a connection already half a queue
+// behind just skips the frame: it misses something about to be stale, keeps
+// its locks and its documents, and the other half of its queue stays free for
+// the events it cannot miss.
+func (client *wsClient) offer(out clientOutbound) {
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	client.offerLocked(out)
+}
+
+// offerLocked is offer for a caller holding queueMu. It reports whether the
+// frame was queued.
+func (client *wsClient) offerLocked(out clientOutbound) bool {
+	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
+		return false
+	}
+	select {
+	case client.outbound <- out:
+		return true
+	default:
+		return false
+	}
+}
+
+// offerDrag is offer for a peer's drag ghost. The end of a drag is the one
+// frame nothing replaces, so a reader that skips it is owed it once it has
+// caught up, else it keeps the ghost. One end per peer, however many it sends.
+func (client *wsClient) offerDrag(from string, active bool, out clientOutbound) {
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	switch {
+	case client.offerLocked(out):
+		delete(client.staleDragEnds, from)
+	case !active && !client.removed && len(client.staleDragEnds) < maxWSConnections:
+		// Bounded by the peers there can be, whose ids it holds.
+		if client.staleDragEnds == nil {
+			client.staleDragEnds = map[string]struct{}{}
+		}
+		client.staleDragEnds[from] = struct{}{}
+	}
+}
+
+// offerTable queues one of a room's tables: who is in it, or which documents
+// are held. Each replaces the last, and anybody in the room can make one
+// change (a viewer by saying which document it looks at), so a reader that is
+// behind skips it as it would a cursor rather than being dropped, which would
+// release its locks and its live documents. It is sent the current table once
+// it has caught up.
+func (h *Hub) offerTable(client *wsClient, table staleTables, event Event) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("ws marshal: %v", err)
+		return
+	}
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	if client.offerLocked(clientOutbound{payload: payload}) {
+		client.stale &^= table
+	} else if !client.removed {
+		client.stale |= table
+	}
+}
+
+// catchUp sends a reader that has caught up what it skipped while it was
+// behind: the drag ends (offerDrag) and the current tables (offerTable).
+// writeLoop calls it after every frame: a frame is skipped only with half a
+// queue still to write, so the reader always gets here again.
+func (h *Hub) catchUp(client *wsClient) {
+	client.queueMu.Lock()
+	stale := client.stale
+	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
+		stale = 0
+	} else {
+		for from := range client.staleDragEnds {
+			payload, err := json.Marshal(Event{Type: "graph-drag", From: from, Drag: &DragGhost{}})
+			if err != nil || !client.offerLocked(clientOutbound{payload: payload}) {
+				break
+			}
+			delete(client.staleDragEnds, from)
+		}
+	}
+	client.stale &^= stale
+	client.queueMu.Unlock()
+	if stale == 0 {
+		return
+	}
+	client.mu.Lock()
+	room := client.room
+	client.mu.Unlock()
+	if stale&stalePresence != 0 {
+		h.sendPresence(room, client)
+	}
+	if stale&staleLocks != 0 {
+		h.sendLocks(room, client)
+	}
+}
+
 func (h *Hub) writeLoop(client *wsClient) {
 	ping := time.NewTicker(wsPingInterval)
 	defer ping.Stop()
@@ -576,6 +910,7 @@ func (h *Hub) writeLoop(client *wsClient) {
 					h.remove(client)
 					return
 				}
+				h.catchUp(client)
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -585,6 +920,7 @@ func (h *Hub) writeLoop(client *wsClient) {
 				h.remove(client)
 				return
 			}
+			h.catchUp(client)
 		case <-ping.C:
 			if client.authorized != nil && !client.authorized() {
 				h.remove(client)
@@ -865,11 +1201,15 @@ func (h *Hub) handleMessage(client *wsClient, message clientMessage) {
 		h.subscribe(client, message.Project)
 	case "presence":
 		client.mu.Lock()
+		changed := client.nodeID != message.NodeID || client.editing != message.Editing
 		client.nodeID = message.NodeID
 		client.editing = message.Editing
 		room := client.room
 		client.mu.Unlock()
-		h.publishPresence(room)
+		// Saying again what the room already knows changes nothing.
+		if changed {
+			h.publishPresence(room)
+		}
 	case "lock":
 		h.acquireLock(client, message.NodeID, message.Steal)
 	case "unlock":
@@ -915,22 +1255,36 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 	resolve := h.resolve
 	h.mu.Unlock()
 
+	client.mu.Lock()
+	actor := client.actor
+	previous := client.room
+	client.mu.Unlock()
+
 	room := ""
 	if resolve != nil && project != "" {
 		resolved, err := resolve(project)
-		if err != nil {
-			// An unknown project leaves the client in the catch-all room
-			// rather than silently muted.
+		if errors.Is(err, ErrLookupFault) {
+			// Not an answer about the project: the client stays where it
+			// was and is not told it lost access; its next subscribe
+			// tries again.
 			log.Printf("ws subscribe %q: %v", project, err)
+			return
+		}
+		if err != nil {
+			log.Printf("ws subscribe %q: %v", project, err)
+			// With project access, a member is refused an unknown project
+			// as a restricted one: two answers would tell which restricted
+			// names exist. Otherwise it leaves the client in the catch-all
+			// room rather than silently muted.
+			if h.accessFunc() != nil && !actor.IsAdmin() {
+				h.deny(client, previous, project)
+				return
+			}
 		} else {
 			room = resolved
 		}
 	}
 
-	client.mu.Lock()
-	actor := client.actor
-	previous := client.room
-	client.mu.Unlock()
 	if !h.mayWatch(actor, room) {
 		// Not the catch-all either: that would hand it every other room's
 		// events it may watch, and this one's it may not, by asking.
@@ -940,6 +1294,9 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 
 	client.mu.Lock()
 	previous = client.room
+	// Staying in the room, already looking at nothing, changes nobody's
+	// table: only this socket is owed it.
+	unchanged := previous == room && client.nodeID == "" && !client.editing
 	client.room = room
 	client.project = project
 	client.nodeID = ""
@@ -955,8 +1312,14 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 		_ = h.leaveAllDocs(client)
 		h.publishPresence(previous)
 	}
-	h.publishPresence(room)
-	h.publishLocks(room)
+	// Each room whose table changed hears it once.
+	if unchanged {
+		h.sendPresence(room, client)
+	} else {
+		h.publishPresence(room)
+	}
+	// Joining changes nobody's locks: only the joiner needs the table.
+	h.sendLocks(room, client)
 }
 
 // acquireLock takes the soft lock on a document, or reports who holds it.
@@ -975,6 +1338,7 @@ func (h *Hub) acquireLock(client *wsClient, nodeID string, steal bool) {
 		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID})
 		return
 	}
+	actorKey := actorConnectionKey(actor)
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -984,20 +1348,43 @@ func (h *Hub) acquireLock(client *wsClient, nodeID string, steal bool) {
 		h.mu.Unlock()
 		return
 	}
-	if h.locks[room] == nil {
-		h.locks[room] = map[string]*nodeLock{}
-	}
 	held, taken := h.locks[room][nodeID]
 	switch {
-	case !taken || held.client == client || steal:
-		h.locks[room][nodeID] = &nodeLock{client: client, actor: actor, since: time.Now()}
+	case taken && held.client == client:
+		// Already this connection's: nothing changed, so only the asker is
+		// told, not the whole room again.
 		h.mu.Unlock()
-		h.publishLocks(room)
-	default:
+		h.sendLocks(room, client)
+	case taken && !steal:
 		holder := held.actor
 		h.mu.Unlock()
 		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID, Actor: &holder})
+	case (!taken || actorConnectionKey(held.actor) != actorKey) && h.actorLockCountLocked(actorKey) >= maxLocksPerActor:
+		// Past the account's share. Moving a lock between its own windows
+		// adds none, so that is never refused here.
+		h.mu.Unlock()
+		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID})
+	default:
+		if h.locks[room] == nil {
+			h.locks[room] = map[string]*nodeLock{}
+		}
+		h.locks[room][nodeID] = &nodeLock{client: client, actor: actor, since: time.Now()}
+		h.mu.Unlock()
+		h.publishLocks(room)
 	}
+}
+
+// actorLockCountLocked counts the locks one account holds, in every room.
+func (h *Hub) actorLockCountLocked(actorKey string) int {
+	count := 0
+	for _, locks := range h.locks {
+		for _, held := range locks {
+			if actorConnectionKey(held.actor) == actorKey {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func (h *Hub) releaseLock(client *wsClient, nodeID string) {
@@ -1006,11 +1393,16 @@ func (h *Hub) releaseLock(client *wsClient, nodeID string) {
 	client.mu.Unlock()
 
 	h.mu.Lock()
-	if held, ok := h.locks[room][nodeID]; ok && held.client == client {
+	held, ok := h.locks[room][nodeID]
+	released := ok && held.client == client
+	if released {
 		delete(h.locks[room], nodeID)
 	}
 	h.mu.Unlock()
-	h.publishLocks(room)
+	// An unlock of a lock this connection does not hold changes nothing.
+	if released {
+		h.publishLocks(room)
+	}
 }
 
 func (h *Hub) releaseAll(client *wsClient, room string) {
@@ -1030,6 +1422,12 @@ func (h *Hub) releaseAll(client *wsClient, room string) {
 
 // publishPresence tells a room who is in it and what they are looking at.
 func (h *Hub) publishPresence(room string) {
+	h.sendPresence(room, nil)
+}
+
+// sendPresence is publishPresence for one client of the room, or for all of
+// them when only is nil.
+func (h *Hub) sendPresence(room string, only *wsClient) {
 	h.mu.Lock()
 	peers := make([]Peer, 0, len(h.conns))
 	targets := make([]*wsClient, 0, len(h.conns))
@@ -1043,14 +1441,14 @@ func (h *Hub) publishPresence(room string) {
 			Editing: client.editing,
 			Color:   peerColor(client.actor),
 		}
-		project := client.project
 		client.mu.Unlock()
 		if !inRoom {
 			continue
 		}
-		_ = project
 		peers = append(peers, peer)
-		targets = append(targets, client)
+		if only == nil || client == only {
+			targets = append(targets, client)
+		}
 	}
 	h.mu.Unlock()
 
@@ -1058,12 +1456,18 @@ func (h *Hub) publishPresence(room string) {
 		client.mu.Lock()
 		project := client.project
 		client.mu.Unlock()
-		h.sendTo(client, Event{Type: "presence", Project: project, Peers: peers})
+		h.offerTable(client, stalePresence, Event{Type: "presence", Project: project, Peers: peers})
 	}
 }
 
 // publishLocks tells a room which documents are held, and by whom.
 func (h *Hub) publishLocks(room string) {
+	h.sendLocks(room, nil)
+}
+
+// sendLocks is publishLocks for one client of the room, or for all of them
+// when only is nil.
+func (h *Hub) sendLocks(room string, only *wsClient) {
 	h.mu.Lock()
 	held := make([]Lock, 0, len(h.locks[room]))
 	owners := make([]*wsClient, 0, len(h.locks[room]))
@@ -1077,6 +1481,9 @@ func (h *Hub) publishLocks(room string) {
 	}
 	targets := make([]*wsClient, 0, len(h.conns))
 	for client := range h.conns {
+		if only != nil && client != only {
+			continue
+		}
 		client.mu.Lock()
 		inRoom := client.room == room
 		client.mu.Unlock()
@@ -1095,6 +1502,6 @@ func (h *Hub) publishLocks(room string) {
 		client.mu.Lock()
 		project := client.project
 		client.mu.Unlock()
-		h.sendTo(client, Event{Type: "locks", Project: project, Locks: mine})
+		h.offerTable(client, staleLocks, Event{Type: "locks", Project: project, Locks: mine})
 	}
 }

@@ -34,6 +34,16 @@ func (a *API) notifyRoom(r *http.Request, evType, id string) {
 	a.hub.BroadcastRoom(st.Root(), evType, id)
 }
 
+// notifyNodeFiles announces the node documents a graph write rewrote (their
+// frontmatter mirrors the graph). The store's own writes are hidden from the
+// file watcher, so without this an editor holding one of them keeps a revision
+// that no longer exists, and its next save is refused as a conflict.
+func (a *API) notifyNodeFiles(r *http.Request, ids []string) {
+	for _, id := range ids {
+		a.notifyRoom(r, "node-changed", id)
+	}
+}
+
 // PeerHeader names the connection a request was made from, so the change it
 // causes can be sent to the room without bouncing back to its author.
 const PeerHeader = "X-Nodevas-Peer"

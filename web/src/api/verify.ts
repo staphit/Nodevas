@@ -1,3 +1,4 @@
+import { translate } from "../i18n";
 import type { Graph, Issue, RunState, Status } from "../types";
 
 /**
@@ -20,7 +21,7 @@ export class ApiShapeError extends Error {
   endpoint: string;
   field: string;
   constructor(endpoint: string, field: string, expected: string, actual: string) {
-    super(`${endpoint} 回應格式不符：${field} 應為 ${expected}，實際為 ${actual}`);
+    super(translate("api.error.shape", undefined, { endpoint, field, expected, actual }));
     this.name = "ApiShapeError";
     this.endpoint = endpoint;
     this.field = field;
@@ -31,7 +32,7 @@ export type Verifier<T> = (value: unknown, endpoint: string) => T;
 
 function describe(value: unknown): string {
   if (value === null) return "null";
-  if (value === undefined) return "缺少";
+  if (value === undefined) return translate("api.shape.missing");
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
@@ -102,6 +103,18 @@ function checkGraph(check: Check, value: unknown, field: string): void {
     const node = check.object(entry, `${field}.nodes[${index}]`);
     check.string(node.id, `${field}.nodes[${index}].id`);
     check.optionalString(node.title, `${field}.nodes[${index}].title`);
+    check
+      .nullableArray(node.refs, `${field}.nodes[${index}].refs`)
+      .forEach((ref, refIndex) =>
+        check.string(ref, `${field}.nodes[${index}].refs[${refIndex}]`),
+      );
+    checkAcceptance(check, node.acceptance, `${field}.nodes[${index}].acceptance`);
+    checkWorkflow(check, node.workflow, `${field}.nodes[${index}].workflow`);
+  });
+  checkWorkflow(check, graph.workflow, `${field}.workflow`);
+  check.nullableArray(graph.agentRoles, `${field}.agentRoles`).forEach((entry, index) => {
+    const role = check.object(entry, `${field}.agentRoles[${index}]`);
+    check.string(role.id, `${field}.agentRoles[${index}].id`);
   });
   const edges = check.nullableArray(graph.edges, `${field}.edges`);
   edges.forEach((entry, index) => {
@@ -112,6 +125,25 @@ function checkGraph(check: Check, value: unknown, field: string): void {
   if (graph.ui !== undefined && graph.ui !== null) {
     check.object(graph.ui, `${field}.ui`);
   }
+}
+
+/** A node's acceptance criteria: the panel indexes into items[].id/text. */
+function checkAcceptance(check: Check, value: unknown, field: string): void {
+  if (value === undefined || value === null) return;
+  const acceptance = check.object(value, field);
+  check.nullableArray(acceptance.items, `${field}.items`).forEach((entry, index) => {
+    const item = check.object(entry, `${field}.items[${index}]`);
+    check.string(item.id, `${field}.items[${index}].id`);
+    check.string(item.text, `${field}.items[${index}].text`);
+  });
+}
+
+/** A project's (or a Goal's) workflow stages; absent or null is legacy. */
+function checkWorkflow(check: Check, value: unknown, field: string): void {
+  if (value === undefined || value === null) return;
+  const workflow = check.object(value, field);
+  check.string(workflow.preset, `${field}.preset`);
+  check.object(workflow.stages, `${field}.stages`);
 }
 
 function checkIssues(check: Check, value: unknown, field: string): void {
@@ -146,7 +178,7 @@ export const verifyGraphResponse: Verifier<{
   issues: Issue[] | null;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   checkGraph(check, body.graph, "graph");
   check.string(body.rev, "rev");
   checkStatusMap(check, body.statuses, "statuses");
@@ -165,7 +197,7 @@ export const verifyStateResponse: Verifier<{
   statuses: Record<string, Status>;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   checkRunState(check, body.state, "state");
   checkStatusMap(check, body.statuses, "statuses");
   return value as { state: RunState; statuses: Record<string, Status> };
@@ -188,6 +220,9 @@ export interface ProjectsResponse {
     path: string;
     nodes: number;
     isFolder?: boolean;
+    layout?: string;
+    officeStyle?: string;
+    officeStyleSet?: boolean;
   }[];
 }
 
@@ -197,7 +232,7 @@ export const verifyProjectsResponse: Verifier<ProjectsResponse> = (
   endpoint,
 ) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   check.string(body.workspace, "workspace");
   check.string(body.active, "active");
   check.nullableArray(body.workspaces, "workspaces").forEach((entry, index) => {
@@ -223,7 +258,7 @@ export const verifyNodeResponse: Verifier<{
   rev: string;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   check.string(body.id, "id");
   check.string(body.content, "content");
   check.string(body.rev, "rev");

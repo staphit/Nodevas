@@ -15,10 +15,12 @@
   right: max(18px, env(safe-area-inset-right, 0px));
   bottom: max(18px, env(safe-area-inset-bottom, 0px));
   z-index: var(--copilot-z);
-  display: grid;
-  place-items: center;
-  width: 48px;
+  /* A pill: the mic and its name, so it says what it is. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 48px;
+  padding: 0 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--border-strong));
   border-radius: 999px;
   background: var(--accent);
@@ -32,6 +34,108 @@
 .copilot-fab:focus-visible {
   outline: 2px solid var(--st-progress-fg);
   outline-offset: 3px;
+}
+.copilot-fab-label {
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* A phone keeps the round button; the name stays its accessible label. */
+@media (max-width: 480px) {
+  .copilot-fab {
+    padding: 0;
+    width: 48px;
+    justify-content: center;
+  }
+  .copilot-fab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+/* Room the button takes at the bottom right: the rows that end there (the
+   open document's footer, the "More properties" bar and, opened, its Delete
+   node row, the collapsed timeline's header) pad their right edge by it, so
+   nothing they hold sits under the button. The pill is its
+   icon, padding and a label of about six ems; round, it is 48px. Both with
+   the 18px inset and a little air. */
+.app:has(> .copilot-fab) {
+  --copilot-fab-clearance: calc(82px + 78px * var(--font-scale, 1));
+}
+.app:has(> .copilot-fab) .drawer .tab-footer,
+.app:has(> .copilot-fab) .drawer .drawer-more-props > summary,
+.app:has(> .copilot-fab) .drawer .meta-actions,
+.app:has(> .copilot-fab) .lane-wrap.timeline.pane-collapsed > .board-title {
+  padding-right: var(--copilot-fab-clearance);
+}
+/* A document open: the button goes round, as on a phone, so its footer
+   gives up 74px rather than the pill's width. */
+.app:has(.drawer:not(.collapsed-rail)) {
+  --copilot-fab-clearance: 74px;
+}
+.app:has(.drawer:not(.collapsed-rail)) > .copilot-fab {
+  width: 48px;
+  padding: 0;
+  justify-content: center;
+}
+.app:has(.drawer:not(.collapsed-rail)) > .copilot-fab .copilot-fab-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+@media (max-width: 480px) {
+  .app:has(> .copilot-fab) {
+    --copilot-fab-clearance: 74px;
+  }
+}
+/* The button floats over the stage's bottom-right corner. The graph's minimap
+   sits there whenever the graph reaches the bottom of the stage — the
+   timeline below it folded or gone — so it rides above the button then; with
+   an open timeline below, the graph ends well clear of it. */
+.app:has(> .copilot-fab) .lane-wrap.graph:not(:has(~ .lane-wrap.timeline:not(.pane-collapsed))) .graph-minimap {
+  bottom: calc(48px + 18px + 10px);
+}
+/* An open vertical timeline ends there too, and its date ruler is sticky at
+   the right edge: rows scroll out from under the button, the ruler never
+   does. The button stands left of the ruler (56px at 100%, and the board's
+   scrollbar) while such a timeline is open. An open document covers the
+   ruler, and its footer keeps clear of the button where it normally stands,
+   so the button stays put then. */
+.app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)):not(:has(.drawer:not(.collapsed-rail))) > .copilot-fab {
+  right: calc(max(18px, env(safe-area-inset-right, 0px)) + 56px + 16px);
+}
+/* Room below the timeline's last row, so whatever lies under the button can
+   be scrolled clear of it. */
+.app:has(> .copilot-fab) .lane-wrap.timeline .board {
+  padding-bottom: calc(48px + 18px);
+}
+/* Settings scrolls as one page whose last rows end at the bottom right (a
+   row's value and ›): room below them, past the page's own 16px, so the end
+   of the page scrolls clear of the button. */
+.app:has(> .copilot-fab) .settings-page {
+  padding-bottom: calc(48px + 18px + 16px);
+}
+/* The editor leaves room below its last line, so it can always be scrolled
+   clear of the button. */
+.app:has(> .copilot-fab) .drawer .cm-content {
+  padding-bottom: calc(48px + 18px);
+}
+/* On a phone the document fills the screen and the keyboard lifts the
+   lines being typed to where the button floats: while a document is being
+   edited the button steps aside, and comes back when the editor lets go. */
+@media (max-width: 640px) {
+  .app:has(.drawer :is(.cm-editor.cm-focused, textarea:focus, input:focus)) > .copilot-fab {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
 }
 /* A follow-up (a plan run ended) waits unread. */
 .copilot-fab-badge {
@@ -112,7 +216,7 @@
 }
 .copilot-heading {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -123,7 +227,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-icon-btn {
@@ -160,7 +264,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-conversations {
   flex: 1;
@@ -169,7 +273,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-mode-hint {
@@ -177,7 +281,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-mode-bypassPermissions {
@@ -195,7 +299,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--st-ready-bg);
   color: var(--st-ready-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-banner span {
   flex: 1;
@@ -224,14 +328,14 @@
 .copilot-empty {
   margin: auto 8px;
   text-align: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-bubble {
   max-width: 92%;
   padding: 8px 12px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -253,7 +357,7 @@
 }
 .copilot-voice-mark {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-style: normal;
 }
 .copilot-bubble-assistant {
@@ -282,7 +386,7 @@
 }
 .copilot-markdown code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--surface-2);
@@ -302,7 +406,7 @@
 }
 .copilot-markdown table {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-markdown th,
 .copilot-markdown td {
@@ -332,7 +436,7 @@
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: center;
 }
 .copilot-notice.is-error {
@@ -351,7 +455,7 @@
   border-left-width: 3px;
   border-radius: 8px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-tool.is-running,
 .copilot-tool.is-awaiting {
@@ -373,6 +477,9 @@
   gap: 6px;
   min-width: 0;
 }
+.copilot-permission-head {
+  flex-wrap: wrap;
+}
 .copilot-tool-title,
 .copilot-permission-title {
   flex: 1;
@@ -382,18 +489,24 @@
   white-space: nowrap;
   font-weight: 600;
 }
+/* An ask's head carries agent, tool, run, node and countdown chips: the title
+   keeps a real width and the chips wrap to the next line around it. */
+.copilot-permission-title {
+  flex: 1 1 auto;
+  min-width: min(100%, 12ch);
+}
 .copilot-tool-name {
   display: block;
   margin-top: 2px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-badge {
   flex-shrink: 0;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 18px;
   background: var(--surface-2);
   color: var(--text-2);
@@ -433,7 +546,7 @@
 .copilot-tool-detail summary {
   cursor: pointer;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .copilot-tool-detail pre {
   max-height: 220px;
@@ -443,7 +556,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -465,8 +578,15 @@
 }
 .copilot-permission-summary {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.copilot-permission .agent-node-chip,
+.agent-node-chip {
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .copilot-permission-actions {
   display: flex;
@@ -483,7 +603,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .copilot-permission-actions button:hover:not(:disabled) {
@@ -509,7 +629,7 @@
 }
 .copilot-permission-hint {
   margin: 6px 0 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 
@@ -534,7 +654,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.45;
   resize: vertical;
 }
@@ -610,7 +730,7 @@
     display: none;
   }
   .copilot-input {
-    font-size: 16px; /* below 16px iOS zooms the page on focus */
+    font-size: calc(16px * var(--font-scale, 1)); /* below 16px iOS zooms the page on focus */
   }
 }
 
@@ -660,7 +780,7 @@
   gap: 10px;
   padding: 14px;
   overflow: auto;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .copilot-runner-body p {
@@ -682,13 +802,13 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow-wrap: anywhere;
   user-select: all;
 }
 .copilot-runner-note {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-free-options {
   list-style: disc;
@@ -703,7 +823,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
@@ -719,7 +839,7 @@
   border-radius: 6px;
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-runner-steps code {
   font-family: var(--mono);

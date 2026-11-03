@@ -52,6 +52,31 @@ func TestADragGhostTravelsWithItsOffset(t *testing.T) {
 	}
 }
 
+func TestTheEndOfADragClearsTheGhostAndKeepsTheSocket(t *testing.T) {
+	httpServer, _ := hubTestServer(t)
+	first := joinRoom(t, httpServer, "main")
+	second := joinRoom(t, httpServer, "main")
+
+	first.send(map[string]any{
+		"type": "graph-drag", "ids": []string{"alpha"},
+		"dx": 4, "dy": 2, "active": true,
+	})
+	second.await("graph-drag", func(event realtime.Event) bool { return event.Drag != nil && event.Drag.Active })
+	// What the board sends when the pointer is released: no ids, no offset.
+	first.send(map[string]any{
+		"type": "graph-drag", "ids": []string{},
+		"dx": 0, "dy": 0, "active": false,
+	})
+	end := second.await("graph-drag", func(event realtime.Event) bool { return event.Drag != nil && !event.Drag.Active })
+	if len(end.Drag.IDs) != 0 {
+		t.Fatalf("drag end = %+v", end.Drag)
+	}
+	// The sender's socket is still the live one: what the room says next
+	// reaches it, rather than a 1008 that leaves the page deaf.
+	second.send(map[string]any{"type": "awareness", "payload": "AQID"})
+	first.await("awareness", nil)
+}
+
 func TestAnOversizedAwarenessUpdateClosesTheConnection(t *testing.T) {
 	httpServer, _ := hubTestServer(t)
 	peer := joinRoom(t, httpServer, "main")

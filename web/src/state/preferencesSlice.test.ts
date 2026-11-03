@@ -93,7 +93,7 @@ describe("resetUIPreferences", () => {
 
     useApp.getState().resetUIPreferences("explorer");
 
-    expect(useApp.getState().preferences.explorerWidth).toBe(304);
+    expect(useApp.getState().preferences.explorerWidth).toBe(320);
     expect(useApp.getState().preferences.theme).toBe("dark");
   });
 
@@ -103,7 +103,7 @@ describe("resetUIPreferences", () => {
 
     useApp.getState().resetUIPreferences();
 
-    expect(useApp.getState().preferences.explorerWidth).toBe(304);
+    expect(useApp.getState().preferences.explorerWidth).toBe(320);
     expect(useApp.getState().preferences.editorFontSize).toBe(14);
   });
 });

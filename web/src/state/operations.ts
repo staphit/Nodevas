@@ -1,5 +1,5 @@
 /**
- * Operation state [A-02].
+ * Operation state.
  *
  * Every mutation the user can trigger reports through one vocabulary, so the
  * UI never has to invent its own `busy` / `error` booleans:

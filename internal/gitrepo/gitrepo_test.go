@@ -201,3 +201,46 @@ func TestVersionFloor(t *testing.T) {
 		}
 	}
 }
+
+// Hooks are switched off without a folder of our own: every hub process used
+// to leave an empty nodevas-gitrepo-nohooks-* folder in the temp directory.
+// The hooks path is one nothing can ever be made at, so no hook can be
+// planted there either.
+func TestNoHooksPathLeavesNothingBehind(t *testing.T) {
+	if !Available() {
+		t.Skip("git is not installed")
+	}
+	path := filepath.FromSlash(noHooksPath())
+	if !filepath.IsAbs(path) {
+		t.Fatalf("hooks path %q is relative: git would read it inside the work tree", path)
+	}
+	if info, err := os.Stat(path); err == nil {
+		t.Fatalf("hooks path %q exists (dir=%v): a folder left behind, or one a hook could be put in", path, info.IsDir())
+	}
+	if err := os.MkdirAll(path, 0o700); err == nil {
+		_ = os.Remove(path)
+		t.Fatalf("hooks path %q could be created: a hook could be planted there", path)
+	}
+}
+
+// The repository's own hooks folder never runs either. Commit passes
+// --no-verify, which skips pre-commit and commit-msg whatever the hooks path
+// says, so the hooks planted here are ones it does not skip.
+func TestRepositoryHookDoesNotRun(t *testing.T) {
+	r, dir := newRepo(t)
+	for _, name := range []string{"prepare-commit-msg", "post-commit"} {
+		marker := filepath.Join(t.TempDir(), name+"-ran")
+		hook := "#!/bin/sh\ntouch '" + filepath.ToSlash(marker) + "'\n"
+		write(t, r.GitDir(), "hooks/"+name, hook)
+		if err := os.Chmod(filepath.Join(r.GitDir(), "hooks", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, dir, "graph.yaml", "nodes: [] # "+name+"\n")
+		if sha, err := r.Commit(context.Background(), nil, "graph", Person{Name: "ann"}, time.Now()); err != nil || sha == "" {
+			t.Fatalf("commit %q, %v", sha, err)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("the repository's %s hook ran", name)
+		}
+	}
+}

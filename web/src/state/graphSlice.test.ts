@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ConflictError } from "../api";
 import { useApp } from "../store";
-import type { Graph, RunState } from "../types";
-import { invalidateGenerations } from "./internals";
-import { clearUndo } from "./undo";
+import type { Graph, NodeStyle, RunState } from "../types";
+import { invalidateGenerations, queues } from "./internals";
+import { clearUndo, pushUndo } from "./undo";
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
@@ -90,7 +90,7 @@ describe("runGraphCommand", () => {
       operation: "node.updateMetadata",
     });
     expect(useApp.getState().canUndo).toBe(true);
-    expect(useApp.getState().undoLabel).toBe("修改節點資料");
+    expect(useApp.getState().undoLabel).toBe("Edit node details");
   });
 
   it("routes a write-access edit through ops", async () => {
@@ -329,6 +329,34 @@ describe("undo", () => {
   });
 });
 
+describe("logic gate inputs", () => {
+  // A gate written without inputs, or sent by a peer with null, must not reach
+  // the board as anything but an array.
+  const gateless = (): Graph => ({
+    ...baseGraph(),
+    ui: {
+      logicGates: [
+        { id: "g1", operator: "and", x: 0, y: 0, inputs: null as unknown as string[] },
+        { id: "g2", operator: "or", x: 0, y: 0, inputs: ["a"] },
+      ],
+    },
+  });
+
+  it("are an array after a load", async () => {
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: gateless(), rev: "rev-1", statuses: {}, issues: null });
+    await useApp.getState().loadAll();
+    const gates = useApp.getState().graph!.ui!.logicGates!;
+    expect(gates[0].inputs).toEqual([]);
+    expect(gates[1].inputs).toEqual(["a"]);
+  });
+
+  it("are an array after a peer's ops", () => {
+    resetStore(gateless());
+    expect(useApp.getState().applyPeerGraphOps([{ kind: "move", nodeId: "a", x: 1, y: 2 }])).toBe(true);
+    expect(useApp.getState().graph!.ui!.logicGates![0].inputs).toEqual([]);
+  });
+});
+
 describe("loadAll", () => {
   // A reload is triggered from several places at once — the mutation itself,
   // the WebSocket echo of it, the effect that re-runs — and every one of those
@@ -371,6 +399,315 @@ describe("loadAll", () => {
 
     expect(useApp.getState().graph!.nodes![0].title).toBe("A");
     expect(useApp.getState().graphRev).toBe("rev-1");
+  });
+
+  // The explorer's project badge reads the graph on screen, which it may only
+  // do while that graph is the active project's and not the one before it.
+  it("records which project the graph on screen belongs to", async () => {
+    useApp.setState({ activeProject: "board", graphProject: "" });
+    await useApp.getState().loadAll();
+    expect(useApp.getState().graphProject).toBe("board");
+  });
+});
+
+// Every whole-file save is echoed back as graph-changed, and the reload that
+// echo starts is on the wire beside the next save in the queue. Its answer can
+// be the graph from before that save; shown, it took the save's edit off the
+// board, and the save after it wrote the board as shown, edit missing, with a
+// baseRev the server accepted.
+describe("a reload on the wire beside a save", () => {
+  type Saved = Awaited<ReturnType<typeof api.putGraph>>;
+  type Read = Awaited<ReturnType<typeof api.getGraph>>;
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  }
+
+  const setStyle = (patch: Partial<NodeStyle>) =>
+    useApp.getState().updateNode({ type: "node.setStyle", nodeId: "a", patch });
+
+  function styled(style: NodeStyle): Graph {
+    const graph = baseGraph();
+    graph.ui = { nodeStyles: { a: style } };
+    return graph;
+  }
+
+  let saves: Array<ReturnType<typeof deferred<Saved>>>;
+  let read: ReturnType<typeof deferred<Read>>;
+
+  beforeEach(() => {
+    saves = [];
+    vi.mocked(api.putGraph).mockImplementation(() => {
+      const save = deferred<Saved>();
+      saves.push(save);
+      return save.promise;
+    });
+    read = deferred<Read>();
+    vi.mocked(api.getGraph).mockImplementationOnce(() => read.promise);
+  });
+
+  // The read that follows the saves lands inside the test that caused it.
+  afterEach(async () => {
+    await queues.graphSave;
+    await useApp.getState().loadAll();
+  });
+
+  /** Shape saved; its echo's reload and the alignment's save both on the wire. */
+  async function shapeSavedAndAlignmentSending() {
+    const shape = setStyle({ shape: "diamond" });
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    const align = setStyle({ align: "left" });
+    saves[0].resolve({ ok: true, rev: "rev-2", issues: null });
+    await shape;
+    const echo = useApp.getState().loadAll();
+    await vi.waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(saves).toHaveLength(2));
+    return { align, echo };
+  }
+
+  async function nextSave() {
+    const valign = setStyle({ valign: "top" });
+    await vi.waitFor(() => expect(saves).toHaveLength(3));
+    const [graph, baseRev] = vi.mocked(api.putGraph).mock.calls[2];
+    saves[2].resolve({ ok: true, rev: "rev-4", issues: null });
+    await valign;
+    return { graph, baseRev };
+  }
+
+  it("keeps an edit whose save was answered after the reload", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+
+    expect(useApp.getState().graph!.ui!.nodeStyles!.a).toMatchObject({ align: "left" });
+    const { graph, baseRev } = await nextSave();
+    expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
+    expect(baseRev).toBe("rev-3");
+  });
+
+  it("keeps an edit whose save was answered before the reload", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+
+    expect(useApp.getState().graph!.ui!.nodeStyles!.a).toMatchObject({ align: "left" });
+    expect(useApp.getState().graphRev).toBe("rev-3");
+    const { graph, baseRev } = await nextSave();
+    expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
+    expect(baseRev).toBe("rev-3");
+  });
+
+  // After a save is answered its operation still holds the queue while it
+  // refreshes the run state, so for that moment no write is open. The echo's
+  // reload can leave then, and the next save be sent before it is answered:
+  // only the count of writes sent tells that reload apart.
+  it("keeps an edit whose save was sent while a reload started between saves was out", async () => {
+    let releaseState!: () => void;
+    const stateHeld = new Promise<void>((release) => {
+      releaseState = release;
+    });
+    vi.mocked(api.getState).mockImplementation(() =>
+      stateHeld.then(() => ({ state: EMPTY_RUN, statuses: {} })),
+    );
+    const shape = setStyle({ shape: "diamond" });
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    const align = setStyle({ align: "left" });
+    saves[0].resolve({ ok: true, rev: "rev-2", issues: null });
+    await vi.waitFor(() => expect(api.getState).toHaveBeenCalled());
+    const echo = useApp.getState().loadAll();
+    await vi.waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(1));
+    expect(saves).toHaveLength(1);
+    releaseState();
+    await shape;
+    await vi.waitFor(() => expect(saves).toHaveLength(2));
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+
+    expect(useApp.getState().graph!.ui!.nodeStyles!.a).toMatchObject({ align: "left" });
+    const { graph, baseRev } = await nextSave();
+    expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
+    expect(baseRev).toBe("rev-3");
+  });
+
+  // The reload left out was what someone else's change was told with: it is
+  // read again once the saves are through, without another trigger.
+  it("reads again after the saves, so someone else's change still arrives", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    const theirs = styled({ shape: "diamond", align: "left" });
+    theirs.nodes![0].title = "別人改的";
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: theirs, rev: "rev-5", statuses: {}, issues: null });
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+
+    await vi.waitFor(() => expect(useApp.getState().graphRev).toBe("rev-5"));
+    expect(useApp.getState().graph).toEqual(theirs);
+    expect(api.getGraph).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Each kind of graph write is counted while it is on the wire, so a reload
+// that was out beside it is never shown: it can hold the graph from before
+// the write, and the write's own answer may already be on screen.
+describe("a reload beside each kind of graph write", () => {
+  type Read = Awaited<ReturnType<typeof api.getGraph>>;
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  }
+
+  let server: { graph: Graph; rev: string };
+  let held: ReturnType<typeof deferred<Read>> | null;
+  let heldTaken: boolean;
+  let shown: Graph[];
+  let unsubscribe: () => void;
+
+  const answer = (graph: Graph, rev: string): Read => ({
+    graph: structuredClone(graph),
+    rev,
+    statuses: {},
+    issues: null,
+  });
+
+  beforeEach(() => {
+    server = { graph: baseGraph(), rev: "rev-1" };
+    vi.mocked(api.getTrash).mockResolvedValue({ items: [] });
+    held = null;
+    heldTaken = false;
+    vi.mocked(api.getGraph).mockImplementation(() => {
+      if (held && !heldTaken) {
+        heldTaken = true;
+        return held.promise;
+      }
+      return Promise.resolve(answer(server.graph, server.rev));
+    });
+    shown = [];
+    unsubscribe = useApp.subscribe((state, prev) => {
+      if (state.graph && state.graph !== prev.graph) shown.push(state.graph);
+    });
+  });
+
+  afterEach(async () => {
+    await queues.graphSave;
+    await useApp.getState().loadAll();
+    unsubscribe();
+  });
+
+  /** Starts the echo's reload and waits until it is on the wire. */
+  async function reloadOnTheWire() {
+    held = deferred<Read>();
+    const echo = useApp.getState().loadAll();
+    await vi.waitFor(() => expect(heldTaken).toBe(true));
+    // Wrapped: an async function returning the promise would wait for it.
+    return { echo };
+  }
+
+  /**
+   * Once the write is on screen, every graph shown after it carries the write;
+   * the reload that was out beside it is answered with the graph from before.
+   */
+  async function staleReloadNeverShown(
+    echo: Promise<void>,
+    before: Graph,
+    carriesWrite: (graph: Graph) => boolean,
+  ) {
+    await vi.waitFor(() => expect(carriesWrite(useApp.getState().graph!)).toBe(true));
+    const from = shown.findIndex(carriesWrite);
+    held!.resolve(answer(before, "rev-1"));
+    await echo;
+    await queues.graphSave;
+    await useApp.getState().loadAll();
+    expect(from).toBeGreaterThanOrEqual(0);
+    expect(shown.slice(from).every(carriesWrite)).toBe(true);
+    expect(carriesWrite(useApp.getState().graph!)).toBe(true);
+  }
+
+  it("a node's placement saved with its creation", async () => {
+    const created = baseGraph();
+    created.nodes!.push({ id: "n1", title: "新節點" });
+    server = { graph: created, rev: "rev-2" };
+    vi.mocked(api.createNode).mockResolvedValue({ ok: true, id: "n1" });
+    const save = deferred<Awaited<ReturnType<typeof api.putGraph>>>();
+    vi.mocked(api.putGraph).mockImplementation(() => save.promise);
+    const placed = (graph: Graph) => graph.ui?.positions?.n1?.x === 5;
+
+    const creating = useApp
+      .getState()
+      .createNode({ title: "新節點", kind: "task" }, { position: { x: 5, y: 6 }, openDocument: false });
+    await vi.waitFor(() => expect(api.putGraph).toHaveBeenCalledTimes(1));
+    const { echo } = await reloadOnTheWire();
+    server = { graph: vi.mocked(api.putGraph).mock.calls[0][0], rev: "rev-3" };
+    save.resolve({ ok: true, rev: "rev-3", issues: null });
+    await staleReloadNeverShown(echo, created, placed);
+    await creating;
+  });
+
+  it("a drag sent as ops", async () => {
+    const moved = baseGraph();
+    moved.ui = { positions: { a: { x: 10, y: 20 } } };
+    const sent = deferred<ReturnType<typeof opsResponse>>();
+    vi.mocked(api.graphOps).mockImplementation(() => sent.promise);
+    const at = (graph: Graph) => graph.ui?.positions?.a?.x === 10;
+
+    const drag = useApp.getState().updateCanvasLayout({
+      type: "canvas.moveNodes",
+      positions: { a: { x: 10, y: 20 } },
+    });
+    await vi.waitFor(() => expect(api.graphOps).toHaveBeenCalledTimes(1));
+    const { echo } = await reloadOnTheWire();
+    server = { graph: moved, rev: "rev-2" };
+    sent.resolve(opsResponse(moved));
+    await staleReloadNeverShown(echo, baseGraph(), at);
+    await drag;
+  });
+
+  it("an undo of a graph edit", async () => {
+    const earlier = baseGraph();
+    earlier.nodes![0].title = "之前";
+    pushUndo({ kind: "graph", graph: earlier });
+    const save = deferred<Awaited<ReturnType<typeof api.putGraph>>>();
+    vi.mocked(api.putGraph).mockImplementation(() => save.promise);
+    const undone = (graph: Graph) => graph.nodes![0].title === "之前";
+
+    const undo = useApp.getState().undoLast();
+    await vi.waitFor(() => expect(api.putGraph).toHaveBeenCalledTimes(1));
+    const { echo } = await reloadOnTheWire();
+    server = { graph: earlier, rev: "rev-2" };
+    save.resolve({ ok: true, rev: "rev-2", issues: null });
+    await staleReloadNeverShown(echo, baseGraph(), undone);
+    await expect(undo).resolves.toBe(true);
+  });
+
+  it("an undo of a node deletion", async () => {
+    const withB = baseGraph();
+    withB.nodes!.push({ id: "b", title: "B" });
+    pushUndo({ kind: "delete-node", graph: withB, trashFiles: [] });
+    const save = deferred<Awaited<ReturnType<typeof api.putGraph>>>();
+    vi.mocked(api.putGraph).mockImplementation(() => save.promise);
+    const restored = (graph: Graph) => graph.nodes!.some((node) => node.id === "b");
+
+    const undo = useApp.getState().undoLast();
+    await vi.waitFor(() => expect(api.putGraph).toHaveBeenCalledTimes(1));
+    const { echo } = await reloadOnTheWire();
+    server = { graph: withB, rev: "rev-2" };
+    save.resolve({ ok: true, rev: "rev-2", issues: null });
+    await staleReloadNeverShown(echo, baseGraph(), restored);
+    await expect(undo).resolves.toBe(true);
   });
 });
 

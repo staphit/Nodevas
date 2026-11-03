@@ -8,6 +8,7 @@ import {
 import { useViewer } from "../components/SignIn";
 import { IconPlus } from "../icons";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import {
@@ -24,28 +25,46 @@ import {
   validRounds,
 } from "./AgentModelFields";
 import { useRouting } from "./routingStore";
+import { normalizeKind } from "../domain/graph/nodeTypes";
+import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
+import { useRoleOptions } from "../roles/roleLabels";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
-
-/** Node kinds a "kind" rule can match (types.ts NodeKind, less ""). */
-export const NODE_KINDS = ["task", "scene", "choice", "gate", "event", "start", "end"] as const;
 
 /** Longest tag or kind value a rule takes. */
 export const MAX_ROUTE_VALUE_CHARS = 64;
 
-/** Whether a match kind takes a value (a tag or a node kind). */
+/** Whether a match kind takes a value (a tag, a node kind or a role). */
 export function matchTakesValue(match: string): boolean {
-  return match === "tag" || match === "kind";
+  return match === "tag" || match === "kind" || match === "role";
 }
 
-/** "tag = review", "Project default", "Global default". */
-export function routeLabel(t: Translate, match: string, value?: string): string {
+/**
+ * "tag = review", "Kind = Review", "Project default", "Global default". A kind
+ * value reads as its type's name when `kindLabel` knows it, and as written
+ * otherwise (a stale or another project's type).
+ */
+export function routeLabel(
+  t: Translate,
+  match: string,
+  value?: string,
+  kindLabel?: (kind: string) => string | undefined,
+  roleLabel?: (role: string) => string | undefined,
+): string {
   switch (match) {
     case "tag":
     case "kind":
-      return value
-        ? t("routing.labelValue", { match: t(`routing.match.${match}`), value })
+    case "role": {
+      const shown =
+        match === "kind" && value
+          ? (kindLabel?.(value) ?? value)
+          : match === "role" && value
+            ? (roleLabel?.(value) ?? value)
+            : value;
+      return shown
+        ? t("routing.labelValue", { match: t(`routing.match.${match}`), value: shown })
         : t(`routing.match.${match}`);
+    }
     case "project":
       return t("routing.match.project");
     case "default":
@@ -56,6 +75,23 @@ export function routeLabel(t: Translate, match: string, value?: string): string 
 }
 
 let idCounter = 0;
+/**
+ * Node types a "kind" rule can route — the ones an agent may work — and a
+ * lookup from a rule's value to the type's name.
+ */
+export function useRouteKinds() {
+  const { t } = useI18n();
+  const nodeTypes = useNodeTypes();
+  return useMemo(() => {
+    const options = nodeTypes
+      .filter((type) => type.agentMode !== "none")
+      .map((type) => ({ value: type.id, label: nodeTypeLabel(type, t) }));
+    const all = new Map(nodeTypes.map((type) => [type.id, nodeTypeLabel(type, t)]));
+    const kindLabel = (kind: string) => all.get(normalizeKind(kind) || "task");
+    return { options, kindLabel };
+  }, [nodeTypes, t]);
+}
+
 /** A new rule's id. The hub keeps it, or assigns its own on save. */
 export function newRuleId(): string {
   idCounter += 1;
@@ -190,6 +226,8 @@ function RuleEditor({
   const ids = { match: useId(), value: useId(), scope: useId(), runner: useId(), list: useId() };
   const errorIds = { match: useId(), value: useId(), scope: useId(), target: useId(), more: useId() };
   const name = t("routing.ruleN", { n: index + 1 });
+  const { options: kindOptions, kindLabel } = useRouteKinds();
+  const { options: roleOptions, roleLabel } = useRoleOptions();
   const shown = (field: RuleField) => (showErrors && problems[field] ? t(problems[field]!) : "");
 
   const runner = runners.find((item) => item.id === rule.runnerId);
@@ -213,7 +251,12 @@ function RuleEditor({
   };
 
   const fallbacks = rule.fallbacks ?? [];
-  const valueList = rule.match === "kind" ? [...NODE_KINDS] : tags;
+  const valueList = tags;
+  const kindValue = (rule.value ?? "").trim();
+  const staleKind =
+    kindValue && !kindOptions.some((option) => option.value === kindValue) ? kindValue : "";
+  const staleRole =
+    kindValue && !roleOptions.some((option) => option.value === kindValue) ? kindValue : "";
 
   return (
     <li className="route-rule" data-testid={`route-rule-${index}`} aria-label={name}>
@@ -222,7 +265,7 @@ function RuleEditor({
           {index + 1}
         </span>
         <strong className="route-rule-summary">
-          {routeLabel(t, rule.match, (rule.value ?? "").trim())}
+          {routeLabel(t, rule.match, (rule.value ?? "").trim(), kindLabel, roleLabel)}
           {rule.target.agent ? ` → ${agentModelText(rule.target)}` : ""}
         </strong>
         <ReorderButtons
@@ -256,7 +299,57 @@ function RuleEditor({
           <FieldError id={errorIds.match} text={shown("match")} />
         </div>
 
-        {matchTakesValue(rule.match) && (
+        {rule.match === "kind" && (
+          <div className="run-field">
+            <label className="run-field-label" htmlFor={ids.value}>{t("routing.value.kind")}</label>
+            <select
+              id={ids.value}
+              value={kindValue}
+              aria-invalid={shown("value") ? true : undefined}
+              aria-describedby={shown("value") ? errorIds.value : undefined}
+              onChange={(event) => onChange({ ...rule, value: event.target.value })}
+            >
+              <option value="" disabled>
+                {t("routing.valuePlaceholder.kind")}
+              </option>
+              {kindOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              {/* A type that is gone, or not one agents work any more, stays
+                  visible as written so the rule is not silently changed. */}
+              {staleKind && <option value={staleKind}>{kindLabel(staleKind) ?? staleKind}</option>}
+            </select>
+            <FieldError id={errorIds.value} text={shown("value")} />
+          </div>
+        )}
+
+        {rule.match === "role" && (
+          <div className="run-field">
+            <label className="run-field-label" htmlFor={ids.value}>{t("routing.value.role")}</label>
+            <select
+              id={ids.value}
+              value={kindValue}
+              aria-invalid={shown("value") ? true : undefined}
+              aria-describedby={shown("value") ? errorIds.value : undefined}
+              onChange={(event) => onChange({ ...rule, value: event.target.value })}
+            >
+              <option value="" disabled>
+                {t("routing.valuePlaceholder.role")}
+              </option>
+              {roleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              {staleRole && <option value={staleRole}>{staleRole}</option>}
+            </select>
+            <FieldError id={errorIds.value} text={shown("value")} />
+          </div>
+        )}
+
+        {matchTakesValue(rule.match) && rule.match !== "kind" && rule.match !== "role" && (
           <div className="run-field">
             <label className="run-field-label" htmlFor={ids.value}>{t(`routing.value.${rule.match}`)}</label>
             <input
@@ -312,7 +405,7 @@ function RuleEditor({
             <option value="">{t("routing.anyRunner")}</option>
             {runners.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.online ? item.name : `${item.name} — ${t("runs.runnerOffline")}`}
+                {item.online ? runnerDisplayName(t, item.name) : `${runnerDisplayName(t, item.name)} — ${t("runs.runnerOffline")}`}
               </option>
             ))}
             {rule.runnerId && !runner && (

@@ -260,6 +260,21 @@ describe("DispatchDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/This runner cannot take runs/);
   });
 
+  it("shows the hub's own reason for a 409 that names one, such as a missing test command", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const reason =
+      'configure a test command for repo on the runner, so it can verify red and green: nodevas runner repo set repo --test-command "go test ./..."';
+    vi.spyOn(api, "createRun").mockRejectedValue(new ConflictError("", "", reason, "FAILED_PRECONDITION"));
+
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("combobox", { name: "Runner" });
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(reason);
+    expect(alert).not.toHaveTextContent(/cannot take runs/);
+  });
+
   it("checks the base branch and the instruction size before sending", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);

@@ -8,7 +8,7 @@
 .node-history {
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   flex-shrink: 0;
   max-height: 220px;
   overflow-y: auto;
@@ -37,26 +37,26 @@
   flex-wrap: wrap;
 }
 .nh-time {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .nh-by {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .nh-note {
   color: var(--st-progress-fg);
 }
 .nh-size {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .nh-files {
   padding: 4px 12px 10px;
   border-top: 1px dashed var(--border);
 }
 .nh-files > b {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .nh-none {
@@ -68,7 +68,7 @@
   background: var(--surface);
   border-radius: 4px;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 .nh-files button:hover {

@@ -23,6 +23,6 @@ explorer/SaveAsPanel.tsx
 explorer/WorkspacePickerPanel.tsx
 explorer/useProjectDrag.ts
 explorer/useProjectTransfer.ts
+inspector/NodeDocumentLinks.tsx
 inspector/NodeHistory.tsx
-inspector/NodeRelations.tsx
 settings/TwoFactorEditor.tsx

@@ -68,6 +68,20 @@ export function useBoardShortcuts({
       ) {
         return;
       }
+      // An open modal owns the keyboard: Enter is its confirm button and
+      // Escape its cancel, and neither should also reach the card behind it.
+      if (document.querySelector("[aria-modal='true']")) return;
+      // Enter and Space on a focused control are that control's click. Taking
+      // them for the board cancels the activation (the card's own Enter is
+      // handled on the card and never gets here).
+      if (
+        (event.key === "Enter" || event.key === " ") &&
+        target?.closest(
+          "button, a[href], summary, [role='button'], [role='menuitem'], [role='option'], [role='tab'], [role='checkbox'], [role='switch']",
+        )
+      ) {
+        return;
+      }
       if (event.key === "Escape") {
         if (marqueeHandlers.cancel()) {
           event.preventDefault();

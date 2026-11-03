@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 94" width="160" height="94">
-<!-- Candy dungeon: a frosted arena tile -->
-<polygon points="0,40 80,80 80,94 0,54" fill="#8a5a44"/>
-<polygon points="80,80 160,40 160,54 80,94" fill="#6f4636"/>
-<path d="M0 40 L80 80 L160 40 V45 Q154 52 148 49 Q140 56 132 54 L118 62 Q112 69 104 66 L80 80 Q74 88 66 82 L44 70 Q38 76 30 70 L12 60 Q6 62 0 50 Z" fill="#ff9cc2"/>
-<polygon points="80,0 160,40 80,80 0,40" fill="#ffc2d6"/>
-<rect x="76" y="12.5" width="8" height="3" rx="1.5" fill="#7fdcc4" transform="rotate(30 80 14)"/><rect x="48" y="28.5" width="8" height="3" rx="1.5" fill="#ffe17a" transform="rotate(-20 52 30)"/><rect x="102" y="26.5" width="8" height="3" rx="1.5" fill="#c9a7ff" transform="rotate(60 106 28)"/><rect x="32" y="40.5" width="8" height="3" rx="1.5" fill="#fff" transform="rotate(80 36 42)"/><rect x="74" y="36.5" width="8" height="3" rx="1.5" fill="#ff5c8a" transform="rotate(-40 78 38)"/><rect x="120" y="40.5" width="8" height="3" rx="1.5" fill="#7fdcc4" transform="rotate(15 124 42)"/><rect x="58" y="50.5" width="8" height="3" rx="1.5" fill="#c9a7ff" transform="rotate(45 62 52)"/><rect x="94" y="52.5" width="8" height="3" rx="1.5" fill="#ffe17a" transform="rotate(-70 98 54)"/><rect x="76" y="64.5" width="8" height="3" rx="1.5" fill="#fff" transform="rotate(10 80 66)"/><rect x="136" y="38.5" width="8" height="3" rx="1.5" fill="#ff5c8a" transform="rotate(-30 140 40)"/><rect x="16" y="38.5" width="8" height="3" rx="1.5" fill="#ffe17a" transform="rotate(25 20 40)"/>
-<polygon points="80,0 160,40 80,80 0,40" fill="none" stroke="#e58aad" stroke-width="1.5" stroke-linejoin="round"/>
-</svg>

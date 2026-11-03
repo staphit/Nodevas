@@ -8,9 +8,12 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"nodevas/internal/engine"
 	"nodevas/internal/identity"
 	"strings"
 	"sync"
+
+	"nodevas/internal/locale"
 )
 
 // Authenticator identifies the actor behind a request.
@@ -31,17 +34,18 @@ type Authenticator interface {
 
 var (
 	// ErrUnauthenticated is returned when a request carries no valid identity.
-	ErrUnauthenticated = errors.New("authentication required")
+	ErrUnauthenticated = locale.Errorf("authentication required", "需要登入")
 	// ErrCSRF is returned when an unsafe request has no matching CSRF token.
-	ErrCSRF = errors.New("missing or invalid CSRF token")
+	ErrCSRF = locale.Errorf("missing or invalid CSRF token", "缺少 CSRF 權杖或權杖無效")
 	// ErrAdminRequired is returned when a member attempts a server-wide
 	// administrative operation.
-	ErrAdminRequired = errors.New("administrator access required")
+	ErrAdminRequired = locale.Errorf("administrator access required", "需要管理員權限")
 	// ErrUnknownAgentRole is returned when a request declares an agent role
 	// this server does not know. It surfaces as a 401 via withAuth, so the
 	// message must tell the client what to send instead.
-	ErrUnknownAgentRole = errors.New(
-		"unknown " + AgentRoleHeaderName + ": send \"worker\" or \"orchestrator\", or omit the header for a human session")
+	ErrUnknownAgentRole = locale.Errorf(
+		"unknown %s: send \"worker\" or \"orchestrator\", or omit the header for a human session",
+		"不明的 %s：請送出 \"worker\" 或 \"orchestrator\"，人的工作階段則不要帶這個標頭", AgentRoleHeaderName)
 )
 
 // AgentRoleHeaderName declares which class of agent a request acts as. It is
@@ -49,24 +53,71 @@ var (
 // so a header the local user's own tools set is as trustworthy as the request.
 const AgentRoleHeaderName = "X-Nodevas-Agent-Role"
 
+// RoleHeaderName declares the agent role (engine roles: planner, qa, tester,
+// executor, reviewer, researcher, custom-role-*) an external loopback session
+// acts in. Like AgentRoleHeaderName it is honored only by LocalOnly; a role
+// never raises the declared class.
+const RoleHeaderName = "X-Nodevas-Role"
+
+// ErrInvalidRole is returned for a RoleHeaderName value that is not a
+// well-formed role id.
+var ErrInvalidRole = locale.Errorf("invalid %s: send a built-in role or custom-role-<id>",
+	"%s 無效：請送出內建角色或 custom-role-<id>", RoleHeaderName)
+
+// ErrRelayedRequest refuses, on a server without accounts, a request a proxy
+// on this machine relayed for somebody else.
+var ErrRelayedRequest = locale.Errorf(
+	"this server has no accounts and answers only this machine; it was reached through a proxy for another one (serve it with accounts to share it)",
+	"這個伺服器沒有帳號，只回應本機；這個請求是經由代理從別台機器來的（要分享請啟用帳號）")
+
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
+//
+// That holds only for a request this machine sent. A tunnel, a reverse proxy
+// or the Vite dev server opened to the LAN connects from loopback too, and
+// says in its forwarding headers whom it relays; a request whose headers
+// name anybody but this machine is refused (ForwardedForThisMachine).
 type LocalOnly struct{}
 
 func (LocalOnly) Authenticate(r *http.Request) (identity.Actor, error) {
 	if r == nil {
 		return identity.Local, nil
 	}
-	switch role := identity.AgentClass(r.Header.Get(AgentRoleHeaderName)); role {
-	case identity.AgentHuman:
-		return identity.Local, nil
-	case identity.AgentWorker, identity.AgentOrchestrator:
-		actor := identity.Local
-		actor.Agent = role
-		return actor, nil
+	if !ForwardedForThisMachine(r) {
+		return identity.Actor{}, ErrRelayedRequest
+	}
+	class := identity.AgentClass(r.Header.Get(AgentRoleHeaderName))
+	switch class {
+	case identity.AgentHuman, identity.AgentWorker, identity.AgentOrchestrator:
 	default:
 		return identity.Actor{}, ErrUnknownAgentRole
 	}
+	agentRole, present := r.Header[http.CanonicalHeaderKey(RoleHeaderName)]
+	if !present {
+		if class == identity.AgentHuman {
+			return identity.Local, nil
+		}
+		actor := identity.Local
+		actor.Agent = class
+		return actor, nil
+	}
+	// An external session in a role: the role is syntax-checked here and
+	// resolved against the project by the role guard (UNKNOWN_ROLE there).
+	// A role alone acts as a worker, and a built-in role's rank can only
+	// lower the declared class.
+	if len(agentRole) != 1 || !engine.ValidRoleID(agentRole[0]) {
+		return identity.Actor{}, ErrInvalidRole
+	}
+	if class == identity.AgentHuman {
+		class = identity.AgentWorker
+	}
+	if rank := engine.RoleClass(nil, agentRole[0]); rank != "" {
+		class = identity.LowerClass(class, rank)
+	}
+	actor := identity.Local
+	actor.Agent = class
+	actor.AgentRole = agentRole[0]
+	return actor, nil
 }
 func (LocalOnly) NeedsCSRF() bool { return false }
 func (LocalOnly) Remote() bool    { return false }
@@ -76,23 +127,34 @@ type revalidatorKey struct{}
 
 // ActorFrom returns the actor the auth middleware attached to the request.
 func ActorFrom(r *http.Request) identity.Actor {
-	if r != nil {
-		if actor, ok := r.Context().Value(actorKey{}).(identity.Actor); ok {
-			return actor
-		}
+	if actor, ok := AttachedActor(r); ok {
+		return actor
 	}
 	return identity.Local
 }
 
-// RequireAdmin verifies that authentication middleware attached an
-// administrator to the request. HTTP packages can use this after their normal
-// authentication check without depending on the concrete authenticator.
-func RequireAdmin(r *http.Request) error {
+// AttachedActor is the actor the auth middleware attached, and false when it
+// attached none: a public route (sign-in, a device-link redeem) has nobody
+// signed in, and must not be taken for the local administrator that
+// ActorFrom falls back to.
+func AttachedActor(r *http.Request) (identity.Actor, bool) {
 	if r == nil {
-		return ErrAdminRequired
+		return identity.Actor{}, false
 	}
-	actor, attached := r.Context().Value(actorKey{}).(identity.Actor)
-	if !attached || !actor.IsAdmin() {
+	actor, ok := r.Context().Value(actorKey{}).(identity.Actor)
+	return actor, ok
+}
+
+// RequireAdmin verifies that authentication middleware attached an
+// administrator to the request, and that a person sent it. Server-wide
+// settings are a person's to change: an agent acting for an administrator,
+// through the copilot or a runner, is refused, as account administration
+// and the runner access token already refuse it. HTTP packages can use this
+// after their normal authentication check without depending on the concrete
+// authenticator.
+func RequireAdmin(r *http.Request) error {
+	actor, attached := AttachedActor(r)
+	if !attached || !actor.IsAdmin() || actor.IsAgent() {
 		return ErrAdminRequired
 	}
 	return nil
@@ -124,17 +186,87 @@ var SignInPaths = map[string]bool{
 const (
 	CSRFCookieName = "nodevas_csrf"
 	CSRFHeaderName = "X-CSRF-Token"
+
+	// hostCookiePrefix names a cookie the browser accepts only Secure, for
+	// Path=/ and without a Domain, so a sibling subdomain cannot set one.
+	hostCookiePrefix = "__Host-"
 )
+
+// SessionCookieNameFor is the session cookie's name in a response to r:
+// __Host- prefixed when the browser reached the server over TLS, the plain
+// name otherwise (a browser refuses a __Host- cookie on plain HTTP).
+func SessionCookieNameFor(r *http.Request) string {
+	return cookieNameFor(r, SessionCookieName)
+}
+
+// CSRFCookieNameFor is the CSRF cookie's name in a response to r, chosen as
+// SessionCookieNameFor chooses.
+func CSRFCookieNameFor(r *http.Request) string {
+	return cookieNameFor(r, CSRFCookieName)
+}
+
+// CookieNameFor is the name a cookie called name is set under in a response
+// to r: __Host- prefixed over TLS (such a cookie must be Secure, Path=/ and
+// have no Domain), plain otherwise. CookieValue reads it back.
+func CookieNameFor(r *http.Request, name string) string {
+	return cookieNameFor(r, name)
+}
+
+// CookieValue reads the one cookie called name the way SessionToken reads
+// the session cookie: false when there is none, or more than one.
+func CookieValue(r *http.Request, name string) (string, bool) {
+	return cookieValue(r, name)
+}
+
+func cookieNameFor(r *http.Request, name string) string {
+	if r != nil && RequestIsSecure(r) {
+		return hostCookiePrefix + name
+	}
+	return name
+}
+
+// SessionToken is the request's session cookie, and false when it carries
+// none, or more than one: a sibling subdomain can set a cookie of the plain
+// name for the parent domain, which the browser sends beside, or before,
+// the server's own, and serving either would put the person in an account
+// that is not theirs. Over TLS only the __Host- cookie counts.
+func SessionToken(r *http.Request) (string, bool) {
+	return cookieValue(r, SessionCookieName)
+}
+
+// cookieValue reads the one cookie called name: the __Host- prefixed one when
+// it is there, and the plain one only on a request that is not over TLS. An
+// in-process request replays a TLS browser's Cookie header without TLS of
+// its own, hence a __Host- cookie is taken whatever the transport.
+func cookieValue(r *http.Request, name string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	if host := r.CookiesNamed(hostCookiePrefix + name); len(host) > 0 {
+		if len(host) > 1 || host[0].Value == "" {
+			return "", false
+		}
+		return host[0].Value, true
+	}
+	if RequestIsSecure(r) {
+		return "", false
+	}
+	plain := r.CookiesNamed(name)
+	if len(plain) != 1 || plain[0].Value == "" {
+		return "", false
+	}
+	return plain[0].Value, true
+}
 
 // CheckCSRF does the double-submit check: the cookie is sent automatically by
 // the browser, the header can only be set by same-origin script.
 func CheckCSRF(r *http.Request) error {
-	cookie, err := r.Cookie(CSRFCookieName)
-	if err != nil || cookie.Value == "" {
+	cookie, ok := cookieValue(r, CSRFCookieName)
+	if !ok {
 		return ErrCSRF
 	}
 	header := r.Header.Get(CSRFHeaderName)
-	if header == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) != 1 {
+	if header == "" || subtle.ConstantTimeCompare([]byte(cookie), []byte(header)) != 1 {
 		return ErrCSRF
 	}
 	return nil
@@ -214,6 +346,16 @@ func remoteAddress(r *http.Request) (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
+// PeerIsTrustedProxy reports r's immediate peer and whether it is a proxy
+// trusted to set forwarding headers. An unparseable peer is "" and untrusted.
+func PeerIsTrustedProxy(r *http.Request) (peer string, trusted bool) {
+	address, ok := remoteAddress(r)
+	if !ok {
+		return "", false
+	}
+	return address.String(), isTrustedProxy(address)
+}
+
 func isTrustedProxy(address netip.Addr) bool {
 	trustedProxies.RLock()
 	defer trustedProxies.RUnlock()
@@ -258,6 +400,27 @@ func ClientIP(r *http.Request) string {
 	return client.String()
 }
 
+// SourceKey is the throttle identity of a client address. An IPv6 address
+// stands for its /64: one host or one subscriber holds the whole of it, so
+// stepping through it must not buy a fresh budget each time. An IPv4 address,
+// or anything that is not an address, is returned as given.
+func SourceKey(address string) string {
+	address = strings.TrimSpace(address)
+	parsed, err := netip.ParseAddr(address)
+	if err != nil {
+		return address
+	}
+	parsed = parsed.Unmap()
+	if !parsed.Is6() {
+		return parsed.String()
+	}
+	prefix, err := parsed.WithZone("").Prefix(64)
+	if err != nil {
+		return address
+	}
+	return prefix.String()
+}
+
 // RequestIsSecure reports whether the browser reached this server over TLS,
 // including through a terminating reverse proxy when one is trusted. Session
 // cookies are marked Secure only then: a Secure cookie on plain HTTP is
@@ -280,9 +443,9 @@ func RequestIsSecure(r *http.Request) bool {
 var (
 	// ErrBadCredentials is deliberately the same for an unknown user and a
 	// wrong password: the difference is not the caller's business.
-	ErrBadCredentials = errors.New("invalid user name or password")
+	ErrBadCredentials = locale.Errorf("invalid user name or password", "使用者名稱或密碼錯誤")
 	// ErrTooManyLogins is returned while an account is throttled.
-	ErrTooManyLogins = errors.New("too many failed sign-ins, try again later")
+	ErrTooManyLogins = locale.Errorf("too many failed sign-ins, try again later", "登入失敗次數太多，請稍後再試")
 )
 
 // WithActor returns a context carrying the actor, which ActorFrom reads back.

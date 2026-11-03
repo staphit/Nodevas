@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/safego"
 )
 
 // Server names a kind of local model server.
@@ -198,6 +200,7 @@ func (d *Detector) probe(ctx context.Context) (Found, bool) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer safego.Recover("local model probe")
 			results[i], oks[i] = d.probeOne(ctx, candidate)
 		}()
 	}

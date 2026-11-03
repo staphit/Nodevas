@@ -37,6 +37,18 @@
   padding-inline: calc(var(--card-w, 152px) * 0.15);
   text-align: center;
 }
+/* Reference material (Note): outside the flow, so it reads lighter. */
+.col-card.shape-dashed {
+  border: 1.5px dashed var(--card-border-color, var(--text-2));
+  border-radius: 6px;
+  background: var(--card-bg, transparent);
+  color: var(--text-2);
+}
+/* A big requirement (Goal): the heavier frame says "this one holds others". */
+.col-card.shape-thick {
+  border-width: 3.5px;
+  border-radius: 10px;
+}
 /* ---- outline for the clipped shapes ---- */
 /* A border drawn on the box is cut off by the clip, which used to leave a
    sliver near one vertex and nothing along the edges. Instead the element
@@ -123,18 +135,31 @@
 .col-card.shape-pill .col-card-head {
   justify-content: center;
 }
-.col-card.shape-diamond .col-card-assignee,
-.col-card.shape-diamond .col-card-tags,
-.col-card.shape-ellipse .col-card-tags,
-.col-card.shape-hexagon .col-card-tags,
-.col-card.shape-pill .col-card-tags,
-.col-card.shape-pill .col-card-assignee {
+/* Too narrow for the assignee and marker, but the type label stays: it is
+   what tells a reader what the shape means. */
+.col-card.shape-diamond .col-card-meta > :not(.col-card-type),
+.col-card.shape-pill .col-card-meta > :not(.col-card-type) {
   display: none;
 }
-.col-card.shape-diamond .col-card-st,
-.col-card.shape-ellipse .col-card-st,
-.col-card.shape-hexagon .col-card-st {
-  display: none;
+.col-card.shape-diamond .col-card-meta,
+.col-card.shape-pill .col-card-meta {
+  justify-content: center;
+}
+.col-card.shape-ellipse .col-card-meta,
+.col-card.shape-hexagon .col-card-meta {
+  justify-content: center;
+}
+/* Centred shapes keep the row's members together in the middle, where the
+   clip leaves room for them, instead of pushing them out to a cut-off corner. */
+.col-card.shape-ellipse .col-card-head .col-card-title,
+.col-card.shape-diamond .col-card-head .col-card-title,
+.col-card.shape-hexagon .col-card-head .col-card-title,
+.col-card.shape-pill .col-card-head .col-card-title {
+  flex: 0 1 auto;
+}
+.col-card.shape-ellipse .col-card-marker,
+.col-card.shape-hexagon .col-card-marker {
+  margin-left: 0;
 }
 .col-card.shape-ellipse .col-card-title,
 .col-card.shape-diamond .col-card-title,
@@ -146,14 +171,46 @@
   max-width: 100%;
 }
 
+/* The card's type label: small, in the type's colour, first on the meta line. */
+.col-card-type {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  padding: 0 5px;
+  border: 1px solid var(--card-type-color, var(--text-2));
+  border-radius: 999px;
+  /* The type colour is picked for its hue, not its contrast (an orange
+     Review on a white card is ~2:1), so the text leans toward the theme's
+     text colour: darker on light, lighter on dark, still reading as the hue. */
+  color: color-mix(in srgb, var(--card-type-color, var(--text-2)) 55%, var(--text));
+  font-size: calc(10px * var(--card-font-scale, 1));
+  line-height: calc(13px * var(--card-font-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-card-meta .col-card-type {
+  flex: none;
+}
+/* A type with no status (Note) carries no status tint. */
+.col-card.no-status {
+  background: var(--card-bg, var(--surface));
+}
+.col-card.no-status:not(.shape-dashed) {
+  border-top-color: var(--card-border-color, var(--border));
+}
+
 /* Explicit text placement wins over the shape's default, which is why these
    rules come after the shape rules. */
 .col-card.align-left { text-align: left; align-items: flex-start; }
 .col-card.align-center { text-align: center; align-items: center; }
 .col-card.align-right { text-align: right; align-items: flex-end; }
-.col-card.align-left .col-card-head { justify-content: flex-start; }
-.col-card.align-center .col-card-head { justify-content: center; }
-.col-card.align-right .col-card-head { justify-content: flex-end; }
+.col-card.align-left .col-card-head,
+.col-card.align-left .col-card-meta { justify-content: flex-start; }
+.col-card.align-center .col-card-head,
+.col-card.align-center .col-card-meta { justify-content: center; }
+.col-card.align-right .col-card-head,
+.col-card.align-right .col-card-meta { justify-content: flex-end; }
 /* `safe` for the two that push text past the top edge when the stack outgrows
    the card: an overflow there hides the status row and the title, which is
    everything a card is read for. Overflowing downwards only costs the tail. */
@@ -169,7 +226,7 @@
 }
 .card-size-value {
   min-width: 30px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   text-align: right;
 }
@@ -256,7 +313,7 @@
   border-radius: 0 5px 5px 0;
   background: none;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -285,19 +342,33 @@
   align-items: baseline;
   gap: 6px;
   padding: 6px 10px 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   min-width: 0;
 }
+/* One line however narrow the drawer: a long project name ends in an
+   ellipsis rather than wrapping, and gives up width before the file does. */
 .editor-path-project {
+  flex: 0 10 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--accent);
 }
+.editor-path-sep {
+  flex-shrink: 0;
+}
 .editor-path-file {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .editor-path-dirty {
+  flex-shrink: 0;
   margin-left: auto;
+  white-space: nowrap;
   color: var(--st-progress-fg, var(--accent));
 }

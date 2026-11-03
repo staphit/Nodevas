@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"nodevas/internal/agenthook"
@@ -19,6 +17,8 @@ import (
 	"nodevas/internal/runner"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
+
+	"golang.org/x/term"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -43,6 +43,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerLogout(args, stdout, stderr)
 	case "status":
 		err = runnerStatus(args, stdout, stderr)
+	case "prune-kept":
+		err = runnerPruneKept(args, stdout, stderr)
 	case "hub-version":
 		err = runnerHubVersion(args, stdout, stderr)
 	case "repo":
@@ -58,8 +60,7 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "agy-gate":
 		// Not for people: the PreToolUse hook of a headless Antigravity run
 		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
-		fmt.Fprintln(stdout, adapter.AntigravityGate(agenthook.ReadStdin(stdin, agenthook.StdinLimit),
-			len(args) > 0 && args[0] == adapter.AntigravityGateReadOnly))
+		fmt.Fprintln(stdout, adapter.AntigravityGateMain(args, agenthook.ReadStdin(stdin, agenthook.StdinLimit)))
 		return 0
 	case "help", "-h", "--help":
 		runnerUsage(stdout)
@@ -87,17 +88,25 @@ func runnerUsage(w io.Writer) {
                                              token on stdin's first line; with --access-client-id,
                                              the Access service token's secret on the second
        nodevas runner login --link [--hub <url>] [--name <label>]
-                                             a device link (Runners → Link a new device) on stdin's
-                                             first line, prompted hidden at a terminal; never as an
-                                             argument. It brings the hub and its Access service token
+                                             a device link (Settings → Agents → Link a new device)
+                                             on stdin's first line, prompted hidden at a terminal; never
+                                             as an argument. It brings the hub and its Access service token
        nodevas runner logout                 forget the token and the Access secret
-       nodevas runner status                 settings (secrets masked) and the agents found here
+       nodevas runner status                 settings (secrets masked), the agents found here and the
+                                             worktrees kept for agent config their commits left out
+       nodevas runner prune-kept [--dry-run] remove those kept worktrees whose only uncommitted change
+                                             is that config (their branches stay); never done on its own
        nodevas runner hub-version            the commit the hub was built from (the installer uses it
                                              to fetch the matching runner binary from GitHub)
        nodevas runner repo add <path> [--name <n>] [--yes]
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
        nodevas runner repo remove <id|name>
+       nodevas runner repo set <id|name> --test-command "go test ./..." [--test-timeout <minutes>]
+                                             the repository's test command, for verify jobs (red
+                                             before the work, green after); it stays on this
+                                             machine, the hub only learns that one is set.
+                                             --test-command "" clears it
        nodevas runner autoaccept on|off|show the offers that start without asking here:
        nodevas runner autoaccept step-up required|optional
        nodevas runner autoaccept repo add|remove <id|name|path>
@@ -105,6 +114,8 @@ func runnerUsage(w io.Writer) {
        nodevas runner autoaccept mode add|remove headless|interactive
        nodevas runner autoaccept allow-shell on|off
        nodevas runner autoaccept remote-typing on|off
+       nodevas runner autoaccept verify on|off  take verify jobs (the repo's test command on code an
+                                             agent wrote; no agent runs) unasked, for listed repos
                                              an offer is auto-accepted only when auto-accept is on,
                                              the dispatcher stepped up on the hub (unless optional),
                                              its repo, agent and mode are all listed, and its agent
@@ -120,7 +131,12 @@ func runnerUsage(w io.Writer) {
                                              every repo here, installed agents, headless; false = off),
                                              interactive (true|false, default true: take runs whose
                                              agent TUI the dispatcher watches, typing only if allowed;
-                                             each still accepted here or by autoaccept);
+                                             each still accepted here or by autoaccept),
+                                             repoBrowse (on|off, default on: the hub's Explorer may list
+                                             and read the repos added here, read-only, secrets hidden),
+                                             httpLoopbackHub (on|off, default off: a runner serve did not
+                                             start sends its token to a plain-http hub on this machine;
+                                             only if nobody else can run programs here);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
@@ -131,6 +147,12 @@ func runnerUsage(w io.Writer) {
                                              opencodeProtocol (run|acp; acp is experimental);
                                              Antigravity CLI (agy): antigravityMode (plan|accept-edits|
                                              auto|full; full skips every permission);
+                                             permissionRelay (true|false, default false: Claude Code,
+                                             Antigravity (accept-edits) and OpenCode over ACP (edit)
+                                             ask you in Nodevas for a permission instead of refusing;
+                                             not runs auto-accepted without allow-shell, nor OpenCode 2
+                                             (it runs through opencode run); review, plan and judge
+                                             runs keep their read-only limits whatever you answer);
                                              pull requests: autoPR (true|false), prDraft (true|false),
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
@@ -217,13 +239,17 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if cfg.Hub == "" || cfg.Token == "" {
 		return fmt.Errorf("not logged in (%s): run nodevas runner login --hub <url> first", path)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Read before runnerStopContext removes it: serve's own runner may use
+	// serve's plain-http loopback port (runner.Config.PlainLocalHubRefusal).
+	underServe := os.Getenv(localRunnerUnderServeEnv) == "1"
+	ctx, stop := runnerStopContext()
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
 	// offers the auto-accept policy does not cover are declined at once.
 	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
-	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter}
+	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter,
+		ServeManaged: underServe}
 	return client.Run(ctx)
 }
 
@@ -280,6 +306,9 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 		return err
 	}
 	fmt.Fprintf(stdout, "saved %s\nstart the runner with: nodevas runner\n", path)
+	if err := cfg.PlainLocalHubRefusal(false); err != nil {
+		fmt.Fprintf(stderr, "note: %v\n", err)
+	}
 	return nil
 }
 
@@ -338,8 +367,68 @@ func runnerStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "  %-7s %s  [models: %s]\n", agent.Kind, state, strings.Join(models, ", "))
 	}
 	printRepos(stdout, cfg)
+	printKept(stdout, cfg)
 	printRunSettings(stdout, cfg)
 	return nil
+}
+
+// printKept lists the worktrees runs kept because their commits left agent
+// config out: nothing removes them on its own.
+func printKept(w io.Writer, cfg *runner.Config) {
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		fmt.Fprintf(w, "kept worktrees: unknown (%v)\n", err)
+		return
+	}
+	kept, err := runner.KeptWorktrees(dataDir)
+	if err != nil {
+		fmt.Fprintf(w, "kept worktrees: unknown (%s)\n", runner.TerminalText(err.Error()))
+		return
+	}
+	if len(kept) == 0 {
+		fmt.Fprintln(w, "kept worktrees: 0")
+		return
+	}
+	fmt.Fprintf(w, "kept worktrees: %d (they hold agent config their commits left out; commit what you meant, "+
+		"then remove the rest with nodevas runner prune-kept)\n", len(kept))
+	for _, k := range kept {
+		fmt.Fprintf(w, "  %s  (run %s; withheld: %s)\n", runner.TerminalText(k.Path), runner.TerminalText(k.RunID),
+			runner.TerminalText(strings.Join(k.Withheld, ", ")))
+	}
+}
+
+// runnerPruneKept removes, when asked, the kept worktrees that hold nothing
+// but the agent config their commits left out.
+func runnerPruneKept(args []string, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("prune-kept")
+	dryRun := fs.Bool("dry-run", false, "only list")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	_, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		return err
+	}
+	report, err := runner.PruneKept(context.Background(), dataDir, *dryRun)
+	verb := "removed"
+	if *dryRun {
+		verb = "would remove"
+	}
+	for _, k := range report.Removed {
+		fmt.Fprintf(stdout, "%s %s (run %s; withheld: %s)\n", verb, runner.TerminalText(k.Path),
+			runner.TerminalText(k.RunID), runner.TerminalText(strings.Join(k.Withheld, ", ")))
+	}
+	for _, s := range report.Skipped {
+		fmt.Fprintf(stdout, "kept %s: %s\n", runner.TerminalText(s.Path), runner.TerminalText(s.Reason))
+	}
+	if len(report.Removed) == 0 && len(report.Skipped) == 0 && err == nil {
+		fmt.Fprintln(stdout, "no kept worktrees")
+	}
+	return err
 }
 
 func printRunSettings(w io.Writer, cfg *runner.Config) {
@@ -370,6 +459,20 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 		interactive += " (the default)"
 	}
 	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
+	repoBrowse := "the hub's Explorer may list and read your registered repos, read-only, secrets hidden"
+	if !cfg.RepoBrowseOn() {
+		repoBrowse = "repo browsing from the hub is refused"
+	} else if cfg.RepoBrowse == nil {
+		repoBrowse += " (the default)"
+	}
+	setting("repoBrowse", fmt.Sprintf("%t (%s)", cfg.RepoBrowseOn(), repoBrowse))
+	if strings.HasPrefix(cfg.Hub, "http:") || cfg.HTTPLoopbackHub {
+		loopback := "only the runner `nodevas serve` starts sends its token to a plain-http hub here"
+		if cfg.HTTPLoopbackHub {
+			loopback = "this runner sends its token to whatever holds the plain-http hub's port here"
+		}
+		setting("httpLoopbackHub", fmt.Sprintf("%t (%s)", cfg.HTTPLoopbackHub, loopback))
+	}
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)
@@ -383,6 +486,13 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("opencodeProtocol", cfg.OpenCodeProtocolOrDefault())
 	fmt.Fprintln(w, "antigravity runs:")
 	setting("antigravityMode", cfg.AntigravityModeOrDefault())
+	fmt.Fprintln(w, "permission prompts:")
+	relay := "headless runs refuse what needs a permission (the default)"
+	if cfg.PermissionRelay {
+		relay = "Claude Code, Antigravity and OpenCode ACP runs ask you in Nodevas instead of refusing, " +
+			"except runs auto-accepted without allow-shell and OpenCode 2; read-only runs keep their limits"
+	}
+	setting("permissionRelay", fmt.Sprintf("%t (%s)", cfg.PermissionRelay, relay))
 	labels := "(none)"
 	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
 		labels = strings.Join(templates, ", ")
@@ -634,6 +744,8 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 	fs, configFlag := newRunnerFlags("repo " + sub)
 	name := fs.String("name", "", "display name")
 	yes := fs.Bool("yes", false, "skip the confirmation")
+	testCommand := fs.String("test-command", "", "repo set: the repository's test command, argv-style (no shell unless you write sh -c)")
+	testTimeout := fs.Int("test-timeout", 0, "repo set: minutes before the test command is stopped (0 is the default, 20)")
 	rest, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -680,6 +792,29 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 		fmt.Fprintf(stdout, "added %s as %q (id %s); a running runner reports it within 5 minutes, or restart it\n",
 			repo.Path, repo.Name, repo.ID)
 		return nil
+	case "set":
+		if len(rest) != 1 {
+			return errUsage
+		}
+		set := false
+		fs.Visit(func(f *flag.Flag) { set = set || f.Name == "test-command" || f.Name == "test-timeout" })
+		if !set {
+			return errUsage
+		}
+		repo, err := cfg.SetRepoTestCommand(rest[0], *testCommand, *testTimeout)
+		if err != nil {
+			return err
+		}
+		if err := runner.SaveConfig(path, cfg); err != nil {
+			return err
+		}
+		if command, timeout := cfg.RepoTestCommand(repo.ID); len(command) > 0 {
+			fmt.Fprintf(stdout, "%s: test command %q (stopped after %s); restart the runner to use it\n",
+				repo.Name, strings.Join(command, " "), timeout)
+		} else {
+			fmt.Fprintf(stdout, "%s: no test command; verify jobs are declined until one is set\n", repo.Name)
+		}
+		return nil
 	case "remove":
 		if len(rest) != 1 {
 			return errUsage
@@ -709,6 +844,9 @@ func printRepos(w io.Writer, cfg *runner.Config) {
 			line += "  " + repo.Remote
 		}
 		fmt.Fprintln(w, line)
+		if command, timeout := cfg.RepoTestCommand(repo.ID); len(command) > 0 {
+			fmt.Fprintf(w, "      test command: %s (stopped after %s)\n", strings.Join(command, " "), timeout)
+		}
 	}
 }
 
@@ -742,7 +880,10 @@ func stdinIsTerminal(r io.Reader) bool {
 	return ok && isTerminal(f)
 }
 
+// isTerminal reports whether f is a terminal (a console on Windows). A
+// character device is not enough: NUL and /dev/null are character devices,
+// and they are what Electron's ignored stdio and systemd's StandardInput=null
+// hand serve, which must then stop on the first Ctrl+C.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return f != nil && term.IsTerminal(int(f.Fd()))
 }

@@ -25,28 +25,72 @@
 // of two *bytes*, and one CJK character is three — a one-character query has
 // no bigram at all and would otherwise match everything.
 //
-// The postings live in SQLite FTS5 now (see persist.go), which changes nothing
-// above: what is written into the FTS5 columns is the output of this file,
-// space separated, and FTS5's own unicode61 tokeniser only has to split that
-// back apart on the spaces. A token is letters and digits only, so unicode61
-// cannot subdivide one — Han characters are letters to it, exactly as they are
-// to unicode.IsLetter here.
+// The postings live in PostgreSQL (see persist.go), which changes nothing
+// above: what goes into the tsvector columns is the output of this file, as
+// lexemes handed to array_to_tsvector, so PostgreSQL's own text-search parser
+// never sees the text and cannot re-split it.
+//
+// Latin diacritics are folded ("café" is indexed as "cafe"), as SQLite FTS5's
+// unicode61 tokeniser folded them when the index lived there. Only the tokens
+// are folded: the substring check still compares the text as written.
 package searchindex
 
 import (
-	"sort"
-	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
-// forEachRun calls fn with each maximal run of letters/digits, lowercased.
-// The slice handed to fn is reused, so fn must not retain it.
+// foldTable maps a precomposed Latin letter to its base letter: NFD, then the
+// combining marks dropped, which is what unicode61's remove_diacritics did.
+// Only the Latin blocks are folded — NFD would take a Hangul syllable apart
+// into jamo, which are letters and would change what a run is.
+var foldTable = func() map[rune]rune {
+	table := make(map[rune]rune, 512)
+	add := func(from, to rune) {
+		for r := from; r <= to; r++ {
+			decomposed := []rune(norm.NFD.String(string(r)))
+			if len(decomposed) < 2 || !unicode.IsLetter(decomposed[0]) {
+				continue
+			}
+			marks := true
+			for _, mark := range decomposed[1:] {
+				if !unicode.Is(unicode.Mn, mark) {
+					marks = false
+					break
+				}
+			}
+			if marks {
+				table[r] = decomposed[0]
+			}
+		}
+	}
+	add(0x00C0, 0x024F) // Latin-1 Supplement, Latin Extended-A and -B
+	add(0x1E00, 0x1EFF) // Latin Extended Additional (Vietnamese)
+	return table
+}()
+
+// fold lowercases r and drops its diacritic.
+func fold(r rune) rune {
+	r = unicode.ToLower(r)
+	if r < 0xC0 {
+		return r
+	}
+	if base, ok := foldTable[r]; ok {
+		return base
+	}
+	return r
+}
+
+// forEachRun calls fn with each maximal run of letters/digits, lowercased and
+// with Latin diacritics folded. The slice handed to fn is reused, so fn must
+// not retain it.
 func forEachRun(text string, fn func(run []rune)) {
 	run := make([]rune, 0, 64)
 	for _, r := range text {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
-			run = append(run, unicode.ToLower(r))
+			run = append(run, fold(r))
 			continue
 		}
 		if len(run) > 0 {
@@ -86,21 +130,64 @@ func collectTokens(text string, into map[string]struct{}) {
 	})
 }
 
-// indexTokens is what goes into an FTS5 column: every distinct token of text,
-// sorted, separated by spaces.
+// documentTokens is what goes into a tsvector column: every distinct token of
+// text, the number of them, and whether some had to be left out to fit.
 //
-// Sorted, not in map order, because retracting a document from a contentless
-// FTS5 table means handing the same string back (see deleteIndexed) and Go's
-// map iteration would hand back a different one every time.
-func indexTokens(text string) string {
-	set := make(map[string]struct{}, 256)
-	collectTokens(text, set)
-	tokens := make([]string, 0, len(set))
-	for token := range set {
+// A tsvector holds under a megabyte of lexemes, and the biggest documents have
+// more distinct bigrams than that (see maxLexemeBytes). Every single character
+// is kept — there are only so many of them, and they are what a ranked search
+// of a Chinese question scores most — and then bigrams in the order the text
+// first uses them, until the budget is spent. The document is marked oversize
+// so a plain search still verifies it whatever its tokens say. The count is of
+// every token, kept or not: it is the document length BM25 normalises by.
+func documentTokens(text string) (tokens []string, count int, cut bool) {
+	seen := make(map[string]struct{}, 256)
+	var unigrams, bigrams []string
+	var buf [8]byte
+	add := func(runes []rune) {
+		n := 0
+		for _, r := range runes {
+			n += utf8.EncodeRune(buf[n:], r)
+		}
+		if _, ok := seen[string(buf[:n])]; ok {
+			return
+		}
+		token := string(buf[:n])
+		seen[token] = struct{}{}
+		if len(runes) == 1 {
+			unigrams = append(unigrams, token)
+		} else {
+			bigrams = append(bigrams, token)
+		}
+	}
+	forEachRun(text, func(run []rune) {
+		for i := range run {
+			add(run[i : i+1])
+			if i+1 < len(run) {
+				add(run[i : i+2])
+			}
+		}
+	})
+	count = len(unigrams) + len(bigrams)
+	tokens = make([]string, 0, count)
+	spent := 0
+	for _, token := range unigrams {
+		if spent+len(token) > maxLexemeBytes {
+			cut = true
+			break
+		}
+		spent += len(token)
 		tokens = append(tokens, token)
 	}
-	sort.Strings(tokens)
-	return strings.Join(tokens, " ")
+	for _, token := range bigrams {
+		if spent+len(token) > maxLexemeBytes {
+			cut = true
+			break
+		}
+		spent += len(token)
+		tokens = append(tokens, token)
+	}
+	return tokens, count, cut
 }
 
 // queryTokens returns the tokens a query must be present under. Every token is
@@ -170,3 +257,52 @@ func matchFoldAt(text, lower string) bool {
 	}
 	return true
 }
+
+// maxRankTokens bounds the tokens a ranked search scores. A CJK
+// character yields two tokens (itself and its bigram), so 32 would drop the
+// tail of any question over 16 characters; 64 keeps a 32-character question
+// whole and is still a small query.
+const maxRankTokens = 64
+
+// rankTokens is what a ranked search looks for: any of these, scored by BM25,
+// rather than all of them. A whole question ("林雨的妹妹叫什麼名字？") then
+// finds the passage that shares most of its words instead of nothing at all.
+//
+// Per run, in text order: a CJK character on its own (a Chinese word is often
+// one character, and the index holds every one), then the bigram starting at
+// it. A Latin letter alone is not a term worth scoring, so only its bigrams
+// are. A one-rune run is its own token either way. The index tokens are
+// unchanged: these are a different selection of the same vocabulary.
+func rankTokens(query string) []string {
+	tokens := make([]string, 0, maxRankTokens)
+	seen := make(map[string]struct{}, maxRankTokens)
+	add := func(token string) {
+		if len(tokens) == maxRankTokens {
+			return
+		}
+		if _, ok := seen[token]; ok {
+			return
+		}
+		seen[token] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	forEachRun(query, func(run []rune) {
+		if len(run) == 1 {
+			add(string(run))
+			return
+		}
+		for i := range run {
+			if isCJK(run[i]) {
+				add(string(run[i : i+1]))
+			}
+			if i+1 < len(run) {
+				add(string(run[i : i+2]))
+			}
+		}
+	})
+	return tokens
+}
+
+// isCJK reports whether r is from the CJK blocks (radicals onwards), where a
+// single character carries meaning.
+func isCJK(r rune) bool { return r >= 0x2E80 }

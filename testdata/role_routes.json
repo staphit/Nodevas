@@ -1,0 +1,31 @@
+{
+  "routes": [
+    {"method": "GET", "pattern": "/api/auth/status", "cap": "read"},
+    {"method": "GET", "pattern": "/api/projects", "cap": "read"},
+    {"method": "GET", "pattern": "/api/ready", "cap": "read"},
+    {"method": "GET", "pattern": "/api/graph", "cap": "read"},
+    {"method": "GET", "pattern": "/api/documents", "cap": "read"},
+    {"method": "GET", "pattern": "/api/search", "cap": "read"},
+    {"method": "GET", "pattern": "/api/validate", "cap": "read"},
+    {"method": "GET", "pattern": "/api/nodes/*", "cap": "read"},
+    {"method": "GET", "pattern": "/api/nodes/*/context", "cap": "read"},
+    {"method": "POST", "pattern": "/api/nodes", "cap": "create"},
+    {"method": "PUT", "pattern": "/api/nodes/*", "cap": "body"},
+    {"method": "POST", "pattern": "/api/nodes/*/claim", "cap": "claim"},
+    {"method": "POST", "pattern": "/api/nodes/*/release", "cap": "claim"},
+    {"method": "POST", "pattern": "/api/nodes/*/status", "cap": "status"},
+    {"method": "POST", "pattern": "/api/nodes/*/acceptance", "cap": "acceptance"},
+    {"method": "POST", "pattern": "/api/graph/ops", "cap": "ops"},
+    {"method": "POST", "pattern": "/api/graph/subgraph", "cap": "create"},
+    {"method": "GET", "pattern": "/api/agents", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/heartbeat", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/leave", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/messages", "cap": "message"},
+    {"method": "GET", "pattern": "/api/agents/messages/*/files/*", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/inbox", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/asks", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/sessions/*/changes", "cap": "message"},
+    {"method": "POST", "pattern": "/api/agents/sessions/*/usage", "cap": "message"},
+    {"method": "POST", "pattern": "/api/verdicts", "cap": "verdict"}
+  ]
+}

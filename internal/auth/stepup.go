@@ -21,10 +21,10 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
-	"errors"
 	"net/http"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -39,11 +39,11 @@ const MaxStepUpWindow = 12 * time.Hour
 var (
 	// ErrStepUpAgent refuses a step-up from an agent: the point is a person
 	// reading their mailbox.
-	ErrStepUpAgent = errors.New("only a person at a browser can step up")
+	ErrStepUpAgent = locale.Errorf("only a person at a browser can step up", "只有在瀏覽器前的人可以驗證身分")
 	// ErrStepUpNoEmail is an account with no address to send a passcode to.
-	ErrStepUpNoEmail = errors.New("this account has no email address to send a step-up passcode to")
+	ErrStepUpNoEmail = locale.Errorf("this account has no email address to send a step-up passcode to", "這個帳號沒有可寄送身分驗證碼的電子郵件地址")
 	// ErrStepUpCode is a wrong, expired or missing step-up passcode.
-	ErrStepUpCode = errors.New("that step-up passcode is wrong or has expired; request a new one")
+	ErrStepUpCode = locale.Errorf("that step-up passcode is wrong or has expired; request a new one", "身分驗證碼錯誤或已過期；請重新索取")
 )
 
 // SetStepUpWindow sets how long a step-up lasts. Zero or less restores the
@@ -87,11 +87,11 @@ func (a *SessionAuth) sessionLocked(r *http.Request) (string, *Session, bool) {
 	if r == nil {
 		return "", nil, false
 	}
-	cookie, err := r.Cookie(SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := SessionToken(r)
+	if !ok {
 		return "", nil, false
 	}
-	key := sessionKey(cookie.Value)
+	key := sessionKey(token)
 	session, ok := a.sessions[key]
 	if !ok || time.Now().After(session.expires) {
 		return "", nil, false
@@ -165,14 +165,16 @@ func (a *SessionAuth) RequestStepUp(r *http.Request) (Challenge, error) {
 	return Challenge{Code: code, Email: account.Email, Expires: expires, Actor: account.Name, Method: StepUpMethodEmail}, nil
 }
 
-// allowStepUpRequest charges the global and per-source passcode budgets, at
-// the sign-in request's limits, in step-up's own buckets.
+// allowStepUpRequest charges the per-source passcode budget, at the sign-in
+// request's limit, in step-up's own bucket. The per-account budget is charged
+// beside it (RequestStepUp); a hub-wide one would let one member hold
+// everybody else's step-up hostage.
 func (a *SessionAuth) allowStepUpRequest(source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepAttemptsLocked(now)
-	charges := []rateCharge{{key: "stepup-global", window: otpRequestWindow, limit: loginGlobalLimit}}
+	var charges []rateCharge
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "stepup-ip:" + source, window: otpRequestWindow, limit: otpRequestLimit})
 	}
@@ -200,10 +202,11 @@ type StepUpResult struct {
 
 // VerifyStepUpProof is VerifyStepUp with the method that proved it.
 //
-// Every attempt is charged to the sign-in budgets (per source, and per account
-// as "stepup:<id>") before anything is compared, and a passcode dies after
-// the same number of wrong guesses as a sign-in passcode. An authenticator
-// code is additionally under the account's wrong-code budgets.
+// Every attempt is charged to the account's own step-up budget ("stepup:<id>")
+// before anything is compared, and a passcode dies after the same number of
+// wrong guesses as a sign-in passcode. An authenticator code is additionally
+// under the account's wrong-code budgets. Nothing a stranger sends to the
+// sign-in door counts against it.
 func (a *SessionAuth) VerifyStepUpProof(r *http.Request, code string) (StepUpResult, error) {
 	if ActorFrom(r).IsAgent() {
 		return StepUpResult{}, ErrStepUpAgent
@@ -218,7 +221,7 @@ func (a *SessionAuth) VerifyStepUpProof(r *http.Request, code string) (StepUpRes
 	if !ok {
 		return StepUpResult{}, ErrUnauthenticated
 	}
-	if !a.chargeLogin("stepup:"+actorID, ClientIP(r)) {
+	if !a.chargeAccount("stepup:" + actorID) {
 		return StepUpResult{}, ErrTooManyLogins
 	}
 	if len(code) == 0 || len(code) > MaxOTPBytes {

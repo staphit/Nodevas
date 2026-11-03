@@ -4,7 +4,6 @@ package node
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 func (a *API) getNodePages(c *gin.Context) {
@@ -57,7 +58,7 @@ func (a *API) postNodePageImport(c *gin.Context) {
 	nodeID := c.Param("id")
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, store.MaxAttachmentBytes)
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("read upload: %w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("read upload: %w", "讀取上傳檔案：%w", err))
 		return
 	}
 	if c.Request.MultipartForm != nil {
@@ -65,7 +66,7 @@ func (a *API) postNodePageImport(c *gin.Context) {
 	}
 	upload, header, err := c.Request.FormFile("file")
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, errors.New("file is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("file is required", "需要提供檔案"))
 		return
 	}
 	defer upload.Close()

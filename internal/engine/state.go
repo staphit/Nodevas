@@ -7,6 +7,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Status is a node's lifecycle state.
@@ -90,6 +92,10 @@ type HistoryEvent struct {
 	Ref string `json:"ref,omitempty"`
 }
 
+// EventEvidence is a pipeline evidence journal event (agent roles): kept in
+// history, ignored for status.
+const EventEvidence = "evidence"
+
 // NewRunState returns an empty state stamped with now.
 func NewRunState(now time.Time) *RunState {
 	return &RunState{
@@ -103,7 +109,7 @@ func NewRunState(now time.Time) *RunState {
 func ParseRunState(data []byte) (*RunState, error) {
 	var rs RunState
 	if err := json.Unmarshal(data, &rs); err != nil {
-		return nil, fmt.Errorf("state.json: %w", err)
+		return nil, locale.Errorf("state.json: %w", "state.json：%w", err)
 	}
 	if rs.Nodes == nil {
 		rs.Nodes = map[string]*NodeState{}
@@ -121,14 +127,14 @@ func MarshalRunState(rs *RunState) ([]byte, error) {
 // A missing state is treated as ready.
 func (rs *RunState) SetStatus(nodeID string, to Status, by string, now time.Time) error {
 	if !ValidStatus(to) {
-		return fmt.Errorf("invalid status %q", to)
+		return locale.Errorf("invalid status %q", "狀態「%s」無效", to)
 	}
 	from := StatusReady
 	if st := rs.Nodes[nodeID]; st != nil && st.Status.explicit() {
 		from = st.Status
 	}
 	if !CanTransition(from, to) {
-		return fmt.Errorf("invalid status transition %s -> %s", from, to)
+		return locale.Errorf("invalid status transition %s -> %s", "無效的狀態轉換 %s -> %s", from, to)
 	}
 	ts := now.UTC().Format(time.RFC3339)
 	rs.Nodes[nodeID] = &NodeState{Status: to, At: ts, By: by}
@@ -186,13 +192,17 @@ func ResumeJournal(base *RunState, data []byte) (*RunState, error) {
 			if isTornTail {
 				break
 			}
-			return rs, fmt.Errorf("journal line %d: %w", index+1, err)
+			return rs, locale.Errorf("journal line %d: %w", "日誌第 %d 行：%w", index+1, err)
 		}
 		switch {
 		case ev.Event == "status" && ev.Node != "" && ev.ID != "":
 			replay.status(ev)
 		case ev.Event == "move" && ev.Ref != "":
 			replay.move(ev)
+		case ev.Event == EventEvidence && ev.Node != "":
+			// Pipeline evidence (red/green runs, diff guard, judge checks)
+			// is history only: it never changes a node's status.
+			replay.appendHistory(ev)
 		}
 	}
 	return rs, nil
@@ -301,8 +311,13 @@ func EffectiveFlags(g *Graph, rs *RunState) map[string]any {
 // Explicit history wins; nodes without history are ready ("未開始").
 // Requires expressions remain graph metadata and validation input, but do not
 // lock lifecycle transitions.
+//
+// The one exception is a type that completes automatically (Start, End): with
+// no explicit history it is derived done once its prerequisites settle. The
+// derived status is never journaled.
 func ComputeStatuses(g *Graph, rs *RunState) map[string]Status {
 	out := map[string]Status{}
+	var auto []string
 	for _, n := range g.Nodes {
 		if n == nil {
 			continue
@@ -314,6 +329,10 @@ func ComputeStatuses(g *Graph, rs *RunState) map[string]Status {
 			}
 		}
 		out[n.ID] = StatusReady
+		if g.TypeOf(n).Completion == CompletionAuto {
+			auto = append(auto, n.ID)
+		}
 	}
+	deriveAutoStatuses(g, rs, out, auto)
 	return out
 }

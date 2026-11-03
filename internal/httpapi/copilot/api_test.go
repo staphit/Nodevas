@@ -15,8 +15,8 @@ import (
 	"nodevas/internal/copilot"
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 var actors = map[string]identity.Actor{
@@ -63,7 +63,7 @@ func (m *memoryKeys) Clear() error            { m.key = nil; return nil }
 func testRouter(t *testing.T, apiKey string) *gin.Engine {
 	t.Helper()
 	service := copilot.New(copilot.Options{
-		Database: dbtest.Open(t),
+		Database: testpg.New(t),
 		Keys:     &memoryKeys{},
 		Defaults: copilot.Defaults{Enabled: true, Provider: "anthropic", Model: "m", APIKey: apiKey},
 		NewProvider: func(provider.Config) (provider.Provider, error) {

@@ -104,6 +104,26 @@ afterEach(() => {
 });
 
 describe("DispatchDialog routing", () => {
+  // W-22: an auto-routing pick shows as such and is linked to its run.
+  it("marks an auto-routing pick and sends its pick id with the run", async () => {
+    vi.spyOn(api, "getRoute").mockResolvedValue({
+      ruleId: "auto:pick-42",
+      match: "auto",
+      runnerId: "r2",
+      target: { agent: "codex", model: "gpt-5" },
+    });
+    const rules = vi.spyOn(api, "getRouting").mockResolvedValue({ rules: [] });
+    const create = vi.spyOn(api, "createRun").mockResolvedValue(created);
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId("dispatch-rule-note")).toHaveTextContent("Auto routing"));
+    expect(rules).not.toHaveBeenCalled();
+    expect(selectNamed("Agent").value).toBe("codex");
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ agent: "codex", model: "gpt-5", runnerId: "r2", routePick: "pick-42" }));
+  });
+
   it("pre-fills runner, agent, model and fallbacks from the matched rule", async () => {
     vi.spyOn(api, "getRoute").mockResolvedValue(suggestion);
     // The suggestion names its rule; the rule says which tag matched.
@@ -282,7 +302,8 @@ describe("DispatchDialog routing", () => {
     });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     const note = await screen.findByTestId("dispatch-rule-note");
-    expect(note).toHaveTextContent("From rule: Node kind = task");
+    // A kind rule reads as the type's name.
+    expect(note).toHaveTextContent("From rule: Node kind = Task");
     expect(note).toHaveTextContent("This runner does not offer gemini/flash; using claude/sonnet.");
   });
 

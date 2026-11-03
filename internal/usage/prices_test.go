@@ -26,7 +26,8 @@ func TestLookup(t *testing.T) {
 		{"opus", "opus"},
 		{"opencode/deepseek-v4.1-flash-free", "opencode/*-free"},
 		{"opencode/big-pickle", ""},
-		{"gpt-5.5", ""},
+		// Estimate prices for CLIs that report no cost (estimate.go).
+		{"gpt-5.5", "gpt-5.5"},
 		{"gemini-3.8-flash-medium", ""},
 		{"claude-opus-50", ""},
 		{"", ""},

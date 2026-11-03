@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
@@ -70,6 +70,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// The panel is a lazy chunk. Its first import is transformed on demand, which
+// under a full parallel run took longer than a findBy's one second; loading it
+// up front leaves the tests to time only what they check.
+beforeAll(async () => {
+  await import("./CopilotPanel");
+}, 30_000);
+
 describe("copilot follow-up", () => {
   it("shows the follow-up at once, and queues it to be spoken, when its conversation is open", async () => {
     const fetchMock = stubServer();
@@ -98,7 +105,7 @@ describe("copilot follow-up", () => {
   it("waits as unread with the panel closed; the mic button opens it", async () => {
     stubServer();
     render(<CopilotRoot />);
-    await screen.findByRole("button", { name: "Open copilot · New follow-up from the copilot" });
+    await screen.findByRole("button", { name: "Voice Copilot · Open copilot · New follow-up from the copilot" });
     // The push arrives too: still unread, nothing opens by itself.
     await act(async () => {
       await followupArrived("c1");
@@ -107,7 +114,7 @@ describe("copilot follow-up", () => {
     expect(useCopilot.getState().conversations[0].unread).toBe(true);
     expect(screen.getByTestId("copilot-unread")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open copilot · New follow-up from the copilot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Voice Copilot · Open copilot · New follow-up from the copilot" }));
     expect(await screen.findByRole("dialog", { name: "Copilot" })).toBeInTheDocument();
     await vi.waitFor(() => expect(useCopilot.getState().activeId).toBe("c1"));
     expect(await screen.findByText("Breakdown finished: 2 tasks")).toBeInTheDocument();

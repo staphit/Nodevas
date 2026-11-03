@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -455,6 +456,7 @@ func testClient(srv *httptest.Server) *Client {
 	return &Client{
 		Config:       &Config{Hub: srv.URL, Token: testToken, AccessClientID: "cid", AccessClientSecret: "sec"},
 		Commands:     &fakeCommands{paths: map[string]string{}},
+		ServeManaged: true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval: 20 * time.Millisecond,
 		BackoffMin:   5 * time.Millisecond,
 		BackoffMax:   20 * time.Millisecond,
@@ -601,5 +603,67 @@ func TestReviewPermission(t *testing.T) {
 	}
 	if text := permissionText(cfg, "opencode"); text != "permission full" {
 		t.Errorf("opencode text = %q", text)
+	}
+}
+
+// A Claude review or plan never runs in a mode that skips Claude Code's own
+// permission prompts: there, the deny list leaves reads anywhere on this
+// machine open. Modes that ask (headless: refuse) or never allow stay the
+// owner's.
+func TestReviewPermissionClaudeKeepsPrompts(t *testing.T) {
+	for _, owner := range []string{"bypassPermissions", "auto"} {
+		mode, text := reviewPermission(&Config{PermissionMode: owner}, "claude")
+		if mode != "acceptEdits" || !strings.Contains(text, mode) || strings.Contains(text, owner) {
+			t.Errorf("owner's %s: review runs in %q (%q)", owner, mode, text)
+		}
+	}
+	for _, owner := range []string{"acceptEdits", "manual", "dontAsk", "plan"} {
+		if mode, _ := reviewPermission(&Config{PermissionMode: owner}, "claude"); mode != owner {
+			t.Errorf("owner's %s: review runs in %q", owner, mode)
+		}
+	}
+}
+
+// permissionRelay is off unless the owner turns it on; the run's log says
+// when it applies, and only for the CLIs that can relay.
+func TestPermissionRelaySetting(t *testing.T) {
+	cfg := &Config{}
+	if cfg.PermissionRelay {
+		t.Fatal("permissionRelay is on by default")
+	}
+	if !slices.Contains(SettingKeys, "permissionRelay") {
+		t.Errorf("permissionRelay is not a setting key: %v", SettingKeys)
+	}
+	for kind := range map[string]bool{"claude": true, "antigravity": true, "opencode": true, "codex": true, "gemini": true} {
+		if text := permissionText(cfg, kind); strings.Contains(text, "relayed") {
+			t.Errorf("relay off: %s text = %q", kind, text)
+		}
+	}
+	if err := cfg.Set("permissionrelay", []string{"true"}); err != nil || !cfg.PermissionRelay {
+		t.Fatalf("set true: %v, %+v", err, cfg)
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil || !strings.Contains(string(raw), `"permissionRelay":true`) {
+		t.Errorf("json = %s, %v", raw, err)
+	}
+	cfg.OpenCodeProtocol = "acp"
+	for kind, relayed := range map[string]bool{"claude": true, "antigravity": true, "opencode": true, "codex": false, "gemini": false} {
+		if text := permissionText(cfg, kind); strings.Contains(text, "permission prompts relayed to Nodevas") != relayed {
+			t.Errorf("relay on: %s text = %q, want relayed %v", kind, text, relayed)
+		}
+	}
+	// opencode run cannot relay; agy full and Claude plan never ask.
+	cfg.OpenCodeProtocol = ""
+	cfg.AntigravityMode, cfg.PermissionMode = "full", "plan"
+	for _, kind := range []string{"opencode", "antigravity", "claude"} {
+		if text := permissionText(cfg, kind); strings.Contains(text, "relayed") {
+			t.Errorf("relay on but not applicable: %s text = %q", kind, text)
+		}
+	}
+	if err := cfg.Set("permissionRelay", []string{"maybe"}); err == nil {
+		t.Error("permissionRelay maybe accepted")
+	}
+	if err := cfg.Set("permissionRelay", []string{"default"}); err != nil || cfg.PermissionRelay {
+		t.Errorf("reset: %v, %+v", err, cfg)
 	}
 }

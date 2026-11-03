@@ -58,6 +58,10 @@ func TestHelperProcess(t *testing.T) {
 		mcp, _ := os.ReadFile(path)
 		put("mcp.json", string(mcp))
 		put("mcp-path", path)
+		// What the run's `nodevas mcp --server-file` reads.
+		if server, err := os.ReadFile(filepath.Join(filepath.Dir(path), "mcp-server")); err == nil {
+			put("mcp-server", string(server))
+		}
 	}
 	put("pid", strconv.Itoa(os.Getpid()))
 
@@ -73,6 +77,24 @@ func TestHelperProcess(t *testing.T) {
 		for name, content := range map[string]string{"README": "hi\nmore\n", "hello.txt": "hello\n", "data.bin": "\x00\x01\x02bin"} {
 			if err := os.WriteFile(filepath.Join(wd, name), []byte(content), 0o644); err != nil {
 				fmt.Fprintln(os.Stderr, err)
+				os.Exit(9)
+			}
+		}
+	}
+	// plant writes agent config of the kinds a run's commit leaves out: a
+	// hook, a plugin, an MCP server, an env file, under a name cased as
+	// Windows would still load it, and one deeper down that is not config.
+	plant := func() {
+		for name, content := range map[string]string{
+			".codex/config.toml":         "[mcp_servers.evil]\ncommand = \"x\"\n",
+			".opencode/plugin/x.js":      "export const X = async () => ({})\n",
+			".Claude/settings.json":      `{"hooks":{}}`,
+			"opencode.json":              `{"mcp":{}}`,
+			".env":                       "X=1\n",
+			"docs/.gemini/settings.json": `{"hooks":{}}`,
+		} {
+			path := filepath.Join(wd, filepath.FromSlash(name))
+			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, []byte(content), 0o644) != nil {
 				os.Exit(9)
 			}
 		}
@@ -96,11 +118,15 @@ func TestHelperProcess(t *testing.T) {
 	case "codex-ok":
 		fixture("codex_stream.jsonl")
 		os.Exit(0)
-	case "edit-quota", "quota":
+	case "edit-quota", "quota", "plant-quota":
 		// Some work, a plan, a command that printed secrets, then Claude
-		// Code's usage limit (handoff_test.go).
-		if mode == "edit-quota" {
+		// Code's usage limit (handoff_test.go). plant-quota also writes
+		// agent config.
+		if mode != "quota" {
 			edit()
+		}
+		if mode == "plant-quota" {
+			plant()
 		}
 		line := func(v any) { raw, _ := json.Marshal(v); fmt.Println(string(raw)) }
 		type m = map[string]any
@@ -144,6 +170,12 @@ func TestHelperProcess(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(wd, ".codex", "config.toml"), []byte("x = 1\n"), 0o644); err != nil {
 			os.Exit(9)
 		}
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
+	case "plant":
+		// An edit-only agent that writes agent config next to its work.
+		edit()
+		plant()
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
 	case "codex-fail":
@@ -200,8 +232,13 @@ func TestHelperProcess(t *testing.T) {
 		edit()
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
-	case "hang":
+	case "hang", "slow-hang":
 		fmt.Println(`{"type":"system","subtype":"init","session_id":"s-hang","model":"m"}`)
+		if mode == "slow-hang" {
+			// Starts its grandchild only after a while, the way a helper
+			// does on a machine a parallel "go test ./..." saturates.
+			time.Sleep(slowHangStart)
+		}
 		// A grandchild holding our stdout, like node's children do: killing
 		// only this process would leave it running and the pipe open.
 		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
@@ -285,6 +322,11 @@ func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, e
 	if err != nil {
 		return nil, err
 	}
+	return f.wrap(cmd, job, env), nil
+}
+
+// wrap has the helper run the real adapter's cmd.
+func (f fakeAgent) wrap(cmd *exec.Cmd, job runnerwire.Job, env adapter.RunEnv) *exec.Cmd {
 	mode, _, _ := strings.Cut(job.Prompt, ":")
 	cmd.Path = os.Args[0]
 	cmd.Args = append([]string{os.Args[0], "-test.run=^TestHelperProcess$", "--"}, cmd.Args[1:]...)
@@ -293,7 +335,26 @@ func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, e
 		"NODEVAS_TEST_RECORD="+filepath.Join(f.record, job.RunID),
 		"NODEVAS_TEST_MCP="+filepath.Join(env.TempDir, "mcp.json"),
 		"NODEVAS_TEST_FIXTURES="+f.fixtures)
-	return cmd, nil
+	return cmd
+}
+
+// CommandRelay is the real adapter's launch decision (adapter.Launch) for
+// the command Command makes.
+func (f fakeAgent) CommandRelay(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, bool, error) {
+	cmd, off, err := adapter.Launch(f.real, job, env)
+	if err != nil {
+		return nil, false, err
+	}
+	return f.wrap(cmd, job, env), !off && env.PermissionRelay, nil
+}
+
+// relayOffAgent is fakeAgent for an adapter that switched the permission
+// relay off at launch (agy without session settings or a hook path).
+type relayOffAgent struct{ fakeAgent }
+
+func (f relayOffAgent) CommandRelay(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, bool, error) {
+	cmd, err := f.Command(job, env)
+	return cmd, false, err
 }
 
 // fakeConversation is fakeAgent for an adapter that talks to its CLI (ACP).
@@ -454,6 +515,7 @@ func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
 			return nil
 		},
 		Accepter:      acceptFunc(func(context.Context, Offer) (bool, string) { return true, "" }),
+		ServeManaged:  true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval:  time.Second,
 		BackoffMin:    5 * time.Millisecond,
 		BackoffMax:    20 * time.Millisecond,
@@ -596,10 +658,11 @@ func TestRunSucceeds(t *testing.T) {
 	}
 	server := mcp.MCPServers["nodevas"]
 	exe, _ := os.Executable()
-	if server.Command != exe || len(server.Args) != 13 || server.Args[0] != "mcp" || server.Args[1] != "--server" {
+	if server.Command != exe || len(server.Args) != 13 || server.Args[0] != "mcp" || server.Args[1] != "--server-file" ||
+		!samePath(filepath.Dir(server.Args[2]), filepath.Dir(env.recorded(t, "run-ok", "mcp-path"))) {
 		t.Fatalf("mcp server = %+v", server)
 	}
-	proxyURL := server.Args[2]
+	proxyURL := env.recorded(t, "run-ok", "mcp-server")
 	if !strings.HasPrefix(proxyURL, "http://127.0.0.1:") || !strings.Contains(proxyURL, "/r/") {
 		t.Errorf("proxy url %q", proxyURL)
 	}
@@ -946,15 +1009,46 @@ func TestRunCancelKillsTree(t *testing.T) {
 	waitDead(t, env, "run-cancel")
 }
 
+// slowHangStart is how long the slow-hang helper waits before it starts its
+// grandchild: longer than TestRunTimeout's run timeout.
+const slowHangStart = time.Second
+
+// TestRunTimeout: a run that outlasts its timeout fails with a message that
+// says so, and its whole process tree is gone. The helper is slow to start
+// its grandchild, as on a busy machine; the tree that is killed must still be
+// the whole one, grandchild included.
 func TestRunTimeout(t *testing.T) {
-	env := startJobRunner(t, func(c *Client) { c.RunTimeout = 500 * time.Millisecond })
+	fire := make(chan time.Time)
+	started := make(chan time.Duration, 1)
+	env := startJobRunner(t, func(c *Client) {
+		c.RunTimeout = 500 * time.Millisecond
+		// The timeout fires when the test says, not 500 ms after the start:
+		// on a busy machine those 500 ms can pass before the helper has
+		// started the grandchild whose death this test checks.
+		c.runTimer = func(d time.Duration) (<-chan time.Time, func() bool) {
+			started <- d
+			return fire, func() bool { return true }
+		}
+	})
 	env.hub.hello()
-	env.hub.offer(testJob("run-slow", "hang:"))
+	env.hub.offer(testJob("run-slow", "slow-hang:"))
+	if d := <-started; d != 500*time.Millisecond {
+		t.Fatalf("run timer started for %s, want the 500ms run timeout", d)
+	}
+	env.recorded(t, "run-slow", "child-pid")
+	fire <- time.Now()
 	result := env.hub.wait("run-slow", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.Error != "timed out after 500ms" {
 		t.Fatalf("result = %+v", result)
 	}
 	waitDead(t, env, "run-slow")
+}
+
+// Without a test's timer, a run's timeout is a real timer that fires.
+func TestRunTimerIsARealTimerByDefault(t *testing.T) {
+	expired, stop := (&Client{}).startRunTimer(time.Millisecond)
+	defer stop()
+	<-expired
 }
 
 func TestRunDedupeBusyAndReconnect(t *testing.T) {
@@ -1117,10 +1211,87 @@ func TestLineWriter(t *testing.T) {
 // write permission are separate flags.
 func TestMCPArgsServeTheRunToolset(t *testing.T) {
 	job := runnerwire.Job{RunID: "run-abcdef12", Agent: "claude", Model: "sonnet", Project: "demo"}
-	got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"})
-	want := []string{"mcp", "--server", "http://127.0.0.1:5/r/s", "--project", "demo", "--agent-role", "worker",
+	got := mcpArgs("/run/tmp/mcp-server", job, runnerwire.Repo{Name: "web"})
+	want := []string{"mcp", "--server-file", "/run/tmp/mcp-server", "--project", "demo", "--agent-role", "worker",
 		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab", "--toolset", "run"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mcpArgs = %q, want %q", got, want)
+	}
+}
+
+// permissionRelay reaches the adapter: the Claude run asks the hub's
+// approve_tool, and its start line says so. Off (TestRunSucceeds' runner),
+// the arguments are today's.
+func TestRunRelaysPermissions(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.Config.PermissionRelay = true })
+	env.hub.hello()
+	env.hub.offer(testJob("run-relay", "ok: do the thing"))
+	env.hub.wait("run-relay", runnerwire.TypeFinish)
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-relay", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(args, "--permission-prompt-tool"); i < 0 || args[i+1] != adapter.ClaudeApproveTool {
+		t.Errorf("args = %q", args)
+	}
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-relay") {
+		events = append(events, msg.Events...)
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started claude") })
+	if started < 0 || !strings.Contains(events[started].Text, "permission prompts relayed to Nodevas") {
+		t.Errorf("no start line with the relay in %+v", events)
+	}
+
+	off := startJobRunner(t, nil)
+	off.hub.hello()
+	off.hub.offer(testJob("run-norelay", "ok: do the thing"))
+	off.hub.wait("run-norelay", runnerwire.TypeFinish)
+	if raw := off.recorded(t, "run-norelay", "args"); strings.Contains(raw, "--permission-prompt-tool") {
+		t.Errorf("relay off: args = %s", raw)
+	}
+}
+
+// The start line says what the adapter decided at launch: a relay the
+// adapter switched off is not claimed.
+func TestRunStartLineFollowsTheLaunchRelayDecision(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) {
+		c.Config.PermissionRelay = true
+		inner := c.Adapter
+		c.Adapter = func(kind string) adapter.Adapter {
+			if fa, ok := inner(kind).(fakeAgent); ok {
+				return relayOffAgent{fa}
+			}
+			return inner(kind)
+		}
+	})
+	env.hub.hello()
+	env.hub.offer(testJob("run-relayoff", "ok: do the thing"))
+	env.hub.wait("run-relayoff", runnerwire.TypeFinish)
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-relayoff") {
+		events = append(events, msg.Events...)
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started claude") })
+	if started < 0 {
+		t.Fatalf("no start line in %+v", events)
+	}
+	if text := events[started].Text; strings.Contains(text, "relayed to Nodevas") || !strings.Contains(text, "not relayed") {
+		t.Errorf("start line %q claims a relay the adapter switched off", text)
+	}
+}
+
+// OpenCode 2 set to go over ACP runs `opencode run`, which relays nothing:
+// its start line must not say its prompts go to Nodevas.
+func TestOpenCode2StartLineClaimsNoRelay(t *testing.T) {
+	cfg := &Config{PermissionRelay: true, OpenCodeProtocol: "acp"}
+	job := testJob("run-1", "x")
+	job.Agent = "opencode"
+	if _, text := runPermission(cfg, job, true); !strings.Contains(text, relayedText) {
+		t.Errorf("over ACP: %q", text)
+	}
+	if _, text := runPermission(cfg, job, false); strings.Contains(text, "relayed to Nodevas") ||
+		!strings.Contains(text, "not relayed") {
+		t.Errorf("through opencode run: %q", text)
 	}
 }

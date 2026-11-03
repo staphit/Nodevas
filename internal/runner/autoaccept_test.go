@@ -370,3 +370,52 @@ func TestAskRemoteTyping(t *testing.T) {
 		}
 	}
 }
+
+// The hello says whether the owner relays permission prompts, so the web can
+// show it; the hub never changes it.
+func TestBuildInfoReportsPermissionRelay(t *testing.T) {
+	cmds := &fakeCommands{}
+	if info := BuildInfo(context.Background(), cmds, &Config{}); info.PermissionRelay {
+		t.Fatal("relay reported on by default")
+	}
+	if info := BuildInfo(context.Background(), cmds, &Config{PermissionRelay: true}); !info.PermissionRelay {
+		t.Fatal("relay not reported when the owner turned it on")
+	}
+}
+
+// The permission relay lets a person on the hub approve what the agent may
+// not do on its own, a shell command included. A run auto-accepted while the
+// owner's policy leaves shell access to a person (no allow-shell) gets no
+// relay, so nobody can grant it a shell through the hub; with allow-shell on,
+// or accepted at the terminal (TestRunRelaysPermissions), it keeps it.
+func TestAutoAcceptedRunGetsNoShellThroughTheRelay(t *testing.T) {
+	for _, allowShell := range []bool{false, true} {
+		policy := runnerwire.AutoAcceptPolicy{Enabled: true, Repos: []string{"r1"}, Agents: []string{"claude"},
+			AllowShell: allowShell}
+		env := startJobRunner(t, func(c *Client) {
+			c.Config.PermissionRelay = true
+			c.Config.AutoAccept = &policy
+			c.Accepter = acceptFunc(func(context.Context, Offer) (bool, string) {
+				t.Error("asked despite auto-accept covering the offer")
+				return false, "asked"
+			})
+		})
+		env.hub.hello()
+		env.hub.offer(testJob("run-autorelay", "ok: do the thing"))
+		env.hub.wait("run-autorelay", runnerwire.TypeFinish)
+		args := env.recorded(t, "run-autorelay", "args")
+		started := ""
+		for _, ev := range eventsOf(env.hub.messages("run-autorelay")) {
+			if strings.HasPrefix(ev.Text, "started claude") {
+				started = ev.Text
+			}
+		}
+		relayed := strings.Contains(args, "--permission-prompt-tool")
+		if relayed != allowShell {
+			t.Errorf("allow-shell %v: relayed %v; args %s", allowShell, relayed, args)
+		}
+		if strings.Contains(started, "prompts relayed to Nodevas") != allowShell {
+			t.Errorf("allow-shell %v: start line %q", allowShell, started)
+		}
+	}
+}

@@ -20,8 +20,6 @@ package members
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +27,7 @@ import (
 
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // Role is a member's role in one project.
@@ -55,12 +54,12 @@ func ParseRole(s string) (Role, bool) {
 
 var (
 	// ErrInvalid is a request the caller got wrong (400).
-	ErrInvalid = errors.New("invalid member request")
+	ErrInvalid = locale.Errorf("invalid member request", "成員請求無效")
 	// ErrForbidden is a caller who may not manage this project's members (403).
-	ErrForbidden   = errors.New("only the project's owners and server administrators may manage its members")
-	errUnavailable = errors.New("project members could not be loaded; see the server log")
+	ErrForbidden   = locale.Errorf("only the project's owners and server administrators may manage its members", "只有專案擁有者與伺服器管理員可以管理成員")
+	errUnavailable = locale.Errorf("project members could not be loaded; see the server log", "無法載入專案成員；請查看伺服器紀錄")
 	// ErrLastOwner refuses to leave a restricted project without an owner.
-	ErrLastOwner = errors.New("a project with members needs at least one owner; add another owner first, or open the project to everyone")
+	ErrLastOwner = locale.Errorf("a project with members needs at least one owner; add another owner first, or open the project to everyone", "有成員的專案至少需要一位擁有者；請先加入另一位擁有者，或把專案開放給所有人")
 )
 
 // MaxMembers bounds one project's member list.
@@ -149,7 +148,7 @@ func (s *Store) Load(ctx context.Context) error {
 	}
 	rows, err := s.database.QueryContext(ctx, `SELECT project, user_id, role FROM project_members`)
 	if err != nil {
-		return fmt.Errorf("read project members: %w", err)
+		return locale.Errorf("read project members: %w", "讀取專案成員：%w", err)
 	}
 	defer rows.Close()
 	roles := map[string]map[string]Role{}
@@ -222,7 +221,7 @@ SELECT m.user_id, COALESCE(a.name, ''), m.role, m.added_by, m.created_at
 FROM project_members m LEFT JOIN accounts a ON a.id = m.user_id
 WHERE m.project = ?`, project)
 	if err != nil {
-		return nil, fmt.Errorf("read project members: %w", err)
+		return nil, locale.Errorf("read project members: %w", "讀取專案成員：%w", err)
 	}
 	defer rows.Close()
 	out := []Member{}
@@ -265,10 +264,10 @@ func (s *Store) CanManage(actor identity.Actor, project string) bool {
 func (s *Store) Set(ctx context.Context, actor identity.Actor, project, userID string, role Role) error {
 	project, userID = strings.TrimSpace(project), strings.TrimSpace(userID)
 	if project == "" || userID == "" {
-		return fmt.Errorf("%w: project and user are required", ErrInvalid)
+		return locale.Errorf("%w: project and user are required", "%w：需要提供專案與使用者", ErrInvalid)
 	}
 	if _, ok := ParseRole(string(role)); !ok {
-		return fmt.Errorf("%w: role must be owner, editor or viewer", ErrInvalid)
+		return locale.Errorf("%w: role must be owner, editor or viewer", "%w：角色須為 owner、editor 或 viewer", ErrInvalid)
 	}
 	if !s.CanManage(actor, project) {
 		return ErrForbidden
@@ -277,7 +276,7 @@ func (s *Store) Set(ctx context.Context, actor identity.Actor, project, userID s
 	current := cloneRoles(s.roles[project])
 	s.mu.RUnlock()
 	if _, exists := current[userID]; !exists && len(current) >= MaxMembers {
-		return fmt.Errorf("%w: a project has at most %d members", ErrInvalid, MaxMembers)
+		return locale.Errorf("%w: a project has at most %d members", "%w：一個專案最多 %d 位成員", ErrInvalid, MaxMembers)
 	}
 	next := cloneRoles(current)
 	next[userID] = role
@@ -301,7 +300,7 @@ func (s *Store) Set(ctx context.Context, actor identity.Actor, project, userID s
 INSERT INTO project_members (project, user_id, role, added_by, created_at) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (project, user_id) DO UPDATE SET role = excluded.role`,
 			project, user, string(r), actor.ID, now); err != nil {
-			return fmt.Errorf("write project member: %w", err)
+			return locale.Errorf("write project member: %w", "寫入專案成員：%w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -334,7 +333,7 @@ func (s *Store) Remove(ctx context.Context, actor identity.Actor, project, userI
 	}
 	if _, err := s.database.ExecContext(ctx,
 		`DELETE FROM project_members WHERE project = ? AND user_id = ?`, project, userID); err != nil {
-		return fmt.Errorf("remove project member: %w", err)
+		return locale.Errorf("remove project member: %w", "移除專案成員：%w", err)
 	}
 	s.replace(project, next)
 	return nil
@@ -346,7 +345,7 @@ func (s *Store) Open(ctx context.Context, actor identity.Actor, project string) 
 		return ErrForbidden
 	}
 	if _, err := s.database.ExecContext(ctx, `DELETE FROM project_members WHERE project = ?`, project); err != nil {
-		return fmt.Errorf("open project: %w", err)
+		return locale.Errorf("open project: %w", "開啟專案：%w", err)
 	}
 	s.replace(project, nil)
 	return nil
@@ -375,7 +374,7 @@ func (s *Store) Moved(ctx context.Context, from, to string) error {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE project_members SET project = ? WHERE project = ?`, next, old); err != nil {
-			return fmt.Errorf("move project members: %w", err)
+			return locale.Errorf("move project members: %w", "搬移專案成員：%w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -415,7 +414,7 @@ func (s *Store) Copied(ctx context.Context, from, to string) error {
 			if _, err := s.database.ExecContext(ctx, `
 INSERT INTO project_members (project, user_id, role, added_by, created_at) VALUES (?, ?, ?, '', ?)
 ON CONFLICT (project, user_id) DO UPDATE SET role = excluded.role`, next, user, string(role), now); err != nil {
-				return fmt.Errorf("copy project members: %w", err)
+				return locale.Errorf("copy project members: %w", "複製專案成員：%w", err)
 			}
 		}
 		s.mu.Lock()
@@ -437,7 +436,7 @@ func (s *Store) Removed(ctx context.Context, dir string) error {
 	}
 	for _, p := range s.under(dir) {
 		if _, err := s.database.ExecContext(ctx, `DELETE FROM project_members WHERE project = ?`, p); err != nil {
-			return fmt.Errorf("forget project members: %w", err)
+			return locale.Errorf("forget project members: %w", "清除專案成員：%w", err)
 		}
 		s.replace(p, nil)
 	}

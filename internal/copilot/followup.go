@@ -13,6 +13,7 @@ import (
 
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 // Follow-up: the copilot coming back to a conversation by itself.
@@ -248,6 +249,7 @@ func (s *Service) RunChanged(run RunInfo) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot follow-up for run " + run.ID)
 		s.settleRun(context.Background(), run)
 	}()
 }
@@ -295,6 +297,7 @@ func (s *Service) StartFollowups(ctx context.Context) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot pending follow-ups")
 		waiting, err := s.store.followups(ctx, `status = ?`, followupPending)
 		if err != nil {
 			slog.Warn("copilot: pending follow-ups", slog.Any("error", err))
@@ -348,8 +351,17 @@ func (s *Service) releaseLocked(conversationID, holder string) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot follow-ups for a conversation")
 		s.settleConversation(context.Background(), conversationID)
 	}()
+}
+
+// mayWork is Options.MayWork.
+func (s *Service) mayWork(ctx context.Context, project, accountID string) (bool, error) {
+	if s.opts.MayWork == nil {
+		return true, nil
+	}
+	return s.opts.MayWork(ctx, project, accountID)
 }
 
 // deliver writes a follow-up whose run has ended into its conversation.
@@ -388,6 +400,21 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 	if run.CreatedBy != current.AccountID || run.NodeID != current.GoalNodeID ||
 		!sameProject(conversation.Project, run.Project) {
 		slog.Warn("copilot: follow-up does not match its run; dropped",
+			slog.String("followup", current.ID), slog.String("run", run.ID))
+		_ = s.store.endFollowup(ctx, current.ID, followupDropped)
+		return
+	}
+	// It reads the goal and, for a revision, writes the board as the owner,
+	// who may have been removed from the project (or made a viewer) since
+	// the run started.
+	may, err := s.mayWork(ctx, run.Project, current.AccountID)
+	if err != nil {
+		// Could not tell: it stays pending, for the next look.
+		slog.Warn("copilot: follow-up's owner access", slog.String("followup", current.ID), slog.Any("error", err))
+		return
+	}
+	if !may {
+		slog.Info("copilot: follow-up's owner can no longer change the project; dropped",
 			slog.String("followup", current.ID), slog.String("run", run.ID))
 		_ = s.store.endFollowup(ctx, current.ID, followupDropped)
 		return

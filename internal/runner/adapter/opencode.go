@@ -146,7 +146,8 @@ func openCodeEnv(job runnerwire.Job, env RunEnv, config string) []string {
 	if ReadOnly(job) {
 		extra = append(extra, openCodeNoProjectConfig)
 	}
-	return extra
+	// The sidecar's session id, which the ACP relay's asks carry too.
+	return append(extra, runSessionEnv(env)...)
 }
 
 // openCodeConfig is the run's OPENCODE_CONFIG_CONTENT. interactive turns each

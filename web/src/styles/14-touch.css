@@ -48,6 +48,8 @@ textarea {
    * these is a row a finger has to hit exactly once. */
   .tree-row,
   .board-tool-button,
+  .board-explorer-toggle,
+  .graph-tools-status,
   .lane-context-menu button,
   .lane-context-menu summary,
   .project-context-menu button,
@@ -77,6 +79,34 @@ textarea {
   .graph-batch-toolbar {
     padding-top: 10px;
     padding-bottom: 10px;
+  }
+}
+
+/* Three small square buttons that open or close a whole panel: the
+ * explorer's «, the board header's » and the Problems panel's ×. Drawn for a
+ * mouse at 24-28px, they are squared up to a finger's 44px on a touch screen
+ * and on a phone, where the panels they toggle are overlays a finger has to
+ * be able to dismiss. Width as well as height, because each is a glyph with no
+ * label to widen it. */
+@media (pointer: coarse), (max-width: 720px) {
+  .explorer-collapse,
+  .board-explorer-toggle,
+  .problems-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /* The same for the small square buttons on a node: the drawer header's ⋯
+     and close (fixed 30px tall in 05-drawer.css) and a dependency's remove
+     (26px). Station's ⋯ and menu items are squared up in 25-station.css,
+     which imports after this file. */
+  .drawer-head-button,
+  .drawer-close,
+  .node-dependency-remove {
+    min-width: 44px;
+    height: 44px;
+  }
+  .node-dependency-remove {
+    width: 44px;
   }
 }
 

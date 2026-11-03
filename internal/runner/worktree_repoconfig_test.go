@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -62,6 +65,47 @@ func TestPlanRemovesRepoConfig(t *testing.T) {
 	}
 	if hasEvent(events, "the planner changed files") {
 		t.Errorf("the runner's own removals counted as the planner's changes: %+v", events)
+	}
+}
+
+// A judge reads at whatever base the hub named, like a plan: its agent never
+// sees that base's agent config, and runs read only.
+func TestJudgeRemovesRepoConfig(t *testing.T) {
+	env := startJobRunner(t, nil)
+	commitRepoConfig(t, env.repo)
+	env.hub.hello()
+	job := testJob("run-judge-cfg", "repoconfig: judge it")
+	job.Kind, job.Role = runnerwire.JobJudge, "reviewer"
+	job.Acceptance = []runnerwire.AcceptanceItem{{ID: "a1", Text: "it works"}}
+	env.hub.offer(job)
+	env.hub.wait("run-judge-cfg", runnerwire.TypeFinish)
+	if found := env.recorded(t, "run-judge-cfg", "found"); found != "." {
+		t.Fatalf("the judge found the repository's config: %s", found)
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-judge-cfg", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if line := strings.Join(args, " "); !strings.Contains(line, "--setting-sources user --disallowedTools "+adapter.ClaudeReadOnlyDeny) {
+		t.Errorf("judge args: %s", line)
+	}
+	events := eventsOf(env.hub.messages("run-judge-cfg"))
+	if !hasEvent(events, "removed the worktree's own agent config") || !hasEvent(events, "for a judge") {
+		t.Errorf("events = %+v", events)
+	}
+}
+
+// The owner's shell-capable settings do not reach a judge, which runs read
+// only like a review.
+func TestShellAccessJudge(t *testing.T) {
+	cfg := Config{PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash"}, CodexSandbox: "danger-full-access",
+		GeminiApprovalMode: "yolo", OpenCodePermission: "full", AntigravityMode: "full"}
+	for _, agent := range []string{"claude", "codex", "gemini", "opencode", "antigravity"} {
+		job := testJob("run-1", "x")
+		job.Agent, job.Kind = agent, runnerwire.JobJudge
+		if shell := cfg.ShellAccess(job); shell != "" {
+			t.Errorf("%s judge: ShellAccess = %q", agent, shell)
+		}
 	}
 }
 
@@ -189,4 +233,119 @@ func TestClearRepoConfigJunction(t *testing.T) {
 	if b, err := os.ReadFile(owners); err != nil || string(b) != "the owner's" {
 		t.Fatalf("the junction's target was touched: %q, %v", b, err)
 	}
+}
+
+// Agent config a run writes is not committed with its work: a later run on
+// that branch (a revise, a handoff, an implement or judge at that base) would
+// load it, and some of it runs programs as the owner. The run says what it
+// left out, and the rest of the work is committed as usual.
+func TestRunDoesNotCommitAgentConfig(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	env.hub.offer(testJob("run-plant", "plant: do it"))
+	finish := env.hub.wait("run-plant", runnerwire.TypeFinish)
+	if finish.Result == nil || finish.Result.Status != runnerwire.RunSucceeded {
+		t.Fatalf("result = %+v", finish.Result)
+	}
+	tree := strings.Fields(gitT(t, env.repo, "ls-tree", "-r", "--name-only", BranchName("n-1", "run-plant")))
+	if !slices.Contains(tree, "hello.txt") {
+		t.Fatalf("the run's work was not committed: %q", tree)
+	}
+	for _, name := range []string{".codex/config.toml", ".opencode/plugin/x.js", ".Claude/settings.json", "opencode.json", ".env"} {
+		if slices.Contains(tree, name) {
+			t.Errorf("the run committed %s: %q", name, tree)
+		}
+	}
+	// Deeper down, a CLI does not read it as the repository's config.
+	if !slices.Contains(tree, "docs/.gemini/settings.json") {
+		t.Errorf("the run lost docs/.gemini/settings.json: %q", tree)
+	}
+	for _, msg := range env.hub.messages("run-plant") {
+		if msg.Type != runnerwire.TypeChanges {
+			continue
+		}
+		for _, f := range msg.Changes.Files {
+			if strings.HasPrefix(f.Path, ".codex") || f.Path == "opencode.json" {
+				t.Errorf("changes list %s", f.Path)
+			}
+		}
+	}
+	if events := eventsOf(env.hub.messages("run-plant")); !hasEvent(events, "left out of the commit") ||
+		!hasEvent(events, ".codex") {
+		t.Errorf("events = %+v", events)
+	}
+}
+
+// Agent config a commit leaves out stays in the worktree, as the run's
+// events tell the person: removing the worktree would throw it away. That
+// holds for a run whose only change is that config, and for one whose other
+// work went to a handoff branch, was pushed to the PR it revised, or went
+// into a PR that was then merged.
+func TestWithheldConfigKeepsTheWorktree(t *testing.T) {
+	kept := func(t *testing.T, env *jobEnv, runID string) {
+		t.Helper()
+		path := filepath.Join(env.client.Config.DataDir, "worktrees", runID, ".codex", "config.toml")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("the agent config left out of the commit is gone: %v", err)
+		}
+	}
+	t.Run("nothing else changed", func(t *testing.T) {
+		env := startJobRunner(t, nil)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-only", "repoconfig: add an MCP server"))
+		finish := env.hub.wait("run-cfg-only", runnerwire.TypeFinish)
+		if finish.Result == nil || finish.Result.Status != runnerwire.RunSucceeded {
+			t.Fatalf("result = %+v", finish.Result)
+		}
+		kept(t, env, "run-cfg-only")
+		if events := eventsOf(env.hub.messages("run-cfg-only")); hasEvent(events, "worktree removed") ||
+			!hasEvent(events, "worktree kept at") {
+			t.Errorf("events = %+v", events)
+		}
+	})
+	t.Run("handed off", func(t *testing.T) {
+		env := startJobRunner(t, nil)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-q", "plant-quota: add hello"))
+		finish := env.hub.wait("run-cfg-q", runnerwire.TypeFinish)
+		if finish.Result == nil || finish.Result.HandoffBranch == "" {
+			t.Fatalf("result = %+v", finish.Result)
+		}
+		kept(t, env, "run-cfg-q")
+	})
+	t.Run("revised", func(t *testing.T) {
+		env := startReviewRunner(t, nil)
+		env.hub.hello()
+		ownPR(env)
+		env.hub.offer(prJob("run-cfg-rvs", runnerwire.JobRevise, "plant: Fix it"))
+		result := env.hub.wait("run-cfg-rvs", runnerwire.TypeFinish).Result
+		if result.Status != runnerwire.RunSucceeded {
+			t.Fatalf("result = %+v", result)
+		}
+		if head := gitT(t, env.bare, "rev-parse", "refs/heads/"+reviewBranch); head == env.head {
+			t.Fatal("the revise pushed nothing")
+		}
+		kept(t, env.jobEnv, "run-cfg-rvs")
+	})
+	t.Run("PR merged", func(t *testing.T) {
+		gh := &ghFake{url: "https://github.com/o/r/pull/7"}
+		gh.setView("OPEN", "")
+		env := startPRRunner(t, gh, func(c *Client) { c.PRPollInterval = 30 * time.Millisecond })
+		withOrigin(t, env.repo)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-pr", "plant: do it"))
+		env.hub.wait("run-cfg-pr", runnerwire.TypeFinish)
+		if got := env.client.jobs.watchedRuns(); !slices.Equal(got, []string{"run-cfg-pr"}) {
+			t.Fatalf("watched %v", got)
+		}
+		gh.setView("MERGED", "success")
+		deadline := time.Now().Add(10 * time.Second)
+		for len(env.client.jobs.watchedRuns()) != 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := env.client.jobs.watchedRuns(); len(got) != 0 {
+			t.Fatalf("still watched %v", got)
+		}
+		kept(t, env, "run-cfg-pr")
+	})
 }

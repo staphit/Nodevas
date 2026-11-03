@@ -9,12 +9,12 @@ import (
 
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 )
 
 func TestStoreConversationsBelongToTheirAccount(t *testing.T) {
 	ctx := context.Background()
-	store := NewStore(dbtest.Open(t))
+	store := NewStore(testpg.New(t))
 
 	first, err := store.CreateConversation(ctx, "alice", "demo", ModeDefault)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestStoreConversationsBelongToTheirAccount(t *testing.T) {
 
 func TestStoreEntriesAreOrderedAndDeletedWithTheirConversation(t *testing.T) {
 	ctx := context.Background()
-	database := dbtest.Open(t)
+	database := testpg.New(t)
 	store := NewStore(database)
 	conversation, err := store.CreateConversation(ctx, "alice", "demo", ModeDefault)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestSettingsLayerDefaultsOverridesAndKeys(t *testing.T) {
 	ctx := context.Background()
 	keys := &memoryKeys{}
 	service := New(Options{
-		Database: dbtest.Open(t), Keys: keys,
+		Database: testpg.New(t), Keys: keys,
 		Defaults: Defaults{
 			Enabled: true, Provider: "anthropic", Model: "claude-from-yaml", Effort: "low",
 			VendorKeys: map[string]string{"anthropic": "sk-ant-env"},
@@ -188,7 +188,7 @@ func TestSettingsLayerDefaultsOverridesAndKeys(t *testing.T) {
 
 func TestStatusAllowsAKeylessLocalOpenAIServer(t *testing.T) {
 	service := New(Options{
-		Database: dbtest.Open(t),
+		Database: testpg.New(t),
 		Defaults: Defaults{Enabled: true, Provider: "openai", Model: "llama3", BaseURL: "http://127.0.0.1:11434/v1"},
 		NewProvider: func(provider.Config) (provider.Provider, error) {
 			return nil, errors.New("not called")

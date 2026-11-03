@@ -51,6 +51,7 @@ type supervisor struct {
 	mu       sync.Mutex
 	state    state
 	cmd      *exec.Cmd
+	stdin    io.WriteCloser // closing it stops the child (--stop-on-stdin-close)
 	pid      int
 	since    time.Time
 	exited   chan struct{} // closed when the current child has been reaped
@@ -187,8 +188,15 @@ func (s *supervisor) spawn() error {
 		"--project", s.cfg.Workspace,
 		"--port", strconv.Itoa(s.cfg.ServerPort),
 		"--listen", s.cfg.ServerHost,
+		// Closing stdin is how a stop reaches the server on Windows (see
+		// terminateChild); a launcher that dies closes it too.
+		"--stop-on-stdin-close",
 	)
 	cmd.Dir = s.cfg.Workspace
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -205,6 +213,7 @@ func (s *supervisor) spawn() error {
 	exited := make(chan struct{})
 	s.mu.Lock()
 	s.cmd = cmd
+	s.stdin = stdin
 	s.pid = cmd.Process.Pid
 	s.since = time.Now()
 	s.state = stateRunning
@@ -236,6 +245,7 @@ func (s *supervisor) spawn() error {
 		}
 		s.state = stateStopped
 		s.cmd = nil
+		s.stdin = nil
 		s.pid = 0
 		s.exited = nil
 		message := s.lastExit
@@ -304,11 +314,12 @@ func (s *supervisor) Stop() error {
 		return fmt.Errorf("the server is %s; wait for that to finish", current)
 	}
 	process := s.cmd.Process
+	stdin := s.stdin
 	exited := s.exited
 	s.state = stateStopping
 	s.mu.Unlock()
 
-	graceful, err := terminateChild(process)
+	graceful, err := terminateChild(process, stdin)
 	if err != nil {
 		s.logs.Add("launcher", "stop signal failed: "+err.Error())
 	}

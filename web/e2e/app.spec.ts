@@ -1,12 +1,24 @@
 import { type Page } from "@playwright/test";
 import { declineTour, expect, freshProject, test } from "./fixture";
 
-/** The app boots with a project selected; wait for that rather than a timeout. */
+/**
+ * Opens the worker's seeded project (two nodes, one dependency; see
+ * seedWorkspace) and waits for the app to show it rather than a timeout.
+ *
+ * The server stays on whichever project was opened last, and the worker may
+ * have run another spec first whose freshProject left an edgeless project
+ * open, so the seeded one is opened explicitly rather than assumed.
+ */
 async function openApp(page: Page) {
   await declineTour(page);
+  const open = await page.request.post("/api/projects/open", { data: { name: "e2e-project" } });
+  expect(open.ok(), await open.text()).toBeTruthy();
+  await expect
+    .poll(async () => (await (await page.request.get("/api/projects")).json()).active, { timeout: 15_000 })
+    .toBe("e2e-project");
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
 }
 
 test.describe("main flows", () => {
@@ -43,7 +55,10 @@ test.describe("main flows", () => {
     const staged = drawer.getByText("尚未套用");
     await expect(staged).toBeHidden();
 
-    await drawer.getByLabel("改為").selectOption("in_progress");
+    // One status picker in the panel's top row; the note is behind its toggle.
+    const status = drawer.getByLabel("狀態", { exact: true });
+    await status.selectOption("in_progress");
+    await drawer.getByRole("button", { name: "加註解" }).click();
     await drawer.getByLabel("實際狀態註解").fill("開工");
     await expect(staged).toBeVisible();
 
@@ -57,7 +72,7 @@ test.describe("main flows", () => {
     await drawer.getByRole("button", { name: "套用狀態" }).click();
 
     await expect(staged).toBeHidden();
-    await expect(drawer.getByText("進行中").first()).toBeVisible();
+    await expect(status).toHaveValue("in_progress");
   });
 
   // Ctrl+S is still "save now", and still the way to apply a staged status
@@ -72,16 +87,18 @@ test.describe("main flows", () => {
 
     // A state the node is not already in — these tests share one project, and
     // choosing the current state is not a change worth staging.
-    await drawer.getByLabel("改為").selectOption("done");
+    const status = drawer.getByLabel("狀態", { exact: true });
+    await status.selectOption("done");
     // Filling the note also puts focus inside the panel, which is where the
     // drawer listens for the keystroke.
+    await drawer.getByRole("button", { name: "加註解" }).click();
     await drawer.getByLabel("實際狀態註解").fill("收工");
     await expect(staged).toBeVisible();
 
     await page.keyboard.press("Control+s");
 
     await expect(staged).toBeHidden();
-    await expect(drawer.getByText("完成").first()).toBeVisible();
+    await expect(status).toHaveValue("done");
   });
 
   // A promise that work is saved is worth nothing if nobody can see that it
@@ -114,14 +131,15 @@ test.describe("main flows", () => {
 
     // The sidebar legend explains, it does not edit.
     await page.getByText("狀態圖例").click();
-    await expect(page.getByText("自訂實際狀態在「設定 → 狀態、里程碑與人員」")).toBeVisible();
+    await expect(page.getByText("自訂實際狀態在「設定 → 這個專案」")).toBeVisible();
 
     // The legend also offers a way in, so match the toolbar button exactly.
     await page.getByRole("button", { name: "設定", exact: true }).click();
-    const dialog = page.getByRole("region", { name: "專案設定" });
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^這個專案/ }).click();
+    await page.getByRole("button", { name: /^里程碑類型/ }).click();
+    const dialog = page.getByRole("region", { name: "里程碑類型", exact: true });
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole("tab", { name: "里程碑類型" }).click();
     await dialog.getByLabel("新里程碑名稱").fill("內審");
     await dialog.getByRole("button", { name: "新增類型" }).click();
     await expect(dialog.getByText("已新增「內審」")).toBeVisible();
@@ -197,7 +215,7 @@ test.describe("keyboard and persistence", () => {
 
     // Double click resets to the default width.
     await restored.dblclick();
-    await expect(restored).toHaveAttribute("aria-valuenow", "304");
+    await expect(restored).toHaveAttribute("aria-valuenow", "320");
   });
 
   test("undo names what it would revert", async ({ page }) => {
@@ -205,8 +223,9 @@ test.describe("keyboard and persistence", () => {
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByLabel("標題").fill("設計稿 v2");
-    await drawer.getByLabel("標題").blur();
+    // The title is edited in the panel's header.
+    await drawer.getByLabel("標題", { exact: true }).fill("設計稿 v2");
+    await drawer.getByLabel("標題", { exact: true }).blur();
     await expect(page.getByText("已儲存").first()).toBeVisible();
 
     await page.keyboard.press("Control+z");

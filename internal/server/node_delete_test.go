@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/audit"
-	"nodevas/internal/db"
 	"nodevas/internal/realtime"
 	"os"
 	"path/filepath"
@@ -235,11 +234,7 @@ func TestDeleteNodeStillWorksThroughTheBatchPath(t *testing.T) {
 
 func TestCommittedDeleteWithPendingCleanupStillSucceedsBroadcastsAndAudits(t *testing.T) {
 	server, root := deleteTestServer(t)
-	database, err := db.Open(server.pm.Workspace())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := dbtestOpenForServer(t, server.pm.Workspace())
 	server.UseAudit(audit.New(database))
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)

@@ -1,5 +1,5 @@
 /**
- * The alignment lines drawn while something is dragged or resized [B-06].
+ * The alignment lines drawn while something is dragged or resized.
  *
  * Plain absolutely-positioned divs rather than part of the `board-edges` SVG:
  * that layer sits under the cards, and the board is scaled with CSS `zoom`,

@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { useApp } from "../../store";
 import type { Graph, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { EdgeMenu } from "./EdgeMenu";
 import { GraphMenu } from "./GraphMenu";
@@ -20,6 +21,7 @@ function nodeMenu(
     incoming?: GraphEdge[];
     controllingLogicGate?: LogicGate;
     conditionOperator?: string;
+    edges?: GraphEdge[];
   } = {},
 ) {
   const incoming = options.incoming ?? [
@@ -35,6 +37,7 @@ function nodeMenu(
   const props: NodeMenuProps = {
     contextMenu: { kind: "node", nodeId: "ship", x: 0, y: 0 },
     nodeTitle,
+    edges: options.edges ?? incoming,
     incomingConditions: incoming,
     availableConditionSources: [{ id: "other", title: "Other" }],
     conditionSource: "other",
@@ -50,10 +53,6 @@ function nodeMenu(
     controllingLogicGate: options.controllingLogicGate,
     assignableLogicGates: options.controllingLogicGate ? [options.controllingLogicGate] : [],
     assignExistingLogicGateToNode: vi.fn(),
-    openTab: vi.fn(async () => {}),
-    selectNode: vi.fn(),
-    duplicateNode: vi.fn(async () => "copy"),
-    deleteNode: vi.fn(async () => {}),
     setContextMenu: vi.fn(),
   };
   const view = render(<NodeMenu {...props} />);
@@ -64,6 +63,35 @@ const advancedDisclosure = (container: HTMLElement) =>
   container.querySelector("details.dependency-advanced") as HTMLDetailsElement;
 
 describe("NodeMenu dependencies", () => {
+  // UX sweep: a prerequisite the expression names without a wire was still
+  // offered as a new one.
+  it("does not offer a prerequisite the expression already names", () => {
+    nodeMenu({ requires: "design and review and other" });
+    const picker = screen.getByRole("combobox", { name: "Add a dependency" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "No nodes available to add",
+    ]);
+    expect(picker).toBeDisabled();
+  });
+
+  // Other already waits on Ship (through Review here), so Ship waiting for
+  // Other would close a loop that Add then refuses.
+  it("does not offer a node that already waits on this one", () => {
+    nodeMenu({
+      requires: "design",
+      incoming: [{ from: "design", to: "ship" }],
+      edges: [
+        { from: "design", to: "ship" },
+        { from: "ship", to: "review" },
+        { from: "review", to: "other" },
+      ],
+    });
+    const picker = screen.getByRole("combobox", { name: "Add a dependency" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "No nodes available to add",
+    ]);
+  });
+
   it("shows the default all-of condition as a plain depends-on list", async () => {
     const { container, addDependency } = nodeMenu({ requires: "design and review" });
     const list = container.querySelector(".dependency-list") as HTMLElement;
@@ -165,6 +193,36 @@ describe("EdgeMenu dependencies", () => {
     expect(advanced.open).toBe(true);
     expect(advanced.querySelector("summary .dependency-badge")?.textContent).toBe("Optional");
     expect(screen.getByText("Convert to logic gate")).toBeTruthy();
+  });
+
+  it("reports a failing style update through the app error store", async () => {
+    useApp.setState({ error: null });
+    const globalReportError = vi.fn();
+    vi.stubGlobal("reportError", globalReportError);
+    try {
+      const setEdgeStyles = vi.fn(async () => {
+        throw new Error("wire save failed");
+      });
+      const setContextMenu = vi.fn();
+      const graph = { nodes: [], edges: [{ from: "design", to: "ship" }] } as unknown as Graph;
+      render(
+        <EdgeMenu
+          contextMenu={{ kind: "edge", edges: [{ from: "design", to: "ship" }], x: 0, y: 0 }}
+          graph={graph}
+          nodeTitle={nodeTitle}
+          setEdgeStyles={setEdgeStyles}
+          convertEdgesToLogicGate={vi.fn()}
+          setContextMenu={setContextMenu}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole("menuitemradio", { name: "Dashed" }));
+      expect(useApp.getState().error).toBe("wire save failed");
+      expect(globalReportError).not.toHaveBeenCalled();
+      expect(setContextMenu).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

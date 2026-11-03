@@ -1,5 +1,5 @@
 /**
- * One dependency wire [B-06].
+ * One dependency wire.
  *
  * Routes around card obstacles, carries user-placed bend points, and exposes a
  * fat invisible hit target so the line is clickable without being thick.

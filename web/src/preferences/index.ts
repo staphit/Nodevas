@@ -1,4 +1,5 @@
-/** Local UI preferences [A-03]. Import from here, never from `localStorage`. */
+/** Local UI preferences. Import from here, never from `localStorage`. */
 
 export * from "./schema";
 export * from "./storage";
+export * from "./textScale";

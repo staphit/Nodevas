@@ -3,12 +3,12 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 )
 
@@ -57,11 +57,11 @@ func (a *API) GetNodeLinks(c *gin.Context) {
 	targetProject := c.Query("project")
 	targetNode := c.Query("node")
 	if targetNode == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("node is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("node is required", "需要指定節點"))
 		return
 	}
 	if targetProject == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("project is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("project is required", "需要提供專案"))
 		return
 	}
 	projects, err := a.pm.List()

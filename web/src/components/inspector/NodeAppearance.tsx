@@ -24,6 +24,7 @@ import type { NodeStyle, Status } from "../../types";
 import { OperationStatus } from "../InteractionPrimitives";
 import { AppearanceControls } from "./AppearanceControls";
 import { useI18n } from "../../i18n";
+import { nodeTypeOf } from "../../domain/graph/nodeTypes";
 
 export function NodeAppearance({ id }: { id: string }) {
   const { t } = useI18n();
@@ -36,6 +37,7 @@ export function NodeAppearance({ id }: { id: string }) {
   const style = graph?.ui?.nodeStyles?.[id];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const status: Status = statuses[id] ?? "ready";
+  const nodeType = nodeTypeOf(graph, node);
 
   const commit = useCallback(
     (patch: Partial<NodeStyle>) => {
@@ -49,7 +51,7 @@ export function NodeAppearance({ id }: { id: string }) {
   );
 
   return (
-    <div className="node-appearance" role="tabpanel" aria-label={t("drawer.appearance")}>
+    <div className="node-appearance" role="group" aria-label={t("drawer.appearance")}>
       <div className="section-head">
         <h3>{t("appearance.panelTitle")}</h3>
         <span className="section-hint">{t("appearance.panelHint")}</span>
@@ -71,6 +73,8 @@ export function NodeAppearance({ id }: { id: string }) {
         customStatuses={customStatuses}
         previewTitle={node?.title || id}
         sizeHint={t("appearance.sizeHint")}
+        typeShape={nodeType.shape}
+        previewType={nodeType}
       />
     </div>
   );

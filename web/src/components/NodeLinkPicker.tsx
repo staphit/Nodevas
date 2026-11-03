@@ -1,5 +1,5 @@
 /**
- * Picks a node to link to [B-04].
+ * Picks a node to link to.
  *
  * Searching runs over the whole workspace, because a link is allowed to cross
  * projects — that is the point of it. The result carries the project so the

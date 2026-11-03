@@ -60,4 +60,32 @@ describe("useNodeConditions", () => {
       relation: "",
     });
   });
+  it("lists a prerequisite that only the requires expression names", () => {
+    // A hand-written graph.yaml with no `edges:` block: the expression is the
+    // condition, so the menu and the Dependencies tab must show it and offer
+    // it as removable rather than as a node still to add.
+    const requiresOnly = {
+      nodes: [
+        { id: "n0001", title: "Card 1" },
+        { id: "n0002", title: "Card 2", requires: "n0001" },
+        { id: "n0003", title: "Card 3" },
+      ],
+    } as unknown as Graph;
+    const { result } = renderHook(() =>
+      useNodeConditions({
+        graph: requiresOnly,
+        logicGates: [],
+        contextMenu: { kind: "node", nodeId: "n0002", x: 0, y: 0 },
+        setContextMenu: vi.fn(),
+        setGraphSelection: vi.fn(),
+        setGraphNotice: vi.fn(),
+        updateNode: vi.fn() as never,
+        updateCanvasLayout: vi.fn() as never,
+        runCanvasCommand: vi.fn(),
+      }),
+    );
+    expect(result.current.incomingConditions).toEqual([{ from: "n0001", to: "n0002" }]);
+    expect(result.current.availableConditionSources.map((node) => node.id)).toEqual(["n0003"]);
+    expect(result.current.conditionSource).toBe("n0003");
+  });
 });

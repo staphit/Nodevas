@@ -1,5 +1,5 @@
 /**
- * Canvas geometry [B-06].
+ * Canvas geometry.
  *
  * Grid constants and the pure maths the graph canvas draws with: card
  * boundaries, wire routing around obstacles, pointer↔SVG conversion. No React,
@@ -268,6 +268,36 @@ export function nearestClearRatio(
   }
   candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
   return candidates.find(isClear) ?? preferred;
+}
+
+/**
+ * The middle of the longest stretch of the segment that no obstacle covers,
+ * as a ratio along it, or null when the obstacles cover all of it. Where no
+ * point on a line holds a whole box clear of the cards, this is the spot that
+ * leaves the least of it over them: the gap between two neighbouring cards.
+ */
+export function widestOpeningRatio(
+  start: Point,
+  end: Point,
+  obstacles: readonly Rect[],
+): number | null {
+  const covered = obstacles
+    .flatMap((rect) => {
+      const interval = segmentRectInterval(start, end, rect);
+      return interval ? [interval] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let bestFrom = 0;
+  let bestLength = 0;
+  let from = 0;
+  for (const [low, high] of [...covered, [1, 1] as const]) {
+    if (low - from > bestLength) {
+      bestFrom = from;
+      bestLength = low - from;
+    }
+    from = Math.max(from, high);
+  }
+  return bestLength > 0 ? bestFrom + bestLength / 2 : null;
 }
 
 export function averagePoint(points: Point[]): Point {

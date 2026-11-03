@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -50,8 +51,50 @@ var prURLExact = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(:\d+)?(/[A-Za-z0-9.
 
 // checkKind vets an offer's W5 fields; "" means fine.
 func checkKind(job *runnerwire.Job, cfg *Config) string {
+	if len(job.TestFiles) > runnerwire.MaxTestFiles {
+		return "the job names too many test files"
+	}
+	if len(job.Acceptance) > runnerwire.MaxCheckResults {
+		return "the job names too many acceptance criteria"
+	}
 	switch job.Kind {
 	case runnerwire.JobImplement:
+		return ""
+	case runnerwire.JobTest:
+		// A Tester round starts its own branch and draft PR.
+		if job.Branch != "" || job.PRURL != "" {
+			return "a test job names no pull request"
+		}
+		return ""
+	case runnerwire.JobVerify:
+		if job.Verify == nil {
+			return "a verify job names no phase or head"
+		}
+		switch job.Verify.Phase {
+		case runnerwire.VerifyRed, runnerwire.VerifyGreen:
+		default:
+			return fmt.Sprintf("unknown verify phase %q", job.Verify.Phase)
+		}
+		if !shaPattern.MatchString(job.Verify.Head) {
+			return fmt.Sprintf("the verify head %q is not a commit sha", job.Verify.Head)
+		}
+		if job.Branch == "" || checkBase(job.Branch) != nil {
+			return fmt.Sprintf("pull request branch %q is not a plain branch name", job.Branch)
+		}
+		if len(job.PRURL) > 512 || !prURLExact.MatchString(job.PRURL) {
+			return fmt.Sprintf("%q is not a pull request URL", job.PRURL)
+		}
+		return ""
+	case runnerwire.JobJudge:
+		if job.Branch != "" || job.PRURL != "" {
+			return "a judge job names no pull request"
+		}
+		if len(job.Acceptance) == 0 {
+			return "a judge job needs the acceptance criteria to judge"
+		}
+		if job.Verify != nil && job.Verify.Phase != runnerwire.VerifyGoal {
+			return "a judge job verifies only a goal"
+		}
 		return ""
 	case runnerwire.JobPlan:
 		// A plan names no pull request and pushes nothing. Its Review, if
@@ -89,6 +132,35 @@ func checkKind(job *runnerwire.Job, cfg *Config) string {
 		return "autoPR is off on this runner, so it does not push revisions"
 	}
 	return ""
+}
+
+// ownBranchLocked vets a revise's branch: a revise pushes with the owner's
+// git credentials, so only to a branch one of this runner's own runs opened
+// its (still watched) pull request from, for the job's node, in the job's
+// repository. reason is "" when it is. j.mu is held.
+func (j *jobs) ownBranchLocked(job *runnerwire.Job, repo runnerwire.Repo) string {
+	for _, id := range j.watchOrder {
+		w := j.watched[id]
+		if w == nil || w.closing || w.NodeID == "" {
+			continue
+		}
+		if w.Branch == job.Branch && w.NodeID == job.NodeID && strings.EqualFold(w.URL, job.PRURL) &&
+			sameRepoPath(w.Repo, repo.Path) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("this runner pushes revisions only to branches its own runs opened for this node; "+
+		"%s (%s) is not one it opened for node %s in %s", job.Branch, job.PRURL, job.NodeID, repo.Name)
+}
+
+// sameRepoPath says whether two paths name the same place, as the runner's
+// config spells them: cleaned, and without letter case on Windows and macOS.
+func sameRepoPath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // prCheck is what checkPR learned about the job's pull request.
@@ -324,6 +396,9 @@ func (j *jobs) executeReview(ctx context.Context, r *run, pr prCheck) {
 		result.Error = `review gave no verdict (no final "VERDICT: approve" or "VERDICT: changes" line)`
 	} else {
 		result.Verdict = verdict
+		// A staged pipeline's reviewer acknowledges the Executor's changes
+		// to the Tester's files on a line of its own.
+		result.GuardAck = verdict == runnerwire.VerdictApprove && parseGuardAck(text)
 	}
 	j.finish(r, result)
 }
@@ -416,7 +491,7 @@ func (j *jobs) postReview(r *run, text, verdict string) error {
 	fmt.Fprintf(&b, "**Nodevas review** (%s/%s) — verdict: %s\n\n", job.Agent, model, shown)
 	b.WriteString(strings.TrimSpace(text))
 	fmt.Fprintf(&b, "\n\n---\n\nNodevas-Node: %s\nNodevas-Run: %s\n", oneLine(job.NodeID), oneLine(job.RunID))
-	body := truncateUTF8(redact.String(b.String()), maxReviewComment)
+	body := truncateUTF8(redact.Output(b.String()), maxReviewComment)
 	if _, err := gh.call(j.ctx, r.repo.Path, body, "pr", "comment", job.PRURL, "--body-file", "-"); err != nil {
 		return ghError("gh pr comment", err)
 	}
@@ -455,7 +530,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	if title := oneLine(job.NodeTitle); title != "" {
 		titled.NodeTitle = "Address review: " + title
 	}
-	committed := commitRun(ctx, wt, commitMessage(result.Summary, titled))
+	committed := j.commit(ctx, r, wt, commitMessage(result.Summary, titled))
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the changes: " + committed.Err.Error()})
 	}
@@ -476,13 +551,17 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 
 	switch {
 	case !committed.Changed && committed.Err == nil:
+		// Detached: the branch is the PR's, and stays.
+		removed := j.dropWorktree(r, wt, committed, false)
 		if result.Status != runnerwire.RunSucceeded {
 			// Nothing to keep; the PR stays as it was.
-			j.removePRWorktree(r, wt)
 			return &changes, nil, result
 		}
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "no changes; nothing pushed; worktree removed"})
-		j.removePRWorktree(r, wt)
+		text := "no changes; nothing pushed; worktree removed"
+		if !removed {
+			text = "no changes committed; nothing pushed; worktree kept at " + wt.Path
+		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		info := j.attachPR(r, wt, "")
 		return &changes, &info, result
 	case changes.Commit == "":
@@ -509,7 +588,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("pushed %s to %s", short(changes.Commit), wt.Branch)})
 	j.c.logf("run %s: pushed %s to %s (%s)", job.RunID, short(changes.Commit), wt.Branch, job.PRURL)
-	j.removePRWorktree(r, wt)
+	j.dropWorktree(r, wt, committed, false)
 	info := j.attachPR(r, wt, changes.Commit)
 	return &changes, &info, result
 }
@@ -518,13 +597,6 @@ func pushRejected(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "fetch first") ||
 		strings.Contains(msg, "[rejected]") || strings.Contains(msg, "stale info")
-}
-
-func (j *jobs) removePRWorktree(r *run, wt Worktree) {
-	// Detached: the branch is the PR's, and stays.
-	if err := removeWorktree(j.ctx, r.repo.Path, wt, false); err != nil {
-		j.c.logf("run %s: removing its worktree: %v", r.job.RunID, err)
-	}
 }
 
 // attachPR reads the revised PR back and watches it under this run as well,

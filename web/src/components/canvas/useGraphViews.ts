@@ -9,10 +9,12 @@
 
 import { useState } from "react";
 import { useI18n } from "../../i18n";
-import { reportError } from "../../store";
+import { reportError, useApp } from "../../store";
+import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
 import type { GraphNode, SavedView, Status } from "../../types";
+import { EMPTY_VIEW_FILTER, type ViewFilter } from "../GraphToolsPanel";
 
 export function useGraphViews({
   statuses,
@@ -35,21 +37,7 @@ export function useGraphViews({
 }) {
   const { t } = useI18n();
   const [savedViewName, setSavedViewName] = useState("");
-  const [viewFilter, setViewFilter] = useState<{
-    query: string;
-    status: string;
-    assignee: string;
-    tag: string;
-    priority: string;
-    sort: "manual" | "title" | "priority" | "status" | "assignee";
-  }>({
-    query: "",
-    status: "",
-    assignee: "",
-    tag: "",
-    priority: "",
-    sort: "manual",
-  });
+  const [viewFilter, setViewFilter] = useState<ViewFilter>(EMPTY_VIEW_FILTER);
 
   const matchesViewFilter = (node: GraphNode) => {
     const query = viewFilter.query.trim().toLocaleLowerCase();
@@ -61,7 +49,12 @@ export function useGraphViews({
     ) {
       return false;
     }
-    if (viewFilter.status && (statuses[node.id] ?? "ready") !== viewFilter.status) return false;
+    if (
+      viewFilter.statuses.length &&
+      !viewFilter.statuses.includes(statuses[node.id] ?? "ready")
+    ) {
+      return false;
+    }
     if (viewFilter.assignee && (node.assignee || "__unassigned__") !== viewFilter.assignee) {
       return false;
     }
@@ -72,11 +65,29 @@ export function useGraphViews({
 
   const applyBatchStatus = (status: Status) => {
     if (!selectedIDs.length) return;
+    // A type with no status, or one that settles itself, is not set by hand:
+    // those are left out and the notice says how many.
+    const graph = useApp.getState().graph;
+    const settable = selectedIDs.filter((id) => {
+      const kind = graph?.nodes?.find((node) => node.id === id)?.kind;
+      const { completion } = nodeTypeById(graph, kind);
+      return completion !== "none" && completion !== "auto";
+    });
+    const skipped = selectedIDs.length - settable.length;
+    if (!settable.length) {
+      setGraphNotice({ text: t("canvasOps.statusBatchSkipped", { count: skipped }), kind: "error" });
+      return;
+    }
     setShortcutBusy(true);
-    void Promise.all(selectedIDs.map((id) => setStatus(id, status, t("canvasOps.batchUpdateActor"))))
+    void Promise.all(settable.map((id) => setStatus(id, status, t("canvasOps.batchUpdateActor"))))
       .then(() =>
         setGraphNotice({
-          text: t("canvasOps.statusBatchUpdated", { count: selectedIDs.length }),
+          text: skipped
+            ? `${t("canvasOps.statusBatchUpdated", { count: settable.length })} ${t(
+                "canvasOps.statusBatchSkipped",
+                { count: skipped },
+              )}`
+            : t("canvasOps.statusBatchUpdated", { count: settable.length }),
           kind: "ok",
         }),
       )
@@ -101,7 +112,7 @@ export function useGraphViews({
       view: {
         id: `view-${Date.now()}`,
         name,
-        statuses: viewFilter.status ? [viewFilter.status] : undefined,
+        statuses: viewFilter.statuses.length ? [...viewFilter.statuses] : undefined,
         assignees: viewFilter.assignee ? [viewFilter.assignee] : undefined,
         tags: viewFilter.tag ? [viewFilter.tag] : undefined,
         priorities: viewFilter.priority ? [viewFilter.priority] : undefined,
@@ -118,7 +129,7 @@ export function useGraphViews({
   const applySavedView = (view: SavedView) => {
     setViewFilter((current) => ({
       ...current,
-      status: view.statuses?.[0] ?? "",
+      statuses: view.statuses ?? [],
       assignee: view.assignees?.[0] ?? "",
       tag: view.tags?.[0] ?? "",
       priority: view.priorities?.[0] ?? "",

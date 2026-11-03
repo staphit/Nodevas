@@ -1,5 +1,5 @@
 /**
- * `/` completion for a node's named links [B-04].
+ * `/` completion for a node's named links.
  *
  * The node's own links (edited under 標籤 in the metadata form) are its
  * shorthand vocabulary: typing `/角色設定` and accepting the completion writes

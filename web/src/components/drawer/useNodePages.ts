@@ -14,6 +14,7 @@ import type { PageDoc, PageSaveResult } from "../../state/types";
 import { useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 import type { EditorMode } from "./editorExtensions";
+import { useNodeDetailView } from "./openNodeDetail";
 
 /** What the editor passes around: the node id is filled in on the way to the store. */
 type PageDocInput = PageDoc | Omit<PageDoc, "nodeId"> | null;
@@ -56,6 +57,12 @@ export type NodePages = {
   movePage: (offset: number) => Promise<void>;
   removePage: () => Promise<void>;
 };
+
+/** A subpage's title, as the page menu names it; blank when the node has no such page. */
+export async function readNodePageTitle(nodeID: string, pageID: string): Promise<string> {
+  const { pages } = await api.listNodePages(nodeID);
+  return pages.find((page) => page.id === pageID)?.title ?? "";
+}
 
 /** The node's subpages: which one is open, and every edit to the set of them. */
 export function useNodePages({
@@ -118,26 +125,58 @@ export function useNodePages({
   const [pageRename, setPageRename] = useState("");
   const [pageBusy, setPageBusy] = useState(false);
 
+  // Every local change to the list bumps this, so a read that was already on
+  // its way cannot put back the list as it was before the change.
+  const listGeneration = useRef(0);
+  const setPagesHere = useCallback((next: SetStateAction<NodePageInfo[]>) => {
+    listGeneration.current += 1;
+    setPages(next);
+  }, []);
+  const diskChanges = useApp((s) => s.nodeDiskChanges[id] ?? 0);
+  // Coming back to the window re-reads too: an event missed while the socket
+  // was down would otherwise leave the tabs stale until the drawer reopens.
+  const [focusReads, setFocusReads] = useState(0);
+  useEffect(() => {
+    const reread = () => {
+      if (document.visibilityState !== "hidden") setFocusReads((count) => count + 1);
+    };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", reread);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", reread);
+    };
+  }, []);
+  const listedNode = useRef<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    setPagesLoading(true);
+    // Only a different node shows the loading state; a re-read of the same
+    // one keeps its tabs on screen and swaps them when the answer arrives.
+    const firstRead = listedNode.current !== id;
+    if (firstRead) setPagesLoading(true);
+    const generation = listGeneration.current;
     void api
       .listNodePages(id)
       .then((response) => {
-        if (!cancelled) setPages(response.pages ?? []);
+        if (!cancelled && generation === listGeneration.current) {
+          setPagesHere(response.pages ?? []);
+        }
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (!cancelled && firstRead) {
           setPageError(error instanceof Error ? error.message : t("subpage.loadFailed"));
         }
       })
       .finally(() => {
-        if (!cancelled) setPagesLoading(false);
+        if (cancelled) return;
+        listedNode.current = id;
+        setPagesLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, diskChanges, focusReads]);
   useEffect(() => {
     setPageRename(
       activePageID
@@ -204,6 +243,17 @@ export function useNodePages({
     }
   }, [initialPageID, pages, pagesLoading, selectPage]);
 
+  // A search jump asks for the subpage that holds its match; the panel
+  // showing the node opens it once its pages are listed.
+  const pageRequest = useNodeDetailView((s) => s.pageRequest);
+  useEffect(() => {
+    if (pageRequest?.nodeId !== id || pagesLoading) return;
+    useNodeDetailView.getState().clearPageRequest();
+    // "main" is the tab whose id is null, not a page in the list.
+    if (pageRequest.pageId === "main") void selectPage(null);
+    else if (pages.some((page) => page.id === pageRequest.pageId)) void selectPage(pageRequest.pageId);
+  }, [pageRequest, id, pages, pagesLoading, selectPage]);
+
   const createPage = useCallback(async () => {
     const title = pageTitle.trim();
     if (!title || pageBusy) return;
@@ -215,7 +265,7 @@ export function useNodePages({
     }
     try {
       const response = await api.createNodePage(id, title, pageFormat);
-      setPages((current) => [...current, response.page]);
+      setPagesHere((current) => [...current, response.page]);
       setActivePageID(response.page.id);
       setPageDoc({
         id: response.page.id,
@@ -250,7 +300,7 @@ export function useNodePages({
       }
       try {
         const response = await api.importNodePage(id, file);
-        setPages((current) => [...current, response.page]);
+        setPagesHere((current) => [...current, response.page]);
         setActivePageID(response.page.id);
         setPageDoc({
           id: response.page.id,
@@ -306,7 +356,7 @@ export function useNodePages({
       try {
         const response = await api.convertNodePage(id, activePageID, format);
         replaceCurrentPageContent?.(response.content);
-        setPages(response.pages);
+        setPagesHere(response.pages);
         setPageDoc({
           id: activePageID,
           content: response.content,
@@ -343,7 +393,7 @@ export function useNodePages({
     setPageError(null);
     try {
       const response = await api.updateNodePage(id, activePageID, title);
-      setPages(response.pages);
+      setPagesHere(response.pages);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : t("subpage.renameFailed"));
     } finally {
@@ -367,7 +417,7 @@ export function useNodePages({
         current.title,
         targetIndex,
       );
-      setPages(response.pages);
+      setPagesHere(response.pages);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : t("subpage.reorderFailed"));
     } finally {
@@ -390,7 +440,7 @@ export function useNodePages({
     setPageError(null);
     try {
       await api.deleteNodePage(id, activePageID);
-      setPages((items) => items.filter((page) => page.id !== activePageID));
+      setPagesHere((items) => items.filter((page) => page.id !== activePageID));
       setActivePageID(null);
       setPageDoc(null);
       setPageRename("");

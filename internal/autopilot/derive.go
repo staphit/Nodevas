@@ -114,8 +114,9 @@ func derive(obs observation, stamp string) derived {
 				round++
 			}
 			implement = &obs.runs[i]
-		case runnerwire.JobPlan:
-			// A plan run is never a task's.
+		case runnerwire.JobPlan, runnerwire.JobVerify, runnerwire.JobJudge:
+			// A plan run is never a task's; verify and judge runs change
+			// nothing (stages below).
 		default:
 			implement = &obs.runs[i]
 		}
@@ -147,6 +148,40 @@ func derive(obs observation, stamp string) derived {
 			add(stage, runnerwire.StageOK, r.FinishedAt, r.ID, rnd, detail)
 		default:
 			add(stage, runnerwire.StageFailed, r.FinishedAt, r.ID, rnd, firstNonEmpty(r.Error, r.Status))
+		}
+	}
+
+	// Staged pipelines (agent roles): the Tester's rounds, the red and green
+	// verify runs and a story's checklist judge.
+	for _, r := range obs.runs {
+		stage, detail := "", ""
+		switch r.Kind {
+		case runnerwire.JobTest:
+			stage, detail = runnerwire.StageTest, firstNonEmpty(r.Agent, "tester")
+		case runnerwire.JobVerify:
+			stage = runnerwire.StageVerifyRed
+			if r.VerifySpec != nil && r.VerifySpec.Phase == runnerwire.VerifyGreen {
+				stage = runnerwire.StageVerifyGreen
+			}
+			if r.Verify != nil {
+				detail = fmt.Sprintf("exit %d", r.Verify.ExitCode)
+			}
+		case runnerwire.JobJudge:
+			stage, detail = runnerwire.StageJudge, r.Verdict
+		default:
+			continue
+		}
+		if retriedBy(obs.runs, r.ID) != "" {
+			continue
+		}
+		switch r.Status {
+		case runnerwire.RunQueued, runnerwire.RunOffered:
+		case runnerwire.RunRunning:
+			add(stage, runnerwire.StageRunning, r.StartedAt, r.ID, 0, detail)
+		case runnerwire.RunSucceeded:
+			add(stage, runnerwire.StageOK, r.FinishedAt, r.ID, 0, detail)
+		default:
+			add(stage, runnerwire.StageFailed, r.FinishedAt, r.ID, 0, firstNonEmpty(r.Error, r.Status))
 		}
 	}
 

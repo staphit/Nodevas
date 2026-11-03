@@ -16,6 +16,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/usage"
 )
@@ -67,14 +68,14 @@ func (a *API) getUsage(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > usage.MaxDays {
-			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("days is between 1 and 365"), nil)
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("days is between 1 and 365", "天數須介於 1 到 365"), nil)
 			return
 		}
 		days = n
 	}
 	name := a.projectName(c.Request)
 	if name == "" {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
@@ -109,7 +110,7 @@ func (a *API) putPrices(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() || !actor.IsAdmin() {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("changing prices requires an owner or administrator"), nil)
+			locale.Errorf("changing prices requires an owner or administrator", "更改價格需要擁有者或管理員"), nil)
 		return
 	}
 	var body struct {

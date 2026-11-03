@@ -18,7 +18,7 @@ const SHAPES: { value: StatusDefinition["shape"]; labelKey: string }[] = [
 ];
 
 /**
- * The lifecycle-status vocabulary [B-05].
+ * The lifecycle-status vocabulary.
  *
  * Definitions live either in the workspace file or in this graph, so every
  * edit first has to work out which file owns the one being touched.

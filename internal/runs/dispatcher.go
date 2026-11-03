@@ -57,6 +57,15 @@ type Dispatcher struct {
 	// UsageAnnounceInterval rather than one per event batch.
 	usageMu sync.Mutex
 	usageAt map[string]time.Time
+
+	// Agent roles: onApproved marks a node done when its staged pipeline is
+	// approved; evidence records red/green/guard/judge evidence on the
+	// node's journal. Either may be nil.
+	onApproved func(project, nodeID, evidence string)
+	evidence   func(project, nodeID, runID, kind, outcome, summary string)
+
+	// createRun records a run (Store.Create); a seam for Start's tests.
+	createRun func(ctx context.Context, in New) (Record, error)
 }
 
 // UsageAnnounceInterval is the least time between two runs changes a running
@@ -97,10 +106,14 @@ func (d *Dispatcher) observed(u Update) {
 // hooks; see Dispatcher. Offers vouch for no dispatcher until SetStepUp says
 // how: failing closed, a runner's auto-accept waits for a person.
 func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(project, runID string)) *Dispatcher {
-	return &Dispatcher{
+	d := &Dispatcher{
 		store: store, reg: reg, changed: changed, events: events,
 		stepUpRequired: true, stepUpWindow: runnerwire.StepUpWindowSeconds * time.Second, now: time.Now,
 	}
+	if store != nil {
+		d.createRun = store.Create
+	}
+	return d
 }
 
 // SetStepUp says whether dispatchers must step up for offers to vouch for
@@ -256,6 +269,10 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		}
 		if r.RetryAt != "" {
 			continue // waiting for a usage limit to reset (handoff.go)
+		}
+		// A role's max concurrent runs (roles_store.go) holds it queued.
+		if ok, err := d.store.roleHasRoom(ctx, r); err != nil || !ok {
+			continue
 		}
 		if d.offer(ctx, r) {
 			room--
@@ -466,6 +483,10 @@ func (d *Dispatcher) PR(ctx context.Context, runnerID, runID string, pr runnerwi
 		// moves on now.
 		if before.PRURL == "" && before.PRError == "" {
 			d.prReported(ctx, r)
+		}
+		// A staged pipeline waiting for CI on its green head moves on.
+		if r.CIStatus != before.CIStatus || r.PRHeadSHA != before.PRHeadSHA {
+			d.ciReported(ctx, r)
 		}
 	}
 	return nil

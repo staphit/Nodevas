@@ -8,6 +8,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 )
 
@@ -19,13 +20,13 @@ import (
 //
 // It refuses a server with accounts: there the local actor is nobody, and a
 // runner owned by it would be a credential no person answers for. Such a
-// server's runners are linked from the Runners page by their owners.
+// server's runners are linked under Settings → Agents by their owners.
 func (s *Server) LocalRunnerToken(ctx context.Context, existing, name string) (token string, created bool, err error) {
 	if s.runners == nil {
-		return "", false, errors.New("runners are not enabled on this server")
+		return "", false, locale.Errorf("runners are not enabled on this server", "這個伺服器沒有啟用 runner")
 	}
 	if _, local := s.auth.(auth.LocalOnly); !local {
-		return "", false, errors.New("a server with accounts has no local owner for a runner; link one from the Runners page")
+		return "", false, locale.Errorf("a server with accounts has no local owner for a runner; link one under Settings → Agents → Link a new device", "有帳號的伺服器沒有 runner 的本機擁有者；請在「設定 → Agent 與 Runner → 連結新裝置」連結一個")
 	}
 	if existing != "" {
 		runner, err := s.runners.Authenticate(ctx, existing)

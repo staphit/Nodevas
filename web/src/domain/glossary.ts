@@ -1,5 +1,5 @@
 /**
- * Domain vocabulary [A-01].
+ * Domain vocabulary.
  *
  * The wire shapes in `../types` mirror the Go engine and must keep their JSON
  * field names. This module gives those shapes their domain names so code and
@@ -13,9 +13,12 @@
  * Nothing here changes serialization: every alias is the wire type.
  */
 
+import { translate } from "../i18n";
 import { isBuiltinPlanStatus } from "../plan";
 import type {
+  BuiltinNodeKind,
   BuiltinPlanStatus,
+  CustomNodeTypeId as WireCustomNodeTypeId,
   BuiltinStatus,
   CustomStatus,
   HistoryEvent,
@@ -58,27 +61,41 @@ export type MilestoneTypeDefinition = PlanStatusDefinition;
 export type PlannedMilestone = PlanMilestone;
 
 // ---------------------------------------------------------------------------
+// Node types (graph.yaml-owned)
+// ---------------------------------------------------------------------------
+
+/** Engine-defined node type ids. */
+export type BuiltinNodeType = BuiltinNodeKind;
+/** Project-defined node type id (`graph.yaml → node_types`). */
+export type CustomNodeTypeId = WireCustomNodeTypeId;
+
+// ---------------------------------------------------------------------------
 // UI copy
 // ---------------------------------------------------------------------------
 
 /**
- * Fixed UI wording (plan §5.4). Never label a plan milestone "狀態" and never
+ * Fixed UI wording. Never label a plan milestone "狀態" and never
  * label a lifecycle status "計畫" — the two live in different files, are
  * written by different actions, and undo differently.
  */
 export const TERMS = {
-  lifecycleStatus: "實際狀態",
-  lifecycleEvent: "實際紀錄",
-  planMilestone: "預期里程碑",
-  planSchedule: "預期計畫",
-  milestoneType: "里程碑類型",
-  document: "文件",
-  workflow: "工作流程定義",
-  projectLayout: "專案版面",
-  uiPreference: "個人偏好",
+  lifecycleStatus: "term.lifecycleStatus",
+  lifecycleEvent: "term.lifecycleEvent",
+  planMilestone: "term.planMilestone",
+  planSchedule: "term.planSchedule",
+  milestoneType: "term.milestoneType",
+  document: "term.document",
+  workflow: "term.workflow",
+  projectLayout: "term.projectLayout",
+  uiPreference: "term.uiPreference",
 } as const;
 
 export type TermKey = keyof typeof TERMS;
+
+/** A fixed term in the reader's language; TERMS holds catalog keys. */
+export function term(key: TermKey): string {
+  return translate(TERMS[key]);
+}
 
 /** Builtin lifecycle states, in engine progression order. */
 export const BUILTIN_LIFECYCLE_STATUSES: readonly BuiltinLifecycleStatus[] = [

@@ -3,6 +3,7 @@ import {
   logicGateIsComplete,
   logicGateRelation,
 } from "./domain/graph/logicGate";
+import { nodeTypeOf } from "./domain/graph/nodeTypes";
 import { evaluateRequires } from "./domain/graph/requires";
 import type {
   Graph,
@@ -17,11 +18,30 @@ export interface DependencyViolation {
   nodeId: string;
   sourceIds: string[];
   kind: "actual" | "schedule";
-  message: string;
+  /** Why, as data: the panel words it in the reader's language. */
+  reason: ViolationReason;
+}
+
+/**
+ * Why a started node breaks its dependencies. The unmet nodes are the
+ * violation's sourceIds.
+ */
+export type ViolationReason =
+  | { kind: "gate-incomplete"; operator: string }
+  | { kind: "gate-false"; operator: string }
+  | { kind: "requires-invalid" }
+  | { kind: "requires-false" }
+  | { kind: "requires-pending" }
+  | { kind: "schedule"; date: string };
+
+/** A plan milestone that has passed: the planned start, progress or deadline. */
+export interface OverdueReason {
+  kind: "start" | "progress" | "deadline";
+  date: string;
 }
 
 export interface GraphAnalysis {
-  overdue: Map<string, string[]>;
+  overdue: Map<string, OverdueReason[]>;
   violations: DependencyViolation[];
   blocked: Map<string, string[]>;
   blocking: Map<string, string[]>;
@@ -121,6 +141,8 @@ function gateBlockers(gate: LogicGate, done: Set<string>): string[] {
 }
 
 function nodeDuration(node: GraphNode, graph: Graph): number {
+  // Start, End and other types that are not work take no time on the path.
+  if (!nodeTypeOf(graph, node).countsInProgress) return 0;
   const plans = graph.ui?.plans?.[node.id];
   const start = milestone(plans, "started");
   const done = milestone(plans, "done");
@@ -152,16 +174,35 @@ export function analyzeGraph(
   };
   if (!graph) return result;
 
-  const nodes = graph.nodes ?? [];
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const allNodes = graph.nodes ?? [];
+  const byId = new Map(allNodes.map((node) => [node.id, node]));
+  // A type with no status (a Note) is reference material outside the flow:
+  // never late, never blocked, never on the critical path, and as a
+  // prerequisite it holds nothing back. Every check below runs on `nodes`.
+  const outsideFlow = new Set(
+    allNodes
+      .filter((node) => nodeTypeOf(graph, node).completion === "none")
+      .map((node) => node.id),
+  );
+  const nodes = allNodes.filter((node) => !outsideFlow.has(node.id));
+  // `node.refs` (a scene using a Note as context) is deliberately never read
+  // here: a reference is not an edge, so it cannot block, enter the critical
+  // path, make an entry point or fade a node. Only `graph.edges` and
+  // `requires` drive this analysis, the same as the server's readiness.
   const statusDefinitions = graph.ui?.customStatuses ?? [];
   const settled = (status: Status) => isSettledStatus(status, statusDefinitions);
   const requiredEdges = (graph.edges ?? []).filter(
-    (edge) => edgeBlocks(edge) && byId.has(edge.from) && byId.has(edge.to),
+    (edge) =>
+      edgeBlocks(edge) &&
+      byId.has(edge.from) &&
+      byId.has(edge.to) &&
+      !outsideFlow.has(edge.from) &&
+      !outsideFlow.has(edge.to),
   );
-  const done = new Set(
-    nodes.filter((node) => settled(statuses[node.id] ?? "ready")).map((node) => node.id),
-  );
+  const done = new Set([
+    ...nodes.filter((node) => settled(statuses[node.id] ?? "ready")).map((node) => node.id),
+    ...outsideFlow,
+  ]);
   const effectiveFlags = { ...(graph.flags ?? {}), ...runtimeFlags };
   const today = localDay(now);
 
@@ -223,24 +264,24 @@ export function analyzeGraph(
   for (const node of nodes) {
     const status = statuses[node.id] ?? "ready";
     const plans = graph.ui?.plans?.[node.id];
-    const messages: string[] = [];
+    const reasons: OverdueReason[] = [];
     const start = milestone(plans, "started");
     const progress = milestone(plans, "in_progress");
     const finish = milestone(plans, "done");
     if (start && start < today && (status === "ready" || status === "locked")) {
-      messages.push(`開始日 ${start}，目前仍未開始`);
+      reasons.push({ kind: "start", date: start });
     }
     if (
       progress &&
       progress < today &&
       !(new Set<Status>(["in_progress", "failed"]).has(status) || settled(status))
     ) {
-      messages.push(`預計 ${progress} 進行，目前尚未進入進行中`);
+      reasons.push({ kind: "progress", date: progress });
     }
     if (finish && finish < today && !settled(status)) {
-      messages.push(`死線 ${finish}，目前尚未完成`);
+      reasons.push({ kind: "deadline", date: finish });
     }
-    if (messages.length) result.overdue.set(node.id, messages);
+    if (reasons.length) result.overdue.set(node.id, reasons);
   }
 
   // A relation gate states what its edges mean, not when its output may run,
@@ -283,19 +324,15 @@ export function analyzeGraph(
         nodeId: node.id,
         sourceIds: unsatisfied,
         kind: "actual",
-        message: gateIncomplete
-          ? `已開始，但邏輯閘 ${gate!.operator.toUpperCase()} 尚未接妥`
+        reason: gateIncomplete
+          ? { kind: "gate-incomplete", operator: gate!.operator }
           : gateConditionFalse
-            ? `已開始，但邏輯閘 ${gate!.operator.toUpperCase()} 條件不成立：${unsatisfied
-                .map((id) => byId.get(id)?.title || id)
-                .join("、")}`
+            ? { kind: "gate-false", operator: gate!.operator }
             : !condition.ok
-              ? "已開始，但前置條件語法無法解析"
+              ? { kind: "requires-invalid" }
               : unsatisfied.length === 0
-                ? "已開始，但前置條件不成立"
-                : `已開始，但前置條件尚未完成：${unsatisfied
-                    .map((id) => byId.get(id)?.title || id)
-                    .join("、")}`,
+                ? { kind: "requires-false" }
+                : { kind: "requires-pending" },
       });
     }
 
@@ -313,7 +350,7 @@ export function analyzeGraph(
         nodeId: node.id,
         sourceIds: lateParents,
         kind: "schedule",
-        message: `預計開始日 ${targetStart} 早於必要前置節點的預計完成日`,
+        reason: { kind: "schedule", date: targetStart },
       });
     }
   }
@@ -352,6 +389,7 @@ export function analyzeGraph(
   }
   let end = "";
   for (const [id, days] of distance) {
+    if (!nodeTypeOf(graph, byId.get(id)).countsInProgress) continue;
     if (!end || days > (distance.get(end) ?? 0)) end = id;
   }
   if (end) {

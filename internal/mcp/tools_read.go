@@ -51,7 +51,9 @@ type readyTasksOutput struct {
 	Waiting int                `json:"waiting"`
 	Busy    int                `json:"busy"`
 	Cursor  string             `json:"cursor,omitempty"`
-	Summary string             `json:"summary"`
+	// ForPeople counts ready nodes left for a person (reviews, decisions).
+	ForPeople int    `json:"forPeople,omitempty"`
+	Summary   string `json:"summary"`
 }
 
 type getNodeInput struct {
@@ -61,15 +63,22 @@ type getNodeInput struct {
 }
 
 type getNodeOutput struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title,omitempty"`
-	Kind     string   `json:"kind,omitempty"`
-	Status   string   `json:"status"`
-	Priority string   `json:"priority,omitempty"`
-	Assignee string   `json:"assignee,omitempty"`
-	Deadline string   `json:"deadline,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Requires string   `json:"requires,omitempty"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	// TypeLabel names the node's type; AgentMode says whether agents work it
+	// ("dispatch"), only break it down ("autopilot"), or leave it to people
+	// ("none").
+	TypeLabel string `json:"typeLabel,omitempty"`
+	AgentMode string `json:"agentMode,omitempty"`
+	// Completion is who finishes this type: anyone, people, auto or none.
+	Completion string   `json:"completion,omitempty"`
+	Status     string   `json:"status"`
+	Priority   string   `json:"priority,omitempty"`
+	Assignee   string   `json:"assignee,omitempty"`
+	Deadline   string   `json:"deadline,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Requires   string   `json:"requires,omitempty"`
 	// WriteAccess is who may modify this node: absent means everyone; "worker",
 	// "orchestrator" and "human-only" each refuse anything below that rank.
 	WriteAccess string   `json:"writeAccess,omitempty"`
@@ -81,6 +90,11 @@ type getNodeOutput struct {
 	Rev        string `json:"rev,omitempty"`
 	Truncated  bool   `json:"truncated,omitempty"`
 	NextOffset int    `json:"nextOffset,omitempty"`
+	// References are the notes this node uses as context (characters,
+	// setting), each with a summary; read them before drafting.
+	References          []ReferenceSummary `json:"references,omitempty"`
+	ReferencesTruncated bool               `json:"referencesTruncated,omitempty"`
+	ReferencedBy        []string           `json:"referencedBy,omitempty"`
 }
 
 func registerReadTools(server *mcp.Server, client *Client) {
@@ -103,7 +117,7 @@ func registerReadTools(server *mcp.Server, client *Client) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_ready_tasks",
-		Description: "List unclaimed, unblocked tasks without bodies. Empty with waiting > 0 means blocked work; do not start it.",
+		Description: "List unclaimed, unblocked tasks of the types agents are dispatched to, without bodies; reviews and decisions wait for a person (forPeople). Empty with waiting > 0 means blocked work; do not start it.",
 		Annotations: readOnly("Ready tasks"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in readyTasksInput) (*mcp.CallToolResult, readyTasksOutput, error) {
 		result, err := client.Ready(ctx, ReadyQuery{
@@ -117,19 +131,20 @@ func registerReadTools(server *mcp.Server, client *Client) {
 			return nil, readyTasksOutput{}, err
 		}
 		return nil, readyTasksOutput{
-			Tasks:   result.Tasks,
-			Blocked: result.Blocked,
-			Ready:   result.Ready,
-			Waiting: result.Waiting,
-			Busy:    result.Busy,
-			Cursor:  result.Cursor,
-			Summary: summarize(result),
+			Tasks:     result.Tasks,
+			Blocked:   result.Blocked,
+			Ready:     result.Ready,
+			Waiting:   result.Waiting,
+			Busy:      result.Busy,
+			Cursor:    result.Cursor,
+			ForPeople: result.ForPeople,
+			Summary:   summarize(result),
 		}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_node",
-		Description: "Read node metadata, dependencies and a body page. Follow nextOffset when truncated. Keep rev for body writes.",
+		Description: "Read node metadata, dependencies, references and a body page. references are notes this node uses as context (characters, setting): read them before drafting; get_node a reference for its full text. Follow nextOffset when truncated. Keep rev for body writes.",
 		Annotations: readOnly("Read a node"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getNodeInput) (*mcp.CallToolResult, getNodeOutput, error) {
 		out, err := readNode(ctx, client, in)
@@ -147,6 +162,14 @@ func registerReadTools(server *mcp.Server, client *Client) {
 // model skimming a JSON blob is exactly the reader that will miss the
 // difference.
 func summarize(result *ReadyResult) string {
+	sentence := summarizeQueue(result)
+	if result.ForPeople > 0 {
+		sentence += fmt.Sprintf(" %d more ready node(s) need a person (review/decision types).", result.ForPeople)
+	}
+	return sentence
+}
+
+func summarizeQueue(result *ReadyResult) string {
 	switch {
 	case result.Ready > 0:
 		return fmt.Sprintf("%d task(s) ready, %d blocked by prerequisites or conditions, %d already under way.",
@@ -189,6 +212,12 @@ func readNode(ctx context.Context, client *Client, in getNodeInput) (getNodeOutp
 		Upstream:    content.Upstream,
 		Downstream:  content.Downstream,
 	}
+	if content.NodeType != nil {
+		out.TypeLabel, out.AgentMode = content.NodeType.Label, string(content.NodeType.AgentMode)
+		out.Completion = string(content.NodeType.Completion)
+	}
+	out.References, out.ReferencesTruncated = content.References, content.ReferencesTruncated
+	out.ReferencedBy = content.ReferencedBy
 	out.Body, out.Truncated, out.NextOffset = sliceBody(content.Content, in.Offset, in.MaxBodyChars)
 	return out, nil
 }

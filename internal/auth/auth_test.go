@@ -7,14 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/identity"
-	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 )
 
 func TestPasswordHashRoundTrip(t *testing.T) {
@@ -36,9 +33,9 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 }
 
 func TestUserStoreRejectsWeakAndDuplicateAccounts(t *testing.T) {
-	dbtest.UsePostgres(t)
+	testpg.UseEnv(t)
 	workspace := t.TempDir()
-	users, err := NewUserStore(workspace)
+	users, err := openUserStore(t, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,29 +58,22 @@ func TestUserStoreRejectsWeakAndDuplicateAccounts(t *testing.T) {
 		t.Fatal("an unknown account signed in")
 	}
 
-	// Credentials on disk must not be readable by other accounts on the host.
-	path := db.PathFor(workspace)
-	info, err := os.Stat(path)
-	if err != nil {
+	// The password is stored only as its argon2id hash. (The database files
+	// themselves are the server's: the embedded cluster's data directory and
+	// secrets are owner-only, see internal/embeddedpg.)
+	var stored string
+	if err := users.database.QueryRowContext(context.Background(),
+		`SELECT password_hash FROM accounts WHERE name = 'ann'`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if runtimeIsUnix() && info.Mode().Perm() != 0o600 {
-		t.Fatalf("database mode = %v, want 0600", info.Mode().Perm())
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "correct-horse-battery") {
-		t.Fatal("the database holds the plaintext password")
+	if strings.Contains(stored, "correct-horse-battery") || !strings.HasPrefix(stored, "$argon2id$") {
+		t.Fatalf("password_hash = %q, want an argon2id hash", stored)
 	}
 	records := users.Records(context.Background())
 	if len(records) != 1 || records[0].Name != "ann" {
 		t.Fatalf("records = %+v", records)
 	}
 }
-
-func runtimeIsUnix() bool { return runtime.GOOS != "windows" }
 
 // X-Forwarded-Proto is client input until an operator says a proxy rewrites
 // it: believed by default, a plaintext caller can claim TLS it never had.
@@ -172,9 +162,9 @@ func TestStillAuthorizedUsesLiveRevalidator(t *testing.T) {
 }
 
 func TestSessionRevokedAfterExternalRoleChange(t *testing.T) {
-	dbtest.UsePostgres(t)
+	testpg.UseEnv(t)
 	workspace := t.TempDir()
-	users, err := NewUserStore(workspace)
+	users, err := openUserStore(t, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +194,7 @@ func TestSessionRevokedAfterExternalRoleChange(t *testing.T) {
 		expires:  time.Now().Add(time.Hour),
 	}
 
-	external, err := NewUserStore(workspace)
+	external, err := openUserStore(t, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,14 +223,20 @@ func TestLoginLimiterBoundsRotatingInputs(t *testing.T) {
 		t.Fatalf("attempt buckets = %d, max %d", len(authenticator.attempts), maxLoginBuckets)
 	}
 
+	// Rotating the address does not rotate the account's own budget, and
+	// rotating both still leaves the bucket table bounded. There is no
+	// hub-wide budget to exhaust (chargeLogin).
 	other := NewSessionAuth(&UserStore{})
-	for index := 0; index < loginGlobalLimit; index++ {
-		if !other.allowLogin(fmt.Sprintf("rotate%d", index), fmt.Sprintf("198.51.100.%d", index)) {
-			t.Fatalf("global attempt %d rejected early", index)
+	for index := 0; index < LoginFailureLimit; index++ {
+		if !other.allowLogin("target", fmt.Sprintf("198.51.100.%d", index)) {
+			t.Fatalf("account attempt %d rejected early", index)
 		}
 	}
-	if other.allowLogin("rotated", "203.0.113.1") {
-		t.Fatal("global limit was bypassed by rotating both username and IP")
+	if other.allowLogin("target", "203.0.113.1") {
+		t.Fatal("account limit was bypassed by rotating the IP")
+	}
+	for index := 0; index < 3*maxLoginBuckets; index++ {
+		other.allowLogin(fmt.Sprintf("rotate%d", index), fmt.Sprintf("10.%d.%d.%d", index>>16&255, index>>8&255, index&255))
 	}
 	if len(other.attempts) > maxLoginBuckets {
 		t.Fatalf("attempt buckets = %d, max %d", len(other.attempts), maxLoginBuckets)

@@ -1,0 +1,128 @@
+version: 1
+type: story
+users:
+    - id: author
+      name: 作者
+nodes:
+    - id: node-0001
+      title: '設定：聽得見記憶的城市'
+      kind: start
+      priority: high
+      assignee: author
+      deadline: "2026-08-14"
+      tags:
+        - 小說
+        - 設定
+    - id: node-0002
+      title: 瑪拉找到檔案館
+      kind: scene
+      priority: high
+      assignee: author
+      deadline: "2026-08-17"
+      requires: node-0001
+      tags:
+        - 小說
+        - 場景
+    - id: node-0003
+      title: '抉擇：打開禁忌之門'
+      kind: choice
+      priority: high
+      assignee: author
+      deadline: "2026-08-20"
+      requires: node-0002
+      tags:
+        - 小說
+        - 抉擇
+    - id: node-0004
+      title: '關卡：信任檔案管理員'
+      kind: gate
+      priority: medium
+      assignee: author
+      deadline: "2026-08-22"
+      requires: node-0003
+      tags:
+        - 小說
+        - 關卡
+    - id: node-0005
+      title: 雨線上的對峙
+      kind: scene
+      priority: medium
+      assignee: author
+      deadline: "2026-08-25"
+      requires: node-0004
+      tags:
+        - 小說
+        - 高潮
+    - id: node-0006
+      title: '結局：歸還記憶'
+      kind: end
+      priority: low
+      assignee: author
+      deadline: "2026-08-28"
+      requires: node-0005
+      tags:
+        - 小說
+        - 結局
+edges:
+    - from: node-0001
+      to: node-0002
+    - from: node-0002
+      to: node-0003
+    - from: node-0003
+      to: node-0004
+    - from: node-0004
+      to: node-0005
+    - from: node-0005
+      to: node-0006
+ui:
+    positions:
+        node-0001:
+            x: 0
+            "y": 0.488
+        node-0002:
+            x: 0.159
+            "y": 2
+        node-0003:
+            x: 1.482
+            "y": 2
+        node-0004:
+            x: 2.744
+            "y": 2.263
+        node-0005:
+            x: 1.226
+            "y": 3.775
+        node-0006:
+            x: 2.811
+            "y": 4.625
+    timeline_order:
+        - node-0001
+        - node-0002
+        - node-0003
+        - node-0004
+        - node-0005
+        - node-0006
+    plans:
+        node-0001:
+            - date: "2026-08-14"
+              status: started
+              note: 寫下故事那個不可能的設定。
+        node-0002:
+            - date: "2026-08-17"
+              status: started
+              note: 讓瑪拉來到檔案館。
+        node-0003:
+            - date: "2026-08-20"
+              status: started
+              note: 讓開門的選擇付出代價。
+        node-0004:
+            - date: "2026-08-22"
+              status: started
+              note: 用記憶考驗信任。
+        node-0005:
+            - date: "2026-08-25"
+              status: started
+              note: 抵達雨線。
+        node-0006:
+            - date: "2026-08-28"
+              status: started
+              note: 歸還記憶，收束故事主線。

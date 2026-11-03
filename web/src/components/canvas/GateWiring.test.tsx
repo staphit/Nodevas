@@ -1,8 +1,9 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { EdgeRelation } from "../../types";
-import { GateWiring, showsGateBadge, type Gate } from "./GateWiring";
-import type { Col } from "./geometry";
+import { GATE_W, GateWiring, gateLayout, showsGateBadge, type Gate } from "./GateWiring";
+import { COL_W, ROW_H, type Col, type Rect } from "./geometry";
+import { obstacleIndex } from "./obstacleIndex";
 
 function col(id: string, index: number, requires?: string): Col {
   return {
@@ -99,5 +100,100 @@ describe("GateWiring", () => {
   it("labels an OR fan-in", () => {
     const { container } = renderGate(gate("or", "source-0 or source-1"));
     expect(container.querySelector(".gate-label")?.textContent).toBe("Any · OR");
+  });
+});
+
+/**
+ * Three cards side by side on the board's grid, the last waiting on either of
+ * the other two: the only room between its inputs and itself is the gap
+ * between two columns, far narrower than a gate box.
+ */
+describe("a gate between neighbouring columns", () => {
+  const card = (id: string, index: number, requires?: string): Col => ({
+    node: { id, title: id, ...(requires ? { requires } : {}) },
+    row: 0,
+    index,
+    width: 152,
+    height: 68,
+  });
+  const centerX = (c: Col) => c.index * COL_W + COL_W / 2;
+  const rowTop = (row: number) => row * ROW_H;
+  const cards = [card("a", 0), card("b", 1), card("c", 2, "b or a")];
+  const obstacles: Rect[] = cards.map((c) => ({
+    left: centerX(c) - c.width / 2,
+    right: centerX(c) + c.width / 2,
+    top: rowTop(c.row) + ROW_H / 2 - c.height / 2,
+    bottom: rowTop(c.row) + ROW_H / 2 + c.height / 2,
+  }));
+  const neighbours: Gate = {
+    to: cards[2],
+    parents: [cards[1], cards[0]].map((from) => ({
+      from,
+      relation: "",
+      line: "solid",
+      muted: false,
+    })),
+    op: "or",
+  };
+  // The gap between card b's right edge and card c's left edge.
+  const gapLeft = obstacles[1].right;
+  const gapRight = obstacles[2].left;
+
+  it("sits in the gap between the cards, as a compact box", () => {
+    const layout = gateLayout(
+      neighbours,
+      centerX,
+      rowTop,
+      undefined,
+      undefined,
+      obstacleIndex(obstacles),
+    );
+    expect(layout.center.x).toBeCloseTo((gapLeft + gapRight) / 2);
+    expect(layout.center.y).toBeCloseTo(ROW_H / 2);
+    expect(layout.compact).toBe(true);
+  });
+
+  it("names just the operator, in a box that barely reaches into the cards", () => {
+    const { container } = render(
+      <svg>
+        <GateWiring
+          gate={neighbours}
+          centerX={centerX}
+          rowTop={rowTop}
+          onPositionChange={() => {}}
+          selectedEdges={new Set()}
+          onSelectEdge={() => {}}
+          onOpenEdgeMenu={() => {}}
+          getWireVertices={() => []}
+          onWireVerticesChange={() => {}}
+          selectedVertex={null}
+          onSelectVertex={() => {}}
+          obstacles={obstacles}
+          onEditGate={() => {}}
+          onDeleteGate={() => {}}
+        />
+      </svg>,
+    );
+    expect(container.querySelector(".gate-label")?.textContent).toBe("OR");
+    const box = container.querySelector(".gate-node")!;
+    const width = Number(box.getAttribute("width"));
+    const left = Number(box.getAttribute("x"));
+    expect(width).toBeLessThan(GATE_W / 2);
+    // No more than a few pixels over either card.
+    expect(left).toBeGreaterThan(gapLeft - 10);
+    expect(left + width).toBeLessThan(gapRight + 10);
+  });
+
+  it("keeps the full box where there is room for it", () => {
+    const apart = [card("a", 0), card("b", 1), card("c", 4, "b or a")];
+    const layout = gateLayout(
+      { ...neighbours, to: apart[2] },
+      centerX,
+      rowTop,
+      undefined,
+      undefined,
+      obstacleIndex(obstacles.slice(0, 2)),
+    );
+    expect(layout.compact).toBe(false);
   });
 });

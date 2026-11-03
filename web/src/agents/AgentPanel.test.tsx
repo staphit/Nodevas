@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentAsk } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { AgentPanel } from "./AgentPanel";
@@ -89,7 +90,16 @@ describe("AgentPanel", () => {
     fireEvent.change(noteInput, { target: { value: "After backup" } });
     fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
 
-    expect(answerAsk).toHaveBeenCalledWith("ask-1", "approved", "After backup");
+    expect(answerAsk).toHaveBeenCalledWith("ask-1", { decision: "approve", note: "After backup" });
+  });
+
+  it("marks the roster as the connect intro while nobody is connected", () => {
+    const { container, rerender } = render(<AgentPanel onClose={vi.fn()} />);
+    const roster = () => container.querySelector(".agent-roster-section");
+    expect(roster()).not.toHaveClass("is-intro");
+    useAgents.setState({ sessions: [] });
+    rerender(<AgentPanel onClose={vi.fn()} />);
+    expect(roster()).toHaveClass("is-intro");
   });
 
   it("shows another person's ask without answer controls", () => {
@@ -102,6 +112,140 @@ describe("AgentPanel", () => {
     expect(screen.queryByRole("button", { name: /Approve/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Optional note for the agent…")).not.toBeInTheDocument();
     expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+  });
+
+  it("follows the hub's canAnswer over the viewer's role", () => {
+    const ask = useAgents.getState().asks[0];
+    useAgents.setState({
+      asks: [{ ...ask, canAnswer: false }],
+      viewer: { id: "root", name: "root", role: "admin" },
+    });
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Approve/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+  });
+
+  it("shows settled asks with their results alongside pending asks", () => {
+    useAgents.setState({
+      asks: [
+        {
+          id: "ask-pending",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          question: "Pending approval?",
+          status: "pending",
+          createdAt: 1700000000000,
+        },
+        {
+          id: "ask-answered",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          kind: "question",
+          question: "Which port?",
+          status: "answered",
+          answer: "Port 5432",
+          createdAt: 1700000001000,
+          decidedAt: Date.now() - 60_000,
+        },
+        {
+          id: "ask-expired",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          kind: "permission",
+          tool: "Bash",
+          question: "Run command?",
+          status: "expired",
+          createdAt: 1700000002000,
+          decidedAt: Date.now() - 30_000,
+        },
+      ],
+    });
+
+    render(<AgentPanel onClose={vi.fn()} />);
+
+    expect(screen.getByText("Pending approval?")).toBeInTheDocument();
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+    expect(screen.getByText("Answer: Port 5432")).toBeInTheDocument();
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+  });
+});
+
+describe("AgentPanel settled asks", () => {
+  const settled = (over: Partial<AgentAsk> & Pick<AgentAsk, "id" | "question">): AgentAsk => ({
+    project: "alpha",
+    sessionId: "claude:1",
+    sessionName: "api-claude",
+    actorId: "alice",
+    agent: "claude",
+    kind: "question",
+    status: "answered",
+    createdAt: Date.now() - 120_000,
+    decidedAt: Date.now() - 60_000,
+    ...over,
+  });
+
+  it("keeps only the viewer's own recent answers, not old, auto-allowed or other people's asks", () => {
+    useAgents.setState({
+      viewer: { id: "alice", name: "alice", role: "member" },
+      asks: [
+        settled({ id: "recent", question: "Recent answer?", answer: "yes" }),
+        settled({ id: "old", question: "Last week's question?", decidedAt: Date.now() - 7 * 86_400_000 }),
+        settled({
+          id: "auto",
+          kind: "permission",
+          tool: "Bash",
+          question: "claude wants to run Bash",
+          status: "approved",
+          decision: "approve_run",
+          answer: "approve_run",
+          note: "allowed for this run",
+          runId: "run-1",
+        }),
+        settled({ id: "bobs", actorId: "bob", sessionId: "codex:2", question: "Bob's question?" }),
+      ],
+    });
+
+    render(<AgentPanel onClose={vi.fn()} />);
+
+    expect(screen.getByText("Recent answer?")).toBeInTheDocument();
+    expect(screen.queryByText("Last week's question?")).toBeNull();
+    expect(screen.queryByText("Allowed for this run")).toBeNull();
+    expect(screen.queryByText("Bob's question?")).toBeNull();
+  });
+
+  it("keeps a settled ask by the hub's canAnswer, over the viewer's role", () => {
+    useAgents.setState({
+      viewer: { id: "root", name: "root", role: "admin" },
+      asks: [
+        settled({ id: "theirs", actorId: "bob", question: "Bob's prompt?", canAnswer: false }),
+        settled({ id: "mine", actorId: "bob", question: "Shared question?", canAnswer: true }),
+      ],
+    });
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.queryByText("Bob's prompt?")).toBeNull();
+    expect(screen.getByText("Shared question?")).toBeInTheDocument();
+  });
+
+  it("shows no asks section once nothing is pending or recently settled", () => {
+    useAgents.setState({
+      asks: [settled({ id: "old", question: "Last week's question?", decidedAt: Date.now() - 7 * 86_400_000 })],
+    });
+    const { container } = render(<AgentPanel onClose={vi.fn()} />);
+    expect(container.querySelector(".agent-asks-section")).toBeNull();
+  });
+
+  it("names the section for what it holds, pending and just answered", () => {
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Agent asks" })).toBeInTheDocument();
   });
 });
 
@@ -257,5 +401,25 @@ describe("AgentPanel W1.5", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// Docked in Station, the panel sits under the card's own "Agent chat · N
+// online" toggle; its own large "Agent chat / N online" header said the same
+// thing a second time. The heading stays for screen readers (it names the
+// region) and the count is left to the card.
+describe("AgentPanel docked header", () => {
+  it("does not repeat the card's title and online count", () => {
+    render(<AgentPanel docked />);
+    const heading = screen.getByRole("heading", { name: "Agent chat" });
+    expect(heading).toHaveClass("sr-only");
+    expect(screen.queryByText("1 online")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent chat" })).toBeInTheDocument();
+  });
+
+  it("keeps both when floating over the board", () => {
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Agent chat" })).not.toHaveClass("sr-only");
+    expect(screen.getByText("1 online")).toBeInTheDocument();
   });
 });

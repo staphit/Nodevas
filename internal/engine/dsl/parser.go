@@ -26,9 +26,14 @@ func Parse(src string) (Expr, *ParseError) {
 	return e, nil
 }
 
+// maxNesting bounds how deep parentheses, `not` and all()/any() nest. Every
+// level costs parser frames, and a Go stack overflow is fatal, not a panic.
+const maxNesting = 256
+
 type parser struct {
-	toks []token
-	i    int
+	toks  []token
+	i     int
+	depth int // parseUnary frames open; every nesting goes through one
 }
 
 func (p *parser) peek() token { return p.toks[p.i] }
@@ -70,6 +75,11 @@ func (p *parser) parseExpr(min int) (Expr, *ParseError) {
 
 func (p *parser) parseUnary() (Expr, *ParseError) {
 	t := p.peek()
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxNesting {
+		return nil, errf(t.pos, "expression nests too deeply (more than %d levels)", maxNesting)
+	}
 	if t.kind == tokIdent && strings.ToLower(t.text) == "not" {
 		p.next()
 		x, err := p.parseUnary()

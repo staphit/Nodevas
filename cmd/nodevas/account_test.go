@@ -8,22 +8,25 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 )
 
 func TestAccountTOTPResetTurnsTheFactorOffAndAudits(t *testing.T) {
 	root := t.TempDir()
-	users, err := auth.NewUserStore(root)
+	testpg.UseEnv(t)
+	first, err := db.OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	users := auth.NewUserStoreDB(first)
 	ctx := context.Background()
 	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "ann@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	id, _, _ := users.FindAccount(ctx, "ann")
-	_ = users.Close()
+	_ = first.Close()
 
-	database, err := db.Open(root)
+	database, err := db.OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
 	}

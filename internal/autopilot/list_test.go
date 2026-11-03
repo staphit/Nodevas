@@ -2,21 +2,17 @@ package autopilot
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"nodevas/internal/db"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/testpg"
 )
 
 // InProject lists one project's autopilots in the statuses asked for, oldest
 // first; List views each.
 func TestListLiveAutopilotsOfAProject(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	store := NewStore(database)
 	create := func(project, goal string) Record {

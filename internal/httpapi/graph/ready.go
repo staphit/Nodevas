@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 )
@@ -49,6 +50,19 @@ func (a *API) getReady(c *gin.Context) {
 	readiness := engine.ComputeReadiness(g, rs)
 	ready := filterTasks(readiness.Ready, c.Query("assignee"), c.Query("tag"))
 	blocked := filterTasks(readiness.Blocked, c.Query("assignee"), c.Query("tag"))
+	// An agent is only offered what agents may work: a review or a decision
+	// waits for a person, and listing it would invite a claim that fails.
+	// forPeople says how many ready nodes were held back for that reason, so
+	// an empty queue is not mistaken for a finished project. busy stays the
+	// whole board's count: it is "already under way", whoever does it.
+	agent := auth.ActorFrom(c.Request).IsAgent()
+	forPeople := 0
+	if agent {
+		all := len(ready)
+		ready = agentWork(ready)
+		blocked = agentWork(blocked)
+		forPeople = all - len(ready)
+	}
 
 	page, next := paginate(ready, c.Query("cursor"), limit)
 	body := map[string]any{
@@ -60,6 +74,9 @@ func (a *API) getReady(c *gin.Context) {
 	if next != "" {
 		body["cursor"] = next
 	}
+	if agent {
+		body["forPeople"] = forPeople
+	}
 	// The blocked listing is opt-in: on a large board it is longer than the
 	// queue itself, and the common call is "what can I do", not "why not".
 	if boolQuery(c.Query("includeBlocked")) {
@@ -67,6 +84,17 @@ func (a *API) getReady(c *gin.Context) {
 		body["blocked"] = blockedPage
 	}
 	c.JSON(200, body)
+}
+
+// agentWork keeps the tasks whose type agents are dispatched to.
+func agentWork(tasks []engine.ReadyNode) []engine.ReadyNode {
+	out := make([]engine.ReadyNode, 0, len(tasks))
+	for _, task := range tasks {
+		if task.AgentMode == string(engine.AgentDispatch) {
+			out = append(out, task)
+		}
+	}
+	return out
 }
 
 // readLimit parses ?limit=, refusing nonsense rather than clamping it silently:

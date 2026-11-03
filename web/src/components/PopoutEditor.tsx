@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { IconClose, IconDoc } from "../icons";
-import { nodeById, useApp } from "../store";
+import { nodeById, useApp, usePreference } from "../store";
+import { applyTextScale } from "../preferences/textScale";
 import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
+import { NodeTitleField } from "./inspector/NodeMetaForm";
+import { usePopoutLiveUpdates } from "../collab/popoutLiveUpdates";
+import { readNodePageTitle } from "./drawer/useNodePages";
 
 export function PopoutEditor() {
   const { t } = useI18n();
@@ -21,6 +25,11 @@ export function PopoutEditor() {
   const [error, setError] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [saveRequest, setSaveRequest] = useState(0);
+  // A subpage is named by its title, as the drawer's page menu names it; its
+  // id is an internal handle. Blank until the list answers.
+  const [pageTitle, setPageTitle] = useState("");
+
+  usePopoutLiveUpdates(nodeID);
 
   const node = nodeById(graph, nodeID);
   const title = node?.title || nodeID || t("node.title");
@@ -28,6 +37,9 @@ export function PopoutEditor() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  const textScale = usePreference("textScale");
+  useEffect(() => applyTextScale(textScale), [textScale]);
 
   useEffect(() => {
     if (!nodeID) {
@@ -56,6 +68,21 @@ export function PopoutEditor() {
   }, [loadAll, nodeID, openTab, refreshProjects, refreshTrash]);
 
   useEffect(() => {
+    if (!nodeID || pageID === "main") return;
+    let cancelled = false;
+    void readNodePageTitle(nodeID, pageID)
+      .then((title) => {
+        if (!cancelled) setPageTitle(title);
+      })
+      .catch(() => {
+        // The header only loses the name; TabBody reports a page it cannot open.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeID, pageID]);
+
+  useEffect(() => {
     document.title = `${title} — Nodevas`;
   }, [title]);
 
@@ -75,8 +102,9 @@ export function PopoutEditor() {
         <div className="popout-editor-title">
           <IconDoc size={16} />
           <div>
-            <strong>{title}</strong>
-            <span>{pageID === "main" ? t("drawer.mainPage") : pageID}</span>
+            {/* The title is edited here: the popout has no node panel header. */}
+            {node ? <NodeTitleField id={nodeID} /> : <strong>{title}</strong>}
+            <span>{pageID === "main" ? t("drawer.mainPage") : pageTitle}</span>
           </div>
         </div>
         <div className="popout-editor-actions">

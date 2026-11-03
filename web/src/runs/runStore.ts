@@ -9,6 +9,7 @@ import {
   type PipelineState,
   type Run,
   type RunChanges,
+  type RunAsk,
   type RunEvent,
 } from "../api";
 
@@ -44,6 +45,8 @@ export interface RunStoreState {
   /** A run's events in seq order, without duplicates. */
   eventsByRun: Record<string, RunEvent[]>;
   eventErrors: Record<string, string>;
+  /** A run's asks for its timeline, oldest first (GET /api/runs/:id/asks). */
+  asksByRun: Record<string, RunAsk[]>;
   /** Runs some view is showing live, with how many views are. Only these
    * follow run-events pushes. */
   watched: Record<string, number>;
@@ -85,6 +88,9 @@ export interface RunStoreState {
   loadEvents: (runId: string) => Promise<void>;
   /** Merges events in, dropping any seq already held. */
   appendEvents: (runId: string, events: RunEvent[]) => void;
+  /** Fetches the run's asks for its timeline. A failure keeps what is
+   * held: the asks are an aside to the run's events. */
+  loadRunAsks: (runId: string) => Promise<void>;
   /** Creates a run; throws the API error so the dialog can show it. */
   createRun: (body: CreateRunRequest) => Promise<Run>;
   cancelRun: (runId: string) => Promise<boolean>;
@@ -105,8 +111,10 @@ export interface RunStoreState {
 
   /** runs-changed: the id is a node id. Refreshes it only if loaded. */
   onRunsChanged: (nodeId: string | undefined) => void;
-  /** run-events: the id is a run id. Fetches new events if it is watched. */
-  onRunEvents: (runId: string | undefined) => void;
+  /** run-events: the id is a run id. Fetches new events if it is watched,
+   * or with kind "ask" (one of its asks started waiting or ended) its
+   * asks. */
+  onRunEvents: (runId: string | undefined, kind?: string) => void;
   /** After a reconnect: whatever is on screen may have missed pushes. */
   resync: () => void;
   /** A different project: nothing held belongs to it. */
@@ -193,6 +201,9 @@ export function findRun(state: Pick<RunStoreState, "runsByNode">, runId: string)
 // run dirty, and the fetch goes round once more instead of racing itself.
 const eventsInFlight = new Map<string, Promise<void>>();
 const eventsDirty = new Set<string>();
+// Same for a run's asks.
+const asksInFlight = new Map<string, Promise<void>>();
+const asksDirty = new Set<string>();
 // Same for node lists, so a burst of runs-changed costs one or two requests.
 const nodesInFlight = new Map<string, Promise<void>>();
 const nodesDirty = new Set<string>();
@@ -226,6 +237,7 @@ const initial = {
   nodeErrors: {},
   eventsByRun: {},
   eventErrors: {},
+  asksByRun: {},
   watched: {},
   selectedRun: {},
   cancelling: {},
@@ -487,6 +499,36 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     });
   },
 
+  loadRunAsks: (runId) => {
+    const running = asksInFlight.get(runId);
+    if (running) {
+      asksDirty.add(runId);
+      return running;
+    }
+    const gen = generation;
+    const work = (async () => {
+      do {
+        asksDirty.delete(runId);
+        try {
+          const response = await api.getRunAsks(runId);
+          if (gen !== generation) return;
+          const asks = response.asks ?? [];
+          set((state) => {
+            const held = state.asksByRun[runId];
+            if (!held && asks.length === 0) return {};
+            return { asksByRun: { ...state.asksByRun, [runId]: asks } };
+          });
+        } catch {
+          return;
+        }
+      } while (asksDirty.has(runId) && gen === generation);
+    })().finally(() => {
+      if (asksInFlight.get(runId) === work) asksInFlight.delete(runId);
+    });
+    asksInFlight.set(runId, work);
+    return work;
+  },
+
   createRun: async (body) => {
     const run = await api.createRun(body);
     set((state) => ({
@@ -594,6 +636,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
   watchRun: (runId) => {
     set((state) => ({ watched: { ...state.watched, [runId]: (state.watched[runId] ?? 0) + 1 } }));
     void get().loadEvents(runId);
+    void get().loadRunAsks(runId);
     let done = false;
     return () => {
       if (done) return;
@@ -649,9 +692,10 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     void state.loadRuns(nodeId);
   },
 
-  onRunEvents: (runId) => {
+  onRunEvents: (runId, kind) => {
     if (!runId || !get().watched[runId]) return;
-    void get().loadEvents(runId);
+    if (kind === "ask") void get().loadRunAsks(runId);
+    else void get().loadEvents(runId);
   },
 
   resync: () => {
@@ -665,6 +709,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     for (const runId of Object.keys(state.watched)) {
       const run = findRun(state, runId);
       if (!run || !runFinal(run.status)) void state.loadEvents(runId);
+      void state.loadRunAsks(runId);
     }
   },
 
@@ -672,6 +717,8 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     generation++;
     eventsInFlight.clear();
     eventsDirty.clear();
+    asksInFlight.clear();
+    asksDirty.clear();
     nodesInFlight.clear();
     nodesDirty.clear();
     changesInFlight.clear();

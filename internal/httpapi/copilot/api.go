@@ -14,6 +14,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/copilot"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/logging"
 )
 
@@ -85,15 +87,17 @@ func (a *API) Register(api *gin.RouterGroup) {
 func fail(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, copilot.ErrNotFound):
-		httpx.Err(c, http.StatusNotFound, errors.New("not found"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("not found", "找不到"))
 	case errors.Is(err, copilot.ErrInvalid), errors.Is(err, copilot.ErrInvalidSettings):
 		httpx.Err(c, http.StatusBadRequest, err)
 	case errors.Is(err, copilot.ErrBusy):
 		httpx.Coded(c, http.StatusConflict, "turn_in_progress", err, nil)
+	case errors.Is(err, copilot.ErrTurnLimit):
+		httpx.Coded(c, http.StatusTooManyRequests, "copilot_busy", err, nil)
 	case errors.Is(err, copilot.ErrUnavailable):
 		// The reason is the operator's configuration, not a secret, and the
 		// panel shows it so the person knows whom to ask.
-		httpx.Coded(c, http.StatusServiceUnavailable, "copilot_unavailable", errors.New("service unavailable"),
+		httpx.Coded(c, http.StatusServiceUnavailable, "copilot_unavailable", locale.Errorf("service unavailable", "服務無法使用"),
 			map[string]any{"reason": strings.TrimPrefix(err.Error(), copilot.ErrUnavailable.Error()+": ")})
 	case errors.Is(err, copilot.ErrBridge):
 		httpx.Err(c, http.StatusBadGateway, err)
@@ -201,6 +205,9 @@ func (a *API) postTurn(c *gin.Context) {
 	}
 	stream := newEventStream(c)
 	stopHeartbeat := stream.heartbeat(heartbeatEvery)
+	// Deferred as well as called below: a Turn that panics (recovered by the
+	// router) must not leave the ticker writing into a finished response.
+	defer stopHeartbeat()
 	err := a.service.Turn(c.Request.Context(), copilot.TurnRequest{
 		Actor:          auth.ActorFrom(c.Request),
 		ConversationID: c.Param("id"),
@@ -239,11 +246,20 @@ func newEventStream(c *gin.Context) *eventStream {
 
 // heartbeat pings the stream until the returned func is called. It only
 // writes once the turn has started, so turn_started stays the first line.
+// The returned func may be called more than once.
 func (s *eventStream) heartbeat(every time.Duration) func() {
 	done := make(chan struct{})
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
+		// A panic here would take the whole server down with it: nothing
+		// above a bare goroutine recovers. Losing the pings is the lesser harm.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				slog.Error("copilot heartbeat panicked",
+					slog.Any("panic", recovered), slog.String("stack", string(debug.Stack())))
+			}
+		}()
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
@@ -260,9 +276,12 @@ func (s *eventStream) heartbeat(every time.Duration) func() {
 			}
 		}
 	}()
+	var once sync.Once
 	return func() {
-		close(done)
-		<-finished
+		once.Do(func() {
+			close(done)
+			<-finished
+		})
 	}
 }
 
@@ -364,11 +383,11 @@ func browserModel(value string) string {
 // carrying the session secret around: a hash of its cookie. Empty on a
 // loopback-only server, which has no sessions.
 func sessionFingerprint(r *http.Request) string {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := auth.SessionToken(r)
+	if !ok {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(cookie.Value))
+	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:16])
 }
 

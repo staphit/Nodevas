@@ -7,31 +7,38 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 )
 
 var (
 	// ErrNotFound is an autopilot run that does not exist.
-	ErrNotFound = errors.New("autopilot not found")
+	ErrNotFound = locale.Errorf("autopilot not found", "找不到 autopilot")
 	// ErrInvalid wraps a request the caller got wrong.
-	ErrInvalid = errors.New("invalid autopilot request")
+	ErrInvalid = locale.Errorf("invalid autopilot request", "autopilot 請求無效")
 	// ErrConflict is a goal that already has a live autopilot, or an action
 	// its state does not allow.
-	ErrConflict = errors.New("autopilot conflict")
+	ErrConflict = locale.Errorf("autopilot conflict", "autopilot 衝突")
+	// ErrNodeType is a goal whose node type agents may not work (a Review,
+	// a Decision, a Note…).
+	ErrNodeType = locale.Errorf("node type forbids agents", "節點類型不允許 agent")
 )
 
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+// invalidf is an ErrInvalid saying why, in both languages.
+func invalidf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrInvalid}, args...)...)
 }
 
-func conflictf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrConflict, fmt.Sprintf(format, args...))
+// conflictf is an ErrConflict saying why, in both languages.
+func conflictf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrConflict}, args...)...)
 }
 
 // Record is a stored autopilot run: the API's view plus what only the hub
@@ -39,6 +46,26 @@ func conflictf(format string, args ...any) error {
 type Record struct {
 	runnerwire.AutopilotRun
 	SteppedUpAt string
+	// Workflow is the goal's workflow stages, frozen when the autopilot
+	// started (nil: legacy, the policy's review mode decides); PlanRunID the
+	// planner run that breaks the goal down (goal phase plan).
+	Workflow  *engine.Workflow
+	PlanRunID string
+}
+
+// stagesColumn is autopilot_runs.stages: the frozen workflow and the
+// planner run.
+type stagesColumn struct {
+	Workflow  *engine.Workflow `json:"workflow"`
+	PlanRunID string           `json:"planRunId,omitempty"`
+}
+
+func encodeStages(r Record) (string, error) {
+	if r.Workflow == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(stagesColumn{Workflow: r.Workflow, PlanRunID: r.PlanRunID})
+	return string(raw), err
 }
 
 // Store keeps autopilot runs and their task instances.
@@ -78,18 +105,28 @@ func newID() (string, error) {
 }
 
 const runColumns = `id, project, goal_node_id, status, policy, reason, created_by, created_by_name,
-	stepped_up_at, created_at, updated_at, finished_at`
+	stepped_up_at, created_at, updated_at, finished_at, stages, goal_phase, qa_round, qa_run_id`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
-	var policy string
+	var policy, stages string
+	var qaRound int64
 	err := row.Scan(&r.ID, &r.Project, &r.GoalNodeID, &r.Status, &policy, &r.Reason, &r.CreatedBy,
-		&r.CreatedByName, &r.SteppedUpAt, &r.CreatedAt, &r.UpdatedAt, &r.FinishedAt)
+		&r.CreatedByName, &r.SteppedUpAt, &r.CreatedAt, &r.UpdatedAt, &r.FinishedAt,
+		&stages, &r.GoalPhase, &qaRound, &r.QARunID)
 	if err != nil {
 		return r, err
 	}
+	r.QARound = int(qaRound)
 	if policy != "" {
 		_ = json.Unmarshal([]byte(policy), &r.Policy)
+	}
+	if stages != "" {
+		var column stagesColumn
+		if json.Unmarshal([]byte(stages), &column) == nil && column.Workflow != nil {
+			r.Workflow, r.PlanRunID = column.Workflow, column.PlanRunID
+			r.Stages = runs.StagesSnapshot(column.Workflow)
+		}
 	}
 	return r, nil
 }
@@ -105,6 +142,11 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 	if err != nil {
 		return Record{}, err
 	}
+	stages, err := encodeStages(r)
+	if err != nil {
+		return Record{}, err
+	}
+	r.Stages = runs.StagesSnapshot(r.Workflow)
 	now := s.stamp()
 	r.ID, r.Status, r.CreatedAt, r.UpdatedAt, r.FinishedAt = id, runnerwire.AutopilotRunning, now, now, ""
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -118,14 +160,15 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 		return Record{}, err
 	}
 	if live > 0 {
-		return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
+		return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first", "這個目標已有 autopilot 在執行；請先暫停或取消")
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO autopilot_runs (`+runColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Project, r.GoalNodeID, r.Status, string(policy), r.Reason, r.CreatedBy, r.CreatedByName,
-		r.SteppedUpAt, r.CreatedAt, r.UpdatedAt, r.FinishedAt); err != nil {
+		r.SteppedUpAt, r.CreatedAt, r.UpdatedAt, r.FinishedAt,
+		stages, r.GoalPhase, int64(r.QARound), r.QARunID); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
+			return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first", "這個目標已有 autopilot 在執行；請先暫停或取消")
 		}
 		return Record{}, err
 	}
@@ -222,6 +265,47 @@ func (s *Store) InProject(ctx context.Context, project string, statuses ...strin
 	return out, rows.Err()
 }
 
+// WaitingHumanRow is one task of a live autopilot whose review waits for a
+// person: what Station's building counts and links to.
+type WaitingHumanRow struct {
+	Project     string
+	AutopilotID string
+	GoalNodeID  string
+	NodeID      string
+	PipelineID  string
+}
+
+// WaitingHuman returns, in one query, the tasks of the given projects' live
+// autopilots (running or paused) that wait for a person's review.
+func (s *Store) WaitingHuman(ctx context.Context, projects []string) ([]WaitingHumanRow, error) {
+	out := []WaitingHumanRow{}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+1)
+	for _, project := range projects {
+		args = append(args, project)
+	}
+	args = append(args, runnerwire.TaskWaitingHuman)
+	rows, err := s.db.QueryContext(ctx, `SELECT r.project, r.id, r.goal_node_id, t.node_id, t.pipeline_id
+		FROM autopilot_tasks t JOIN autopilot_runs r ON r.id = t.autopilot_id
+		WHERE r.project IN (?`+strings.Repeat(", ?", len(projects)-1)+`) AND r.status IN ('running', 'paused')
+		AND t.state = ? AND t.pipeline_id <> ''
+		ORDER BY r.project, r.created_at, t.node_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row WaitingHumanRow
+		if err := rows.Scan(&row.Project, &row.AutopilotID, &row.GoalNodeID, &row.NodeID, &row.PipelineID); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // Tasks returns an autopilot's task instances, unordered.
 func (s *Store) Tasks(ctx context.Context, autopilotID string) ([]runnerwire.TaskInstance, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT data FROM autopilot_tasks WHERE autopilot_id = ?`, autopilotID)
@@ -276,8 +360,14 @@ func (s *Store) Save(ctx context.Context, r Record, tasks []runnerwire.TaskInsta
 		return r, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE autopilot_runs SET status = ?, reason = ?, updated_at = ?, finished_at = ?
-		WHERE id = ?`, r.Status, r.Reason, r.UpdatedAt, r.FinishedAt, r.ID); err != nil {
+	stages, err := encodeStages(r)
+	if err != nil {
+		return r, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE autopilot_runs SET status = ?, reason = ?, updated_at = ?, finished_at = ?,
+		stages = ?, goal_phase = ?, qa_round = ?, qa_run_id = ?
+		WHERE id = ?`, r.Status, r.Reason, r.UpdatedAt, r.FinishedAt,
+		stages, r.GoalPhase, int64(r.QARound), r.QARunID, r.ID); err != nil {
 		return r, err
 	}
 	for _, t := range tasks {

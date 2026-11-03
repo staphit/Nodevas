@@ -3,7 +3,7 @@
 // The workspace is disposable, so tests may create, edit and delete freely.
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -20,7 +20,12 @@ function run(command, args, cwd) {
 
 run("npx", ["vite", "build"], webDir);
 
-const binary = join(webDir, "e2e", ".bin", process.platform === "win32" ? "nodevas.exe" : "nodevas");
+const binary = join(
+  webDir,
+  "e2e",
+  ".bin",
+  process.platform === "win32" ? "nodevas.exe" : "nodevas",
+);
 mkdirSync(join(webDir, "e2e", ".bin"), { recursive: true });
 run("go", ["build", "-tags", "nomsgpack", "-o", binary, "./cmd/nodevas"], repoDir);
 
@@ -57,19 +62,65 @@ writeFileSync(join(project, "nodes", "beta.md"), "# 實作\n\n待辦。\n", "utf
 const configDir = join(workspace, "config");
 mkdirSync(configDir, { recursive: true });
 
+// PostgreSQL: NODEVAS_E2E_DATABASE_URL names a server, or this starts the
+// embedded one in the foreground (`nodevas db test-server`) and stops it on
+// exit by closing its stdin. The app gets a database of its own on it.
+let dbServer = null;
+let adminURL = process.env.NODEVAS_E2E_DATABASE_URL;
+if (!adminURL) {
+  const urlFile = join(workspace, "pg-url");
+  dbServer = spawn(
+    binary,
+    ["db", "test-server", "--dir", join(workspace, "pg"), "--url-file", urlFile],
+    {
+      stdio: ["pipe", "inherit", "inherit"],
+    },
+  );
+  const deadline = Date.now() + 180_000;
+  while (!existsSync(urlFile) || readFileSync(urlFile, "utf8").trim() === "") {
+    if (dbServer.exitCode !== null || Date.now() > deadline) {
+      throw new Error("nodevas db test-server did not start");
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  adminURL = readFileSync(urlFile, "utf8").trim();
+}
+const databaseName = `e2e_serve_${process.pid}`;
+// No shell: the URL may hold & and ?.
+const created = spawnSync(
+  binary,
+  ["db", "create-database", "--url", adminURL, "--name", databaseName],
+  {
+    stdio: "inherit",
+  },
+);
+if (created.status !== 0) {
+  throw new Error(`nodevas db create-database failed (${created.status})`);
+}
+const databaseURL = new URL(adminURL);
+databaseURL.pathname = `/${databaseName}`;
+
 console.log(`[e2e] workspace ${workspace}`);
 const server = spawn(binary, ["serve", "--project", workspace, "--port", port], {
   stdio: "inherit",
   env: {
     ...process.env,
     APPDATA: configDir,
+    LOCALAPPDATA: configDir,
     XDG_CONFIG_HOME: configDir,
     HOME: configDir,
+    NODEVAS_DATABASE_URL: databaseURL.toString(),
+    NODEVAS_DATABASE_URL_FILE: "",
   },
 });
 
+let cleaned = false;
 const cleanup = () => {
+  if (cleaned) return;
+  cleaned = true;
   server.kill();
+  spawnSync(binary, ["db", "drop-database", "--url", adminURL, "--name", databaseName]);
+  dbServer?.stdin?.end();
   try {
     rmSync(workspace, { recursive: true, force: true });
   } catch {

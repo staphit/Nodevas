@@ -154,6 +154,9 @@ type Options struct {
 	Assets AssetResolver
 	// Modified stamps the generated file; zero means "now".
 	Modified time.Time
+	// Language is the HTML language tag for a document with no words to
+	// tell its own by (LanguageOf), normally the reader's; "" means "en".
+	Language string
 }
 
 // ModifiedOrNow is the timestamp to stamp a generated file with.

@@ -1,5 +1,5 @@
 /**
- * Who else is in the document you have open [P2].
+ * Who else is in the document you have open.
  *
  * The server has always known this — it publishes a peer list per project with
  * the document each person holds and a stable colour per account — but the only

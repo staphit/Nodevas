@@ -8,16 +8,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/audit"
@@ -65,8 +66,26 @@ func isWildcardHost(host string) bool {
 	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
-func isRemoteDeployment(host string, behindProxy bool) bool {
-	return behindProxy || !isLoopbackHost(host)
+// isRemoteDeployment reports whether the hub is reachable from anywhere but
+// this machine, which is what makes accounts mandatory: a listener beyond
+// loopback, or a loopback one that something on this machine forwards to. A
+// proxy (--behind-proxy), a name that is not this machine's (--hostname) and
+// Cloudflare Access in front of the hub each say that something does.
+func isRemoteDeployment(host string, behindProxy bool, hostNames []string, access bool) bool {
+	if behindProxy || access || !isLoopbackHost(host) {
+		return true
+	}
+	return publicHostName(hostNames) != ""
+}
+
+// publicHostName is the first of names that is not this machine's, or "".
+func publicHostName(names []string) string {
+	for _, name := range names {
+		if !isLoopbackHost(name) {
+			return name
+		}
+	}
+	return ""
 }
 
 // hostList splits the --hostname value into the names to accept.
@@ -93,6 +112,36 @@ func stepUpMinutesDefault() int {
 		log.Printf("ignoring %s=%q: not a whole number of minutes", stepUpMinutesEnv, raw)
 	}
 	return runnerwire.StepUpWindowSeconds / 60
+}
+
+// wsLimitFlags registers the WebSocket connection caps on fs. Each flag's
+// default comes from its NODEVAS_SERVE_WS_* variable, else the hub default, so
+// the command line wins over the environment. The returned function reads the
+// parsed values.
+func wsLimitFlags(fs *flag.FlagSet, lookup func(string) (string, bool)) func() realtime.ConnectionLimits {
+	defaults := realtime.DefaultConnectionLimits()
+	fromEnv := func(name string, fallback int) int {
+		raw, ok := lookup(name)
+		if !ok {
+			return fallback
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || value <= 0 {
+			log.Printf("ignoring %s=%q: not a positive whole number", name, raw)
+			return fallback
+		}
+		return value
+	}
+	total := fs.Int("ws-max-conns", fromEnv("NODEVAS_SERVE_WS_MAX_CONNS", defaults.Total),
+		"most WebSocket connections the hub keeps open; env NODEVAS_SERVE_WS_MAX_CONNS")
+	perAccount := fs.Int("ws-max-conns-per-account",
+		fromEnv("NODEVAS_SERVE_WS_MAX_CONNS_PER_ACCOUNT", defaults.PerAccount),
+		"most WebSocket connections one account may hold (tabs, devices); env NODEVAS_SERVE_WS_MAX_CONNS_PER_ACCOUNT")
+	perIP := fs.Int("ws-max-conns-per-ip", fromEnv("NODEVAS_SERVE_WS_MAX_CONNS_PER_IP", defaults.PerIP),
+		"most WebSocket connections from one client IP; env NODEVAS_SERVE_WS_MAX_CONNS_PER_IP")
+	return func() realtime.ConnectionLimits {
+		return realtime.ConnectionLimits{Total: *total, PerAccount: *perAccount, PerIP: *perIP}
+	}
 }
 
 // secretEnvironment reads a secret directly or from the file named by the
@@ -129,6 +178,7 @@ func validateServeFlags(
 	keyFile string,
 	behindProxy bool,
 	allowPlaintext bool,
+	access bool,
 ) error {
 	if port < 1 || port > 65535 {
 		return errors.New("port must be between 1 and 65535")
@@ -139,11 +189,27 @@ func validateServeFlags(
 	// A loopback listener behind a reverse proxy is still remotely reachable;
 	// treating it as local would silently disable accounts for the common
 	// same-host proxy deployment.
-	remote := isRemoteDeployment(listen, behindProxy)
+	remote := isRemoteDeployment(listen, behindProxy, hostNames, access)
 	useTLS := certFile != ""
 	proxyOnlyTransport := behindProxy && isLoopbackHost(listen)
 	if remote && isWildcardHost(listen) && len(hostNames) == 0 {
 		return fmt.Errorf("refusing wildcard listen %s without --hostname; configure the public Host name to prevent DNS rebinding", listen)
+	}
+	// A loopback listener with a public name or Access in front is reached
+	// through a tunnel or proxy on this machine. Unless the transport is
+	// settled otherwise (TLS, or plaintext accepted), that proxy is the
+	// HTTPS edge, and the hub has to be told so.
+	if remote && isLoopbackHost(listen) && !behindProxy && !useTLS && !allowPlaintext {
+		reason := "Cloudflare Access is configured"
+		drop := "remove the access settings"
+		if name := publicHostName(hostNames); name != "" {
+			reason = "--hostname " + name + " is not this machine"
+			drop = "drop --hostname"
+		}
+		return fmt.Errorf(
+			"refusing to serve %s: %s, so requests reach it through a proxy or tunnel on this machine; "+
+				"pass --behind-proxy (the hub then requires accounts), or %s to keep it to this machine",
+			listen, reason, drop)
 	}
 	if remote && !useTLS && !proxyOnlyTransport && !allowPlaintext {
 		return fmt.Errorf(
@@ -181,11 +247,13 @@ func serveArgValue(args []string, name string) (string, bool, error) {
 }
 
 // bootstrapWorkspace opens everything a workspace is made of: the projects on
-// disk, the database beside them, and the search index that spans both.
+// disk, the database, and the search index that spans both.
 //
 // The database is opened once here and shared with everything that follows:
-// SQLite admits one writer, so a second handle would be a second pool queueing
-// against this one for it rather than behind it in Go.
+// its single writer is what keeps the count-then-insert account rules
+// serialised, and a second handle would be a second writer. Without
+// NODEVAS_DATABASE_URL it is the workspace's embedded PostgreSQL, which this
+// starts before the hub and which every exit path below stops (atFatal).
 //
 // Failures end the process rather than travelling back as errors. There is no
 // caller above startup that could do anything else with them, and the wording
@@ -197,7 +265,7 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 	// .vised/history instead.
 	historyMode, err := store.ParseHistoryMode(os.Getenv("NODEVAS_HISTORY"))
 	if err != nil {
-		log.Fatalf("NODEVAS_HISTORY: %v", err)
+		fatalf("NODEVAS_HISTORY: %v", err)
 	}
 	store.SetDefaultHistoryMode(historyMode)
 	slog.Info("version history", slog.String("mode", string(historyMode)),
@@ -212,20 +280,37 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 			fmt.Fprintf(os.Stderr, "%v.\n", busy)
 			fmt.Fprintln(os.Stderr,
 				"Close the other Nodevas window or stop the running server, then start again.")
-			os.Exit(1)
+			exit(1)
 		}
-		log.Fatalf("workspace: %v", err)
+		fatalf("workspace: %v", err)
 	}
 
 	// The workspace database holds accounts, the audit trail, settings and the
 	// search index.
-	database, err := db.Open(root)
+	database, err := db.OpenRoot(root)
 	if err != nil {
-		log.Fatalf("workspace database: %v", err)
+		pm.Close()
+		fatalf("workspace database: %v", err)
 	}
-	slog.Info("workspace database ready",
-		slog.String("backend", string(database.Backend())),
-		slog.String("path", database.Path()))
+	atFatal = func() {
+		database.Close()
+		pm.Close()
+	}
+	ready := []any{
+		slog.String("event.code", "db.ready"),
+		slog.String("mode", database.Mode()),
+		slog.String("server", database.Path()),
+	}
+	if database.DataDir() != "" {
+		ready = append(ready, slog.String("data_dir", database.DataDir()), slog.Int("port", database.Port()))
+	}
+	slog.Info("workspace database ready", ready...)
+
+	// A workspace that kept its data in SQLite before this release brings it
+	// along once, before anything reads the new database.
+	if err := importLegacy(context.Background(), database, root); err != nil {
+		fatalf("workspace database: %v", err)
+	}
 
 	// The search index lives in the database now, so it outlives a restart.
 	pm.UseDatabase(database)
@@ -234,13 +319,16 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 	if err := pm.PruneSearchIndex(context.Background()); err != nil {
 		slog.Warn("could not prune the search index", logging.Err(err))
 	}
+	// The first node drawer anyone opens lists links from every project;
+	// reading them now is what keeps that drawer from waiting on the scan.
+	pm.WarmNodeLinks()
 	return hub, pm, database
 }
 
 func serve(args []string) {
 	projectDefault, projectSet, err := serveArgValue(args, "project")
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if !projectSet || strings.TrimSpace(projectDefault) == "" {
 		projectDefault = "."
@@ -248,7 +336,7 @@ func serve(args []string) {
 
 	configPath, configSet, err := serveArgValue(args, "config")
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if !configSet {
 		if envPath, ok := os.LookupEnv("NODEVAS_CONFIG"); ok && strings.TrimSpace(envPath) != "" {
@@ -260,12 +348,19 @@ func serve(args []string) {
 		configPath = filepath.Join(projectDefault, config.DefaultFileName)
 	}
 
-	serveConfig, err := config.LoadServeConfig(configPath, !configSet)
+	// A file named on purpose is the operator's; the one found in the
+	// workspace is workspace content, and may not say everything.
+	var serveConfig config.ServeConfig
+	if configSet {
+		serveConfig, err = config.LoadServeConfig(configPath, false)
+	} else {
+		serveConfig, err = config.LoadWorkspaceServeConfig(configPath)
+	}
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		fatalf("config: %v", err)
 	}
 	if err := config.ApplyEnvironment(&serveConfig, os.LookupEnv); err != nil {
-		log.Fatalf("config environment: %v", err)
+		fatalf("config environment: %v", err)
 	}
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
@@ -276,7 +371,8 @@ func serve(args []string) {
 	listen := fs.String("listen", serveConfig.Listen,
 		"listen address; anything other than loopback requires accounts (nodevas user add)")
 	hostname := fs.String("hostname", serveConfig.Hostname,
-		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy)")
+		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy); "+
+			"a name other than this machine's makes it a networked hub, which requires accounts")
 	behindProxy := fs.Bool("behind-proxy", serveConfig.BehindProxy,
 		"trust X-Forwarded-Proto from a terminating reverse proxy")
 	trustedProxy := fs.String("trusted-proxy", serveConfig.TrustedProxy,
@@ -287,6 +383,9 @@ func serve(args []string) {
 		"serve a networked listener over plain HTTP (passwords and session cookies travel in the clear)")
 	maxActiveUsers := fs.Int("max-active-users", serveConfig.MaxActiveUsers,
 		"how many distinct accounts may be signed in at once; 0 means no limit. Counts people, not devices: one person on a phone and a laptop is one")
+	stopOnStdinClose := fs.Bool("stop-on-stdin-close", false,
+		"shut down gracefully when stdin reaches end of file: how the desktop app and nodevas-dev stop serve "+
+			"(Windows has no SIGTERM); the local runner then gets no terminal")
 	stepUpMinutes := fs.Int("step-up-minutes", stepUpMinutesDefault(),
 		"how long a step-up (a fresh passcode before remote dispatch) lasts, in minutes; env NODEVAS_STEP_UP_MINUTES")
 	smtpHost := fs.String("smtp-host", serveConfig.SMTP.Host, "SMTP host for one-time passcodes")
@@ -353,6 +452,7 @@ func serve(args []string) {
 	abuseMaxConcurrentHeavy := fs.Int("abuse-max-concurrent-heavy", serveConfig.Abuse.MaxConcurrentHeavy, "max concurrent heavy operations")
 	abuseMaxConcurrentDOCX := fs.Int("abuse-max-concurrent-docx", serveConfig.Abuse.MaxConcurrentDOCX, "max concurrent DOCX operations")
 	abuseMaxConcurrentRemote := fs.Int("abuse-max-concurrent-remote", serveConfig.Abuse.MaxConcurrentRemote, "max concurrent remote sync operations")
+	wsLimits := wsLimitFlags(fs, os.LookupEnv)
 	_ = fs.Parse(args)
 
 	// The flag values now represent the complete precedence chain:
@@ -413,48 +513,65 @@ func serve(args []string) {
 	serveConfig.Abuse.MaxConcurrentDOCX = *abuseMaxConcurrentDOCX
 	serveConfig.Abuse.MaxConcurrentRemote = *abuseMaxConcurrentRemote
 	if err := serveConfig.Validate(); err != nil {
-		log.Fatalf("config: %v", err)
+		fatalf("config: %v", err)
 	}
+
+	hostNames := hostList(*hostname)
+	remote := isRemoteDeployment(*listen, *behindProxy, hostNames, serveConfig.Access.Enabled())
 
 	// Logging is set up before anything else can fail, so a startup error is
 	// itself a structured record rather than the one line that escapes the
-	// pipeline.
-	logger, err := logging.Setup(os.Stderr, logging.Config{
+	// pipeline. A standalone hub's log also goes to a file under the catalog
+	// root, with the runtime's crash output (serve_console.go).
+	standalone := !remote
+	logs := openServeLogs(os.Stderr, standalone)
+	defer logs.close()
+	logger, err := logging.Setup(logs.writer, logging.Config{
 		Level:   *logLevel,
 		Format:  *logFormat,
 		Service: "nodevas",
 	})
 	if err != nil {
-		log.Fatalf("logging: %v", err)
+		fatalf("logging: %v", err)
+	}
+	if logs.path != "" {
+		log.Printf("serve log: %s", logs.path)
 	}
 
 	root, err := filepath.Abs(*projectFlag)
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if _, err := os.Stat(root); err != nil {
-		log.Fatalf("project dir: %v", err)
+		fatalf("project dir: %v", err)
 	}
-	hostNames := hostList(*hostname)
 	if err := validateServeFlags(
-		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext,
+		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext, serveConfig.Access.Enabled(),
 	); err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
-	remote := isRemoteDeployment(*listen, *behindProxy)
 	useTLS := *certFile != ""
 	proxyOnlyTransport := *behindProxy && isLoopbackHost(*listen)
 	runnerMode, runnerNote, err := planLocalRunner(*withRunner, *noRunner, repos, remote, useTLS, serveConfig.Access.Enabled())
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if runnerNote != "" {
 		log.Print(runnerNote)
 	}
 
 	hub, pm, database := bootstrapWorkspace(root)
+	hub.SetConnectionLimits(wsLimits())
+	wsLimitsInForce := hub.ConnectionLimits()
+	slog.Info("websocket limits", slog.Int("total", wsLimitsInForce.Total),
+		slog.Int("per_account", wsLimitsInForce.PerAccount), slog.Int("per_ip", wsLimitsInForce.PerIP))
 	defer pm.Close()
 	defer database.Close()
+	// Refused even when --behind-proxy is off: a list that does not parse is
+	// a mistake in the command line or the config, whichever flag uses it.
+	if err := checkTrustedProxies(*trustedProxy); err != nil {
+		fatalf("trusted proxy: %v", err)
+	}
 
 	distFS, ok := web.Dist()
 	if !ok {
@@ -515,7 +632,7 @@ func serve(args []string) {
 			AUD:        serveConfig.Access.AUD,
 		})
 		if err != nil {
-			log.Fatalf("access: %v", err)
+			fatalf("access: %v", err)
 		}
 		srv.UseAccess(verifier, serveConfig.Access.Required)
 		slog.Info("cloudflare access",
@@ -527,7 +644,7 @@ func serve(args []string) {
 	srv.UseRunnersDB(database)
 	srv.UseMembersDB(database)
 	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
-		log.Fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
+		fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}
 	srv.SetStepUpWindow(time.Duration(*stepUpMinutes) * time.Minute)
 	// Model calls can run on each person's own runner, with a key only
@@ -539,7 +656,7 @@ func serve(args []string) {
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler, runnerLLM,
 		copilotFollowups(srv, pm))
 	if err != nil {
-		log.Fatalf("copilot: %v", err)
+		fatalf("copilot: %v", err)
 	}
 	observeCopilotFollowups(srv, copilotService)
 	srv.UseCopilot(copilotapi.New(copilotService))
@@ -547,34 +664,34 @@ func serve(args []string) {
 	// deployment; this catches the rest, and keeps the guarantee in the server
 	// package rather than only in this one call site.
 	if err := srv.UseListenAddress(*listen, *port, hostNames); err != nil {
-		log.Fatalf("listen address: %v", err)
+		fatalf("listen address: %v", err)
 	}
 	// The header only means anything when a proxy in front of us rewrites it;
 	// believed by default it is a free HTTPS claim for any plaintext client.
 	if *behindProxy {
 		if err := auth.SetTrustedProxyCIDRs(strings.Split(*trustedProxy, ",")); err != nil {
-			log.Fatalf("trusted proxy: %v", err)
+			fatalf("trusted proxy: %v", err)
 		}
 	} else {
 		auth.TrustForwardedProto(false)
 	}
 
 	if remote {
-		// Share the handle rather than opening a second one: SQLite admits one
-		// writer, and two pools would queue against each other for it.
+		// Share the handle rather than opening a second one: a second handle
+		// is a second writer, and the account rules rely on there being one.
 		users := auth.NewUserStoreDB(database)
 		// Authenticator secrets are sealed with the same machine key as every
 		// other stored secret (NODEVAS_SECRET_KEY overrides it).
 		users.UseSecretKey(filepath.Join(pm.CatalogRoot(), "secrets", "master.key"))
 		if err := users.EnsureAdmin(); err != nil {
-			log.Fatalf("accounts: %v", err)
+			fatalf("accounts: %v", err)
 		}
 		// No request is behind startup or the `nodevas user` commands, so the
 		// account queries below get a background context: there is nobody who
 		// could disconnect and nothing that should cancel them.
 		accountCtx := context.Background()
 		if users.Count(accountCtx) == 0 {
-			log.Fatalf(
+			fatalf(
 				"refusing to serve %s with no accounts: create one first with "+
 					"`nodevas user add --project %q --user <name>`", *listen, root)
 		}
@@ -597,7 +714,7 @@ func serve(args []string) {
 			// in the process list of every other user on the machine.
 			smtpPassword, err := secretEnvironment("NODEVAS_SMTP_PASSWORD")
 			if err != nil {
-				log.Fatalf("smtp password: %v", err)
+				fatalf("smtp password: %v", err)
 			}
 			sender, err := mail.New(mail.Config{
 				Host:     *smtpHost,
@@ -608,7 +725,7 @@ func serve(args []string) {
 				Security: *smtpSecurity,
 			})
 			if err != nil {
-				log.Fatalf("smtp: %v", err)
+				fatalf("smtp: %v", err)
 			}
 			srv.UseMailer(sender)
 			log.Printf("passcode mail via %s:%d as %s", *smtpHost, *smtpPort, *smtpFrom)
@@ -625,7 +742,7 @@ func serve(args []string) {
 	localRunnerConfig := ""
 	runnerFailed := func(err error) {
 		if runnerMode == explicitLocalRunner {
-			log.Fatalf("local runner: %v", err)
+			fatalf("local runner: %v", err)
 		}
 		log.Printf("WARNING: local runner not started: %v; the hub serves without it "+
 			"(--no-runner silences this, --with-runner makes it fatal)", err)
@@ -670,13 +787,42 @@ func serve(args []string) {
 		log.Print("WARNING: serving over plain HTTP; passwords and session cookies are visible on the network")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// A standalone hub on a terminal asks for a second Ctrl+C: that terminal
+	// is also where its runner's runs are accepted.
+	confirmStop := standalone && isTerminal(os.Stdin)
+	ctx, stop := serveContext(confirmStop, os.Stderr)
 	defer stop()
+	runnerStdin := os.Stdin
+	if *stopOnStdinClose {
+		// The launcher holds the other end; closing it (or dying) is the stop.
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			log.Print("stdin closed; shutting down")
+			stop()
+		}()
+		if devNull, err := os.Open(os.DevNull); err == nil {
+			runnerStdin = devNull
+		}
+	}
+	// An embedded PostgreSQL that keeps dying past its restart budget ends
+	// serve: nothing works without it, and exiting lets a supervisor (the
+	// desktop app, a service manager) start everything again.
+	var databaseFailed atomic.Bool
+	if exited := database.Exited(); exited != nil {
+		go func() {
+			if err, ok := <-exited; ok {
+				slog.Error("the embedded PostgreSQL stopped and could not be restarted; shutting down",
+					slog.String("event.code", "db.embedded_gave_up"), logging.Err(err))
+				databaseFailed.Store(true)
+				stop()
+			}
+		}()
+	}
 	// Bound before serving, so a local runner started next finds the hub
 	// already listening.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("serve: %v", err)
+		fatalf("serve: %v", err)
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -688,18 +834,35 @@ func serve(args []string) {
 	}()
 	stopRunner := func() {}
 	if localRunnerConfig != "" {
-		if stop, err := startLocalRunner(localRunnerConfig, os.Stdin, os.Stderr); err != nil {
+		if stop, err := startLocalRunner(localRunnerConfig, runnerStdin, os.Stderr); err != nil {
 			runnerFailed(err)
 		} else {
 			stopRunner = stop
 		}
+	}
+	// A click in the console must not pause the runner's prompt. Only once
+	// the hub is listening and its runner is up, so a startup failure leaves
+	// the console as it found it; from here on every exit puts it back,
+	// fatal (which skips deferred calls) included.
+	restoreConsole := func() {}
+	if standalone && localRunnerConfig != "" {
+		restoreConsole = disableQuickEdit()
+	}
+	defer func() { restoreConsole() }()
+	fatal := func(format string, args ...any) {
+		restoreConsole()
+		runAtFatal()
+		logs.fatal(format, args...)
+	}
+	if standalone {
+		logs.consoleNonBlocking()
 	}
 
 	select {
 	case err := <-errCh:
 		stopRunner()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve: %v", err)
+			fatal("serve: %v", err)
 		}
 	case <-ctx.Done():
 		log.Print("shutting down")
@@ -715,7 +878,28 @@ func serve(args []string) {
 			log.Printf("final backup: %v", err)
 		}
 		backupCancel()
+		if databaseFailed.Load() {
+			exit(1)
+		}
 	}
+}
+
+// checkTrustedProxies validates a --trusted-proxy list without applying it:
+// each entry an IP address or a CIDR prefix.
+func checkTrustedProxies(value string) error {
+	for _, entry := range strings.Split(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(entry); err == nil {
+			continue
+		}
+		if _, err := netip.ParseAddr(entry); err != nil {
+			return fmt.Errorf("invalid trusted proxy address %q", entry)
+		}
+	}
+	return nil
 }
 
 // newCopilotService wires the voice copilot from its configuration.
@@ -798,28 +982,41 @@ func newCopilotService(
 	return service, nil
 }
 
-const (
-	requestReadTimeout   = 60 * time.Second
-	responseWriteTimeout = 10 * time.Minute
-)
+// requestReadTimeout is a variable so a test can wait out a short one.
+var requestReadTimeout = 60 * time.Second
+
+const responseWriteTimeout = 10 * time.Minute
 
 // protectHTTPTransport places absolute per-request body and response
 // deadlines around ordinary HTTP traffic. WebSockets get their own frame,
 // rate, ping, and write deadlines after upgrade, so they are excluded here.
+//
+// The read deadline is for a request body only. Without one there is nothing
+// left to read (ReadHeaderTimeout covered the headers, IdleTimeout covers the
+// wait for the next request), and Go's server is already reading the
+// connection in the background to notice the client leaving: a deadline
+// there cancels the request when it passes, so a download slower than it
+// would stop half-way. With a body, the server clears the deadline itself
+// once the body has been read.
 func protectHTTPTransport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/ws" {
 			next.ServeHTTP(writer, request)
 			return
 		}
+		hasBody := request.Body != nil && request.Body != http.NoBody
 		if auth.SignInPaths[request.URL.Path] && request.Body != nil {
 			request.Body = http.MaxBytesReader(writer, request.Body, auth.MaxLoginBodyBytes)
 		}
 		controller := http.NewResponseController(writer)
-		_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		if hasBody {
+			_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		}
 		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		defer func() {
-			_ = controller.SetReadDeadline(time.Time{})
+			if hasBody {
+				_ = controller.SetReadDeadline(time.Time{})
+			}
 			_ = controller.SetWriteDeadline(time.Time{})
 		}()
 		next.ServeHTTP(writer, request)

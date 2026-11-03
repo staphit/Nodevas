@@ -1,5 +1,5 @@
 /**
- * The connect-a-workspace panel [B-06].
+ * The connect-a-workspace panel.
  *
  * Picking a workspace means picking a directory, so the panel carries its own
  * server-side filesystem browser: the browser only ever lists directories, and

@@ -132,7 +132,7 @@ func registerPrompt(server *mcp.Server, client *Client) {
 const workTheQueuePrompt = `Work the ready queue:
 1. get_ready_tasks; stop if empty.
 2. claim_task; if already claimed, try another ready task.
-3. get_node; read all pages before working or replacing the file.
+3. get_node; read all pages, and the reference notes it lists, before working or replacing the file.
 4. Do the work; set_node_status to done, failed or skipped with an accurate note.
 5. release_task if unfinished.
 When nothing is ready, report waiting and busy counts. If tasks still wait, people are the blockers: name them. Do not start blocked work or invent tasks. Ask for clarification when the ticket is insufficient.`

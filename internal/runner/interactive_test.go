@@ -613,3 +613,22 @@ func TestInteractiveDeclinedWithoutInteractiveAdapter(t *testing.T) {
 		t.Fatalf("decline = %q", decline.Reason)
 	}
 }
+
+// An interactive run never relays a permission prompt: the person at the
+// terminal answers it. Its start line does not say otherwise, whatever the
+// owner's permissionRelay.
+func TestInteractiveRunNeverSaysRelayed(t *testing.T) {
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.Config.PermissionRelay = true
+		c.Accepter = typingAccepter{typing: true, acceptFunc: func(context.Context, Offer) (bool, string) { return true, "" }}
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-int-relay"))
+	st := waitStarted(t, started)
+	eventually(t, "start line", func() bool { return hubHasEvent(env, "run-int-relay", "interactively") })
+	if hubHasEvent(env, "run-int-relay", "relayed") {
+		t.Error("an interactive run's log says its prompts are relayed")
+	}
+	st.term.exit <- 0
+	env.hub.wait("run-int-relay", runnerwire.TypeFinish)
+}

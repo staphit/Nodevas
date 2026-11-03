@@ -23,6 +23,8 @@ var actors = map[string]identity.Actor{
 	"bob-agent":   {ID: "bob", Name: "Bob", Role: identity.RoleMember, Agent: identity.AgentWorker},
 	"carol":       {ID: "carol", Name: "Carol", Role: identity.RoleMember},
 	"root":        {ID: "root", Name: "Root", Role: identity.RoleAdmin},
+	// local is the one person of a server without accounts.
+	"local": identity.Local,
 }
 
 func testRouter(t *testing.T) *gin.Engine {

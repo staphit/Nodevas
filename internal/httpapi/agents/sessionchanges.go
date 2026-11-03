@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"nodevas/internal/agents"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -62,24 +62,24 @@ func (a *API) postSessionChanges(c *gin.Context) {
 	if !httpx.DecodeJSONLimit(c, &body, runnerwire.MaxChangesMessageBytes) {
 		return
 	}
-	invalid := func(msg string) {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New(msg), nil)
+	invalid := func(english, chinese string) {
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf(english, chinese), nil)
 	}
 	if sessionID == "" || len(sessionID) > 256 {
-		invalid("session id is missing or too long")
+		invalid("session id is missing or too long", "工作階段代號缺少或太長")
 		return
 	}
 	if len(body.Files) == 0 && body.Snapshot == nil {
-		invalid("body must carry files or a snapshot")
+		invalid("body must carry files or a snapshot", "內容須包含檔案或快照")
 		return
 	}
 	if len(body.Files) > runnerwire.MaxSessionFiles {
-		invalid("too many files")
+		invalid("too many files", "檔案太多")
 		return
 	}
 	for _, f := range body.Files {
 		if !validChangedPath(f) {
-			invalid("a file path is empty, too long or not text")
+			invalid("a file path is empty, too long or not text", "檔案路徑是空的、太長或不是文字")
 			return
 		}
 	}
@@ -94,7 +94,7 @@ func (a *API) postSessionChanges(c *gin.Context) {
 	}
 	name := a.projectName(c.Request)
 	if name == "" {
-		invalid("no project selected")
+		invalid("no project selected", "沒有選擇專案")
 		return
 	}
 	projectKey := a.projectKey(c.Request)
@@ -102,7 +102,7 @@ func (a *API) postSessionChanges(c *gin.Context) {
 	claims, _ := a.liveClaimsAndUsers(c.Request)
 	session, nodeID, found := a.hub.ClaimedNode(projectKey, sessionID, claims)
 	if !found {
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such session; heartbeat first"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such session; heartbeat first", "沒有這個工作階段；請先送出心跳"), nil)
 		return
 	}
 	// A session ID is bound to the actor that registered it, as in Touch.
@@ -130,12 +130,12 @@ func (a *API) getNodeSessionChanges(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, http.StatusBadRequest, errors.New("invalid node id"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	name := a.projectName(c.Request)
 	if name == "" {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return
 	}
 	changes, err := a.hub.NodeSessionChanges(c.Request.Context(), name, id)

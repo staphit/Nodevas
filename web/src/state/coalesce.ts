@@ -1,5 +1,5 @@
 /**
- * Read coalescing [A-05].
+ * Read coalescing.
  *
  * One logical change fans out into several triggers: the mutation refreshes
  * eagerly, the server broadcasts the same change back over the WebSocket, and

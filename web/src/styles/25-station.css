@@ -21,7 +21,7 @@
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -43,7 +43,7 @@
   border-radius: 9px;
   background: var(--st-ready-bg);
   color: var(--st-ready-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
@@ -55,18 +55,54 @@
   color: var(--text-2);
 }
 
-/* Roster | live view and timeline | waiting and the agent panel. */
+/* The header with its one emergency button; then waiting, in progress and
+   the last hour | today, runners and the agent messages. */
 .station {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  /* The one scroll container. Positioned, so the office's absolutely placed
+     art scrolls inside it instead of hanging out into .main (a scroller too,
+     through its overflow-x) and scrolling that as well. Its height comes from
+     .main, never from its content, so it can be the side column's yardstick. */
+  position: relative;
+  container-type: size;
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) minmax(320px, 380px);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 12px 16px;
+  padding: 12px 16px 16px;
   background: var(--bg);
   align-items: start;
+  /* Rows take their content's height; the space left stays at the end. */
+  align-content: start;
+}
+.station-head,
+.station-report,
+.station-center {
+  grid-column: 1;
+}
+.station-report:empty {
+  display: none;
+}
+.station-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+.station-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: calc(18px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text);
+}
+.station-head-stop {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
 }
 .station-center,
 .station-side {
@@ -75,10 +111,71 @@
   gap: 12px;
   min-width: 0;
 }
+/* Level with the header and exactly as tall as Station's content box
+   (100cqh), so the column fits the window from the top and stays put while
+   the rest scrolls. 100vh ignored the top bar and the header above it: the
+   column scrolled on its own and the agent chat's composer sat under the
+   bottom edge. The open chat is what gives up height; the column itself
+   scrolls only when even that is not enough. */
 .station-side {
+  grid-column: 2;
+  grid-row: 1 / span 3;
   position: sticky;
   top: 0;
-  max-height: calc(100vh - 80px);
+  max-height: 100cqh;
+  overflow-y: auto;
+}
+.station-side > .station-panel {
+  flex: 0 0 auto;
+}
+/* With the chat open the column is exactly Station's height, so the chat can
+   grow into whatever the cards above leave. It never shrinks below its own
+   sections: shrinking them together cut the connect intro and the message
+   list into slivers that each scrolled. When even that does not fit, the
+   column scrolls, once. */
+.station-side:has(> .station-network.is-open) {
+  height: 100cqh;
+}
+.station-side > .station-network.is-open,
+.station-side > .station-network.is-open > .agent-panel.is-docked {
+  flex: 1 0 auto;
+}
+/* Taller than Station even so (StationSide measures it): pinned, the column
+   would scroll on its own right beside Station's scrollbar. It lets go
+   instead and scrolls with the rest, so Station keeps the one scrollbar. */
+.station-side.is-overflowing,
+.station-side.is-overflowing:has(> .station-network.is-open) {
+  position: static;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+.agent-panel.is-docked > * {
+  flex-shrink: 0;
+}
+/* Nobody connected yet: the intro is read once, top to bottom. */
+.agent-panel.is-docked > .agent-roster-section.is-intro {
+  max-height: none;
+  overflow: visible;
+}
+/* Room for a few messages; the one line that says there are none needs no
+   more than itself. */
+.agent-panel.is-docked > .agent-messages-list {
+  flex: 1 0 140px;
+}
+.agent-panel.is-docked > .agent-messages-list:has(> .copilot-empty) {
+  flex-basis: auto;
+}
+/* A narrow column at large text: the controls wrap, the title and the online
+   count stay whole. */
+.agent-panel.is-docked .copilot-header-row {
+  flex-wrap: wrap;
+}
+.agent-panel.is-docked .copilot-heading {
+  white-space: nowrap;
+}
+.agent-panel.is-docked .copilot-model {
+  flex: 1 0 auto;
 }
 
 .station-panel {
@@ -97,12 +194,12 @@
 }
 .station-panel-head h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text);
 }
 .station-panel-meta {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .station-count {
@@ -111,26 +208,22 @@
   border-radius: 10px;
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
 }
 .station-empty {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text-2);
   line-height: 1.5;
 }
 
-/* Roster */
-.station-roster {
-  position: sticky;
-  top: 0;
-}
+/* Roster, unfolded from the Today card. */
 .station-roster-list {
   list-style: none;
-  margin: 0;
+  margin: 4px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -167,7 +260,7 @@
   justify-content: center;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   border: 2px solid var(--border);
 }
@@ -181,6 +274,9 @@
 }
 .station-actor.tone-bad .station-avatar {
   border-color: var(--st-failed-fg);
+}
+.station-actor.tone-done .station-avatar {
+  border-color: var(--st-done-fg);
 }
 .station-avatar.agent-claude {
   background: #f6e6dc;
@@ -209,12 +305,12 @@
   min-width: 0;
 }
 .station-actor-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
 }
 .station-actor-line,
 .station-actor-room {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -228,36 +324,6 @@
   color: var(--st-failed-fg);
   font-weight: 600;
 }
-.station-roster-foot {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-/* Live view: the game stage, sized as a card rather than a pane. */
-.station .lane-wrap.game-stage.station-live {
-  height: clamp(420px, 58vh, 760px);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.station-live-hint {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.station-live-loading {
-  height: clamp(420px, 58vh, 760px);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-2);
-}
-
 /* Who worked on what */
 .station-legend {
   display: flex;
@@ -266,7 +332,7 @@
   list-style: none;
   margin: 0 0 0 auto;
   padding: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .station-legend li {
@@ -319,7 +385,7 @@
   border-top: 1px solid var(--border);
 }
 .station-lane-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
@@ -340,7 +406,7 @@
   border-radius: 4px;
   color: #fff;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   line-height: 16px;
   text-align: left;
@@ -373,37 +439,416 @@
 .station-axis-ticks {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--text-2);
   font-family: var(--mono);
 }
 
 /* Waiting on you */
-.station-waiting-list {
+/* A waiting tile says what it waits for in up to three lines (a question
+   is worth reading before answering it), its buttons at the bottom. */
+.station-waiting-item .station-tile-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.station-waiting-item .col-card-head {
+  align-items: flex-start;
+}
+.station-waiting-item .col-card-head .station-dot {
+  margin-top: 4px;
+}
+.station-waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+/* Something waits: the card says so before its rows are read. */
+.station-waiting.is-attention {
+  border-color: var(--st-ready-fg);
+  box-shadow: inset 3px 0 0 var(--st-ready-fg);
+}
+.station .ap-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.station .ap-btn.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, var(--text));
+}
+
+/* A fold: a line that opens what is under it. */
+.station-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.station-fold:hover {
+  color: var(--text);
+}
+.station-fold.is-heading {
+  margin: 0;
+  color: var(--text);
+  font-size: calc(14px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.station-head-end {
+  margin-left: auto;
+}
+
+/* The war room section: the room, then tiles for what it does not draw. */
+.station-warroom-loading {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.station-warroom-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.station-warroom-extras:empty {
+  display: none;
+}
+.station-warroom-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Tiles: Station's items as small cards, shaped like the board's node cards,
+   as many to a row as fit. A tile never stretches across a wide window. */
+.station-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.station-tile {
+  display: flex;
+  min-width: 0;
+  max-width: 360px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--st-progress-fg);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: calc(13px * var(--font-scale, 1));
+  color: var(--text);
+}
+.station-tile.dot-queued,
+.station-tile.dot-offered,
+.station-tile.dot-paused,
+.station-tile.dot-waiting {
+  border-top-color: var(--st-ready-fg);
+}
+.station-tile.dot-failed {
+  border-top-color: var(--st-failed-fg);
+}
+.station-tile.dot-succeeded {
+  border-top-color: var(--st-done-fg);
+}
+.station-tile.dot-cancelled,
+.station-tile.dot-declined,
+.station-tile.dot-off {
+  border-top-color: var(--st-locked-fg);
+}
+.station-tiles.is-muted .station-tile {
+  background: var(--surface-2);
+}
+.station-tile .col-card-head {
+  min-height: 28px;
+}
+.station-tile-title {
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.station-tile-title.is-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.station-tile-title.is-link:hover {
+  text-decoration: underline;
+}
+.station-tile-meta {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.station-tile-line {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-progress-bar {
+  width: min(220px, 100%);
+  height: 4px;
+  accent-color: var(--st-progress-fg);
+}
+.station-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-progress-fg);
+}
+.station-dot.status-queued,
+.station-dot.status-offered,
+.station-dot.status-paused,
+.station-dot.status-waiting {
+  background: var(--st-ready-fg);
+}
+.station-dot.status-failed {
+  background: var(--st-failed-fg);
+}
+.station-dot.status-succeeded {
+  background: var(--st-done-fg);
+}
+.station-dot.status-cancelled,
+.station-dot.status-declined,
+.station-dot.is-off {
+  background: var(--st-locked-fg);
+}
+.station-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0 4px;
+  font-size: calc(13px * var(--font-scale, 1));
+  color: var(--text);
+}
+.station-cta p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* The ⋯ and view menus (StationMenu). */
+.station-menu {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.station-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.station-menu-trigger.is-icon {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+}
+.station-menu-trigger.is-text {
+  padding: 2px 8px;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.station-menu-trigger:hover,
+.station-menu-trigger[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.station-menu-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.station-menu-panel {
+  z-index: var(--z-popover, 60);
+  display: flex;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.station-menu-head {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.station-menu-head span {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+.station-menu-item {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.station-menu-item > span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.station-menu-item:hover:not(:disabled),
+.station-menu-item:focus-visible {
+  background: var(--hover);
+}
+.station-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.station-menu-item.is-danger {
+  color: var(--st-failed-fg);
+}
+/* A finger's 44px on a touch screen and on a phone: the row's ⋯ is a glyph
+   with no label to widen it, and the menu's rows are 32px for a mouse. */
+@media (pointer: coarse), (max-width: 720px) {
+  .station-menu-trigger.is-icon {
+    width: 44px;
+    min-height: 44px;
+  }
+  .station-menu-head {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.station-menu-head span {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+.station-menu-item {
+    min-height: 44px;
+  }
+}
+.station-menu-check {
+  width: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.station-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* Side column: today, runners, agent messages. */
+.station-today-spend {
+  margin: 0 0 6px;
+  font-size: calc(26px * var(--font-scale, 1));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.station-budget-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  accent-color: var(--accent);
+}
+.station-today .station-panel-meta {
+  margin: 4px 0 0;
+}
+.station-runner-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.station-waiting-item {
+.station-runner-list li {
   display: flex;
-  gap: 8px;
   align-items: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--text);
+  gap: 8px;
+  min-height: 28px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
-.station-waiting-text {
+.station-runner-name {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.station-network-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* At large text the summary goes under the name, not the name over two
+     lines. */
+  flex-wrap: wrap;
+}
+.station-network-name {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  font-size: calc(14px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.station-network.is-open {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  line-height: 1.4;
-}
-.station-waiting-sub {
-  font-size: 12px;
-  color: var(--text-2);
+  gap: 8px;
 }
 /* The agent panel, docked: in the column instead of over the board. */
 .agent-panel.is-docked {
@@ -426,27 +871,52 @@
   .app.mode-station .copilot-fab {
     right: calc(min(380px, 30vw) + 36px);
   }
+  /* An open document covers that column; the button goes back to the corner
+     its footer keeps clear (15-copilot.css). */
+  .app.mode-station:has(.drawer:not(.collapsed-rail)) .copilot-fab {
+    right: max(18px, env(safe-area-inset-right, 0px));
+  }
 }
 
-/* Narrower: the side column moves under the live view. */
+/* Narrower, the button stays in the corner, over the side column's end (the
+   agent chat's Send) or, in one column, the last card's. Station's end keeps
+   the button's height (48px, its 18px inset and some air) clear, so the last
+   row scrolls up past it; the side column, sized by the content box, ends
+   above it too. */
 @media (max-width: 1180px) {
-  .station {
-    grid-template-columns: 230px minmax(0, 1fr);
-  }
-  .station-side {
-    grid-column: 1 / -1;
-    position: static;
-    max-height: none;
+  .app.mode-station:has(> .copilot-fab) .station {
+    padding-bottom: calc(48px + 18px + 12px);
   }
 }
-/* Phone: one column. */
-@media (max-width: 760px) {
+
+/* Narrower: one column, the side cards under the main ones. */
+@media (max-width: 900px) {
   .station {
     grid-template-columns: minmax(0, 1fr);
-    padding: 8px;
   }
-  .station-roster {
+  .station-head,
+  .station-report,
+  .station-center,
+  .station-side {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .station-side,
+  .station-side:has(> .station-network.is-open) {
     position: static;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+  /* Nothing to fit under in one column: the chat keeps its full height. */
+  .station-side > .station-network.is-open > .agent-panel.is-docked {
+    min-height: 420px;
+  }
+}
+/* Phone: tighter. */
+@media (max-width: 760px) {
+  .station {
+    padding: 8px;
   }
   .station-lane {
     grid-template-columns: 72px minmax(0, 1fr);
@@ -490,25 +960,6 @@
   }
 }
 
-/* Settings → Appearance → View packs */
-.view-pack-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-}
-.view-pack-name {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.view-pack-meta {
-  font-size: 12px;
-  color: var(--text-2);
-}
-
 /* The node panel's Autopilot pill, in its top row. */
 .autopilot-pill {
   flex: 0 0 auto;
@@ -523,7 +974,7 @@
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -575,7 +1026,7 @@
 .settings-page-group h2 {
   margin: 0 0 4px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -601,7 +1052,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
 }
 .settings-page-nav button:hover {
@@ -632,7 +1083,7 @@
 }
 .settings-page-pane > h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 /* Budget and routing pad themselves for a section of a dialog; as parts of
    their own the pane's padding is enough. */
@@ -642,7 +1093,7 @@
 }
 /* A pane of the page's own reads like the dialogs beside it (.settings-body). */
 .settings-page-pane > .settings-section {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 /* A dialog drawn inline keeps its own look (.confirm-dialog) and padding. */
 .settings-page-pane.confirm-dialog {
@@ -675,25 +1126,18 @@
   color: var(--text-2);
 }
 
-/* Control: every run under way, its autopilot, and the emergency stop. */
-.station-control {
-  container-type: inline-size;
-}
+/* Control: the active count, the pause-all report and its dialog. */
 .station-control-count {
   min-width: 20px;
   padding: 0 6px;
   border-radius: 10px;
   background: var(--st-progress-bg, var(--surface-2));
   color: var(--st-progress-fg, var(--text));
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-.station-control-stop {
-  margin-left: auto;
-  font-weight: 600;
 }
 .station-control-result {
   display: flex;
@@ -703,118 +1147,15 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-control-result .run-link-button {
   margin-left: auto;
 }
-/* The table never widens the panel: a wide row scrolls inside it. */
-.station-control-scroll {
-  max-width: 100%;
-  overflow-x: auto;
-}
-.station-control-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  color: var(--text);
-}
-.station-control-table th {
-  padding: 4px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-2);
-  text-align: left;
-  white-space: nowrap;
-}
-.station-control-table td {
-  padding: 6px;
-  border-top: 1px solid var(--border);
-  vertical-align: middle;
-}
-/* Runner and status stay on one line; the node and agent may wrap. */
-.station-control-row td:nth-child(4),
-.station-control-row td:nth-child(5) {
-  white-space: nowrap;
-}
-.station-control-row.status-cancelled td,
-.station-control-row.status-declined td {
-  color: var(--text-2);
-}
-.station-control-node {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-.station-control-num {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.station-control-note {
-  display: block;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.station-control-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: flex-end;
-  align-items: center;
-}
-.station-control-actions-cell .station-control-actions .ap-btn {
-  white-space: nowrap;
-}
-.station-control-toggle-row td {
-  padding-top: 10px;
-}
-.station-control-sub {
-  margin: 14px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-.station-control-pilots {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.station-control-pilot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto;
-  gap: 6px 10px;
-  align-items: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-}
-.station-control-pilot > .autopilot-error {
-  grid-column: 1 / -1;
-}
-.station-control-pilot-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.station-control-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.station-control-progress progress {
-  width: 100%;
-  height: 6px;
-  accent-color: var(--st-progress-fg);
-}
 .station-control-dialog-body {
   padding: 0 18px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-control-dialog-body ul {
@@ -832,64 +1173,70 @@
   margin: 8px 0 0;
 }
 
-/* Narrow (a phone, or a squeezed centre column): each run is a card of
-   labelled lines instead of a row of nine columns. */
-@container (max-width: 900px) {
-  .station-control-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-  .station-control-table,
-  .station-control-table tbody,
-  .station-control-table tr,
-  .station-control-table td {
-    display: block;
-    width: auto;
-  }
-  .station-control-table tr {
-    padding: 6px 0;
-    border-top: 1px solid var(--border);
-  }
-  .station-control-table td {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 2px 0;
-    border-top: 0;
-    min-width: 0;
-  }
-  .station-control-table td[data-label]::before {
-    content: attr(data-label);
-    flex: 0 0 auto;
-    font-size: 11px;
-    color: var(--text-2);
-  }
-  .station-control-table td > * {
-    min-width: 0;
-  }
-  .station-control-node {
-    max-width: 100%;
-  }
-  .station-control-actions {
-    justify-content: flex-start;
-    padding-top: 4px;
-  }
-  .station-control-table td.station-control-actions-cell {
-    display: block;
-    width: auto;
-  }
-  .station-control-toggle-row {
-    border-top: 0;
-  }
-  .station-control-pilot {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .station-control-pilot .station-control-actions {
-    justify-content: flex-start;
-  }
+/* The dialogs a war-room click or a waiting item opens (GameActions). */
+.game-dialog {
+  width: min(480px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px var(--shadow);
+}
+.game-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.game-dialog-head h2 {
+  margin: 0;
+  font-size: calc(15px * var(--font-scale, 1));
+}
+.game-dialog-close {
+  border: 0;
+  background: none;
+  font-size: calc(18px * var(--font-scale, 1));
+  cursor: pointer;
+  color: var(--text-2);
+}
+.game-held-route {
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.game-held-body {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.game-dialog-error {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 45%, var(--border));
+  border-radius: 6px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  overflow-wrap: anywhere;
+}
+.game-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.game-dialog-actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.game-dialog-actions button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
 }

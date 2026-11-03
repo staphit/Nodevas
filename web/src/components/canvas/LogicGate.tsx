@@ -1,5 +1,5 @@
 /**
- * First-class logic gates on the canvas [B-06].
+ * First-class logic gates on the canvas.
  *
  * The glyph and its wiring UI. Gate semantics (what an operator means, when a
  * gate is complete) come from the domain layer.

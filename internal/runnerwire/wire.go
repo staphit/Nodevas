@@ -116,6 +116,10 @@ type Envelope struct {
 	// System One decisions; see decide.go.
 	Decide     *DecideRequest `json:"decide,omitempty"`
 	DecideDone *DecideDone    `json:"decideDone,omitempty"`
+
+	// Read-only repo browsing; see repobrowse.go.
+	Repo     *RepoRequest `json:"repo,omitempty"`
+	RepoDone *RepoDone    `json:"repoDone,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -151,6 +155,10 @@ type Info struct {
 	// to pick an agent and model per task (W7; LLMPurposeAdvisor), set with
 	// CapLLMAdvisor; nil when it has none.
 	Advisor *LLMInfo `json:"advisor,omitempty"`
+	// PermissionRelay: the owner relays headless runs' tool-permission
+	// prompts to Nodevas (runner config permissionRelay). Shown only; the
+	// owner changes it on the runner.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.
@@ -188,6 +196,9 @@ type Repo struct {
 	Path string `json:"path,omitempty"`
 	// Remote is the origin URL, when there is one.
 	Remote string `json:"remote,omitempty"`
+	// Verify says the runner has a test command for this repo. The command
+	// itself stays on the runner.
+	Verify bool `json:"verify,omitempty"`
 }
 
 // Limits on what a hello may carry, enforced by the hub.
@@ -197,6 +208,13 @@ const (
 	MaxModels     = 64
 	MaxRepos      = 256
 )
+
+// LocalRunnerName is the name `nodevas serve` registers its own local runner
+// under. It is a fixed id, not display text: clients show it in the viewer's
+// language ("this machine", 本機), and runs copy it into their runnerName, so
+// it never changes, or every existing local runner and its runs would show
+// untranslated.
+const LocalRunnerName = "this machine"
 
 // Runner is a runner as the HTTP API (GET /api/runners) returns it.
 type Runner struct {

@@ -1,0 +1,146 @@
+/**
+ * The node drawer is laid over the panes' right side, toolbars included. At
+ * 1280×800 the default 580px drawer sat on the graph toolbar's Problems and
+ * ⋯ and on the timeline toolbar's orientation switch, ? and ⋯: they could not
+ * be clicked without closing the drawer. A pane measures how far the drawer
+ * reaches into its toolbar and the toolbar keeps its controls left of it.
+ */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { act, render } from "@testing-library/react";
+import { useRef } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { drawerCover, useDrawerCover } from "./useDrawerCover";
+
+const bar = { left: 340, top: 46, right: 1280, bottom: 82 };
+
+describe("drawerCover", () => {
+  it("is how far a side drawer reaches into the toolbar", () => {
+    expect(drawerCover(bar, [{ left: 700, top: 46, right: 1280, bottom: 800 }])).toBe(580);
+  });
+
+  it("is the collapsed rail's width when only the rail is out", () => {
+    expect(drawerCover(bar, [{ left: 1250, top: 46, right: 1280, bottom: 800 }])).toBe(30);
+  });
+
+  it("is nothing when the drawer is not beside the toolbar", () => {
+    // A phone's sheet over the bottom half, below the upper pane's toolbar.
+    expect(drawerCover(bar, [{ left: 0, top: 400, right: 1280, bottom: 800 }])).toBe(0);
+    expect(drawerCover(bar, [])).toBe(0);
+  });
+
+  it("is nothing when the drawer covers the whole toolbar: no padding would bring it back", () => {
+    expect(drawerCover(bar, [{ left: 0, top: 0, right: 1280, bottom: 800 }])).toBe(0);
+  });
+});
+
+function Pane() {
+  const ref = useRef<HTMLElement>(null);
+  const cover = useDrawerCover(ref);
+  return (
+    <section ref={ref} className="lane-wrap" data-cover={cover}>
+      <div className="board-title" />
+    </section>
+  );
+}
+
+describe("useDrawerCover", () => {
+  let drawerLeft = 700;
+  beforeEach(() => {
+    drawerLeft = 700;
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.classList.contains("board-title")) return new DOMRect(340, 46, 940, 36);
+      if (this.classList.contains("drawer")) return new DOMRect(drawerLeft, 46, 1280 - drawerLeft, 754);
+      return realRect.call(this);
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.querySelectorAll("main[data-test-stage]").forEach((stage) => stage.remove());
+  });
+
+  function mount() {
+    const stage = document.createElement("main");
+    stage.className = "stage";
+    stage.dataset.testStage = "";
+    document.body.appendChild(stage);
+    const view = render(<Pane />, { container: stage });
+    const pane = () => stage.querySelector<HTMLElement>(".lane-wrap")!;
+    const openDrawer = () => {
+      const drawer = document.createElement("div");
+      drawer.className = "drawer";
+      stage.appendChild(drawer);
+      return drawer;
+    };
+    return { ...view, stage, pane, openDrawer };
+  }
+
+  it("follows the drawer opening and closing beside the pane", async () => {
+    const { pane, openDrawer, unmount } = mount();
+    expect(pane().dataset.cover).toBe("0");
+    let drawer!: HTMLElement;
+    await act(async () => {
+      drawer = openDrawer();
+    });
+    expect(pane().dataset.cover).toBe("580");
+    await act(async () => {
+      drawer.remove();
+    });
+    expect(pane().dataset.cover).toBe("0");
+    unmount();
+  });
+
+  it("measures a drawer already open when the pane mounts", () => {
+    const { container } = render(
+      <main className="stage">
+        <Pane />
+        <div className="drawer" />
+      </main>,
+    );
+    expect(container.querySelector<HTMLElement>(".lane-wrap")!.dataset.cover).toBe("580");
+  });
+});
+
+describe("toolbar beside an open drawer", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/styles/10a-canvas-tools.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+
+  it("pads the pane's toolbar by the drawer's reach on a desktop", () => {
+    const rule = /\.lane-wrap\[data-drawer-cover\]\s*>\s*\.board-title\s*\{([^}]*)\}/.exec(css);
+    expect(rule).not.toBeNull();
+    expect(rule![1]).toMatch(/padding-right:\s*calc\([^;]*var\(--drawer-cover\)/);
+  });
+
+  // Beside a 580px drawer at 1280×800 the timeline toolbar has ~320px left.
+  // Wrapping kept every control there but took 4 rows at 150% text (~200px of
+  // a 366px pane), leaving about one lane row. It stays one row and scrolls
+  // sideways instead, as the phone strip does.
+  it("stays one row and scrolls sideways rather than wrapping", () => {
+    const title = /\.lane-wrap\[data-drawer-cover\]\s*>\s*\.board-title\s*\{([^}]*)\}/.exec(css);
+    expect(title![1]).toMatch(/flex-wrap:\s*nowrap/);
+    const strip =
+      /\.lane-wrap\[data-drawer-cover\]\s*>\s*\.board-title\s*>\s*\.board-title-controls\s*\{([^}]*)\}/.exec(css);
+    expect(strip).not.toBeNull();
+    expect(strip![1]).toMatch(/display:\s*flex/);
+    expect(strip![1]).toMatch(/min-width:\s*0/);
+    expect(strip![1]).toMatch(/overflow-x:\s*auto/);
+    expect(strip![1]).toMatch(/overflow-y:\s*hidden/);
+  });
+
+  // The strip keeps its controls on one line with white-space: nowrap on each.
+  // A ⋯ menu's panel sits inside its control, fixed to the window, and
+  // inherited that nowrap: beside the drawer the graph ⋯ grew to 320px in a
+  // 268px panel and the timeline ⋯ to 338px, so both scrolled sideways and cut
+  // off the Display scale hint, Reset, Auto-size and the size values. Out of
+  // the strip the panel is a menu again and wraps its sentences.
+  it("lets a menu opened from the strip wrap its text again", () => {
+    const panel = /\.board-title-controls\s+\.board-overflow-panel\s*\{([^}]*)\}/.exec(css);
+    expect(panel).not.toBeNull();
+    expect(panel![1]).toMatch(/white-space:\s*normal/);
+  });
+});

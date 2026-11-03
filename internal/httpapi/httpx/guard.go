@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // networkReach is the one thing RefuseHostPath needs to know about a project
@@ -22,7 +24,7 @@ func RefuseHostPath(c *gin.Context, reach networkReach) bool {
 		return false
 	}
 	Err(c, http.StatusForbidden,
-		errors.New("在網路模式下不接受伺服器本機路徑"))
+		locale.Errorf("paths on the server machine are not accepted in network mode", "在網路模式下不接受伺服器本機路徑"))
 	return true
 }
 

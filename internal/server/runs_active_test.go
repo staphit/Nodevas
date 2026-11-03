@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"nodevas/internal/agents"
@@ -218,6 +219,15 @@ func TestAutopilotListRoute(t *testing.T) {
 	}
 	if code := f.do(t, &f.bea, http.MethodGet, "/api/autopilot?goal=", "", nil).Code; code != http.StatusBadRequest {
 		t.Fatalf("an empty goal is still refused: %d", code)
+	}
+	// A goal that never had an autopilot is null, not a 404; an unknown id
+	// still is one.
+	if response := f.do(t, &f.bea, http.MethodGet, "/api/autopilot?goal=task-a", "", nil); response.Code != http.StatusOK ||
+		strings.TrimSpace(response.Body.String()) != "null" {
+		t.Fatalf("a goal with no autopilot: %d %s", response.Code, response.Body)
+	}
+	if code := f.do(t, &f.bea, http.MethodGet, "/api/autopilot/no-such-autopilot", "", nil).Code; code != http.StatusNotFound {
+		t.Fatalf("an unknown id: %d, want 404", code)
 	}
 	if code := f.do(t, &f.bea, http.MethodPost, "/api/autopilot/"+created.Run.ID+"/pause", "", nil).Code; code != http.StatusOK {
 		t.Fatalf("pause: %d", code)

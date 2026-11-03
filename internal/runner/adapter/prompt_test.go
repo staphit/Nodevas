@@ -68,3 +68,36 @@ func TestPromptHandoff(t *testing.T) {
 		t.Error("a plain run is told about a handoff")
 	}
 }
+
+// A planner reads the board's types and picks one per node, so a story board
+// is broken into scenes and events, and reference material into notes.
+func TestPlanPromptsChooseNodeTypes(t *testing.T) {
+	job := runnerwire.Job{NodeID: "n-1", NodeTitle: "Book one", Prompt: "Write it.", Kind: runnerwire.JobPlan}
+	for name, prompt := range map[string]string{"plan": planPrompt(job), "replan": replanPrompt(job)} {
+		for _, want := range []string{"get_graph_outline", `"scene"`, `"event"`, `"note"`, `"gate"`, `"choice"`, "non-note"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s prompt missing %q", name, want)
+			}
+		}
+		if strings.Contains(prompt, `kind "task", a short title`) {
+			t.Errorf("%s prompt still forces every node to a task", name)
+		}
+	}
+}
+
+// An implement run reads the notes its node references before writing, and a
+// planner builds its breakdown in one create_subgraph call.
+func TestPromptsMentionReferencesAndSubgraphs(t *testing.T) {
+	implement := Prompt(runnerwire.Job{NodeID: "s-1", Prompt: "Write it."}, "agent/s-1")
+	if !strings.Contains(implement, "read the reference notes it lists before writing") {
+		t.Errorf("implement prompt does not ask for the reference notes:\n%s", implement)
+	}
+	job := runnerwire.Job{NodeID: "n-1", Prompt: "Write it.", Kind: runnerwire.JobPlan}
+	for name, prompt := range map[string]string{"plan": planPrompt(job), "replan": replanPrompt(job)} {
+		for _, want := range []string{"create_subgraph", "dependsOn", "refs", "link_nodes from: that node"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s prompt missing %q", name, want)
+			}
+		}
+	}
+}

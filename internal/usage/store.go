@@ -51,6 +51,9 @@ type SessionReport struct {
 	ActorName   string
 	Agent       string
 	Models      []ModelUsage
+	// RunID ties the session to the interactive run it is the agent of, so
+	// the report counts its tokens on the run, not twice.
+	RunID string
 }
 
 // Store keeps session usage and custom prices in the workspace database.
@@ -87,13 +90,13 @@ func (s *Store) stamp() string {
 // refused rather than guessed between.
 func ValidateReport(r *SessionReport) error {
 	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.SessionID) == "" {
-		return invalidf("project and session are required")
+		return invalidf("project and session are required", "需要提供專案與工作階段")
 	}
 	if len(r.Models) == 0 {
-		return invalidf("no models reported")
+		return invalidf("no models reported", "沒有回報任何 model")
 	}
 	if len(r.Models) > MaxModelsPerReport {
-		return invalidf("at most %d models per report", MaxModelsPerReport)
+		return invalidf("at most %d models per report", "每次回報最多 %d 個 model", MaxModelsPerReport)
 	}
 	seen := make(map[string]bool, len(r.Models))
 	for i := range r.Models {
@@ -103,19 +106,19 @@ func ValidateReport(r *SessionReport) error {
 			m.Model = UnknownModel
 		}
 		if !ValidModelName(m.Model) {
-			return invalidf("a model name is too long or not text")
+			return invalidf("a model name is too long or not text", "model 名稱太長或不是文字")
 		}
 		if seen[m.Model] {
-			return invalidf("model %q is reported twice", m.Model)
+			return invalidf("model %q is reported twice", "model「%s」重複回報", m.Model)
 		}
 		seen[m.Model] = true
 		for _, n := range []int64{m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens} {
 			if n < 0 || n > MaxTokens {
-				return invalidf("token counts are between 0 and %d", MaxTokens)
+				return invalidf("token counts are between 0 and %d", "token 數須介於 0 到 %d", MaxTokens)
 			}
 		}
 		if math.IsNaN(m.CostUSD) || math.IsInf(m.CostUSD, 0) || m.CostUSD < 0 || m.CostUSD > MaxCostUSD {
-			return invalidf("costUsd is between 0 and %.0f", MaxCostUSD)
+			return invalidf("costUsd is between 0 and %.0f", "costUsd 須介於 0 到 %.0f", MaxCostUSD)
 		}
 	}
 	return nil
@@ -132,21 +135,43 @@ func (s *Store) RecordSession(ctx context.Context, r SessionReport) error {
 		for _, m := range r.Models {
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO agent_session_usage (project, session_id, model, actor_id, actor_name, session_name, agent,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd, first_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd, first_at, updated_at, run_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (project, session_id, model) DO UPDATE SET
+    run_id = CASE WHEN excluded.run_id <> '' THEN excluded.run_id ELSE agent_session_usage.run_id END,
     actor_id = excluded.actor_id, actor_name = excluded.actor_name,
     session_name = excluded.session_name, agent = excluded.agent,
     input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
     cache_read_tokens = excluded.cache_read_tokens, cache_write_tokens = excluded.cache_write_tokens,
     reported_cost_usd = excluded.reported_cost_usd, updated_at = excluded.updated_at`,
 				r.Project, r.SessionID, m.Model, r.ActorID, r.ActorName, r.SessionName, strings.ToLower(strings.TrimSpace(r.Agent)),
-				m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.CostUSD, now, now); err != nil {
+				m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.CostUSD, now, now, r.RunID); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// SessionModels is every model one session reported in project, its latest
+// totals each.
+func (s *Store) SessionModels(ctx context.Context, project, sessionID string) ([]ModelUsage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd
+  FROM agent_session_usage WHERE project = ? AND session_id = ? ORDER BY model`, project, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ModelUsage
+	for rows.Next() {
+		var m ModelUsage
+		if err := rows.Scan(&m.Model, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // CustomPrices are the owner's own prices.

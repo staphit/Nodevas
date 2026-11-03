@@ -11,10 +11,12 @@ describe("runPose", () => {
       "offline",
       "asking-user",
       "failed",
+      "limit",
       "awaiting-accept",
       "waiting-ci",
       "reviewing",
       "working",
+      "finished",
       "idle",
     ]);
   });
@@ -45,8 +47,8 @@ describe("runPose", () => {
     expect(
       runPose({ ...run, merge: { id: "m", runId: "r", headSha: "h", status: "pending", requestedBy: "", createdAt: "" } }, here),
     ).toBe("awaiting-accept");
-    // No PR URL, no CI to wait for.
-    expect(runPose({ ...run, prUrl: undefined }, here)).toBe("idle");
+    // No PR URL, no CI to wait for: it is done.
+    expect(runPose({ ...run, prUrl: undefined }, here)).toBe("finished");
   });
 
   it("fails on a failed run or a red CI, before any wait", () => {
@@ -57,7 +59,7 @@ describe("runPose", () => {
       runPose({ ...red, merge: { id: "m", runId: "r", headSha: "h", status: "pending", requestedBy: "", createdAt: "" } }, here),
     ).toBe("failed");
     // A merged or closed PR's old CI no longer counts.
-    expect(runPose({ ...red, prState: "merged" }, here)).toBe("idle");
+    expect(runPose({ ...red, prState: "merged" }, here)).toBe("finished");
   });
 
   it("raises a hand over everything but being offline", () => {
@@ -76,9 +78,19 @@ describe("runPose", () => {
     expect(runPose(makeRun({ status: "running" }), { runnerOnline: null, asking: false })).toBe("working");
   });
 
-  it("idles once finished with nothing pending", () => {
-    expect(runPose(makeRun({ status: "succeeded" }), here)).toBe("idle");
+  it("is finished once it succeeded with nothing pending, and idles once cancelled", () => {
+    expect(runPose(makeRun({ status: "succeeded" }), here)).toBe("finished");
     expect(runPose(makeRun({ status: "cancelled" }), here)).toBe("idle");
+  });
+
+  it("sleeps while queued for a usage limit to reset, before waiting at the door", () => {
+    const limited = makeRun({ status: "queued", retryAt: "2026-10-27T10:00:00Z" });
+    expect(runPose(limited, here)).toBe("limit");
+    // Only a queued run waits for the reset; offered is at the door.
+    expect(runPose({ ...limited, status: "offered" }, here)).toBe("awaiting-accept");
+    // Its runner gone is still the first thing to say.
+    expect(runPose(limited, { runnerOnline: false, asking: false })).toBe("offline");
+    expect(runPose(limited, { runnerOnline: true, asking: true })).toBe("asking-user");
   });
 });
 

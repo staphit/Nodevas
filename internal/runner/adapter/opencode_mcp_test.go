@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -33,10 +34,19 @@ func TestOpenCodeDisablesOtherMCP(t *testing.T) {
 	}
 }
 
+// realAgentTestsEnv opts in to the tests that start a real agent CLI. They
+// run the owner's installed agent, with its own config and sign-in, so a
+// plain `go test` never starts one just because it is on PATH.
+const realAgentTestsEnv = "NODEVAS_REAL_AGENT_TESTS"
+
 // realOpenCode is the installed OpenCode for the tests against the real CLI,
-// which skip when there is none or when it is one runs refuse.
+// which skip unless NODEVAS_REAL_AGENT_TESTS=1, and when there is none or it
+// is one runs refuse.
 func realOpenCode(t *testing.T) string {
 	t.Helper()
+	if os.Getenv(realAgentTestsEnv) != "1" {
+		t.Skip("set " + realAgentTestsEnv + "=1 to run the tests against the installed agent CLIs")
+	}
 	bin, err := exec.LookPath("opencode")
 	if err != nil {
 		t.Skip("opencode not installed")
@@ -78,6 +88,31 @@ func TestOpenCodeServerNames(t *testing.T) {
 	}
 	if _, err := openCodeServerNames([]byte("Error: no service")); err == nil {
 		t.Error("not JSON: no error")
+	}
+}
+
+// A read-only run asks OpenCode for its config in a directory only the owner
+// can write. OpenCode loads the config and the plugins it finds there and in
+// the directories above; in the shared temp dir another local user, or a
+// Codex run whose sandbox may write there, could have left some.
+func TestOpenCodeEmptyDirIsTheOwners(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("LOCALAPPDATA", cache)   // os.UserCacheDir on Windows
+	t.Setenv("XDG_CACHE_HOME", cache) // on Linux
+	t.Setenv("HOME", cache)           // on macOS, under Library/Caches
+	dir, err := openCodeEmptyDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, err := filepath.Rel(cache, dir); err != nil || !filepath.IsLocal(rel) {
+		t.Fatalf("read-only runs ask OpenCode in %s, not in the owner's cache dir %s", dir, cache)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("%s: %v", dir, err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Errorf("%s has mode %v, want 0700", dir, info.Mode().Perm())
 	}
 }
 

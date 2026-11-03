@@ -1,14 +1,53 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
+	"nodevas/internal/searchindex"
+	"nodevas/internal/testpg"
 )
+
+// newTestSearchIndex is the project's index over a fresh database, as serve
+// wires it with UseDatabase.
+func newTestSearchIndex(t testing.TB) *searchIndex {
+	t.Helper()
+	index := &searchIndex{manager: searchindex.NewManagerWithDB(testpg.New(t))}
+	// Background passes read the fixture's files; they end before it goes.
+	t.Cleanup(func() { _ = index.manager.Close() })
+	return index
+}
+
+// searchEventually polls a search until it returns exactly the nodes in want
+// (in order) or within has passed.
+func searchEventually(t *testing.T, index *searchIndex, project ProjectInfo, query string, want []string, within time.Duration) {
+	t.Helper()
+	began := time.Now()
+	for {
+		results, err := index.search(context.Background(), project, query)
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		got := make([]string, 0, len(results))
+		for _, result := range results {
+			got = append(got, result.NodeID)
+		}
+		if fmt.Sprint(got) == fmt.Sprint(want) {
+			return
+		}
+		if time.Since(began) > within {
+			t.Fatalf("search %q = %v after %v, want %v", query, got, within, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func writeSearchProject(t testing.TB, nodes ...*engine.Node) string {
 	t.Helper()
@@ -38,8 +77,8 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 	writeNodeBody(t, root, "alpha", "before body")
 
 	project := ProjectInfo{Name: "main", Path: root}
-	index := newSearchIndex()
-	results, err := index.search(project, "before")
+	index := newTestSearchIndex(t)
+	results, err := index.search(context.Background(), project, "before")
 	if err != nil {
 		t.Fatalf("initial search: %v", err)
 	}
@@ -48,23 +87,47 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 	}
 
 	writeNodeBody(t, root, "alpha", "after body with more text")
-	// The watcher hook is the primary freshness path; internal/searchindex
-	// covers the stat-walk net that catches edits it never hears about.
+	// The watcher hook is the primary freshness path for outside edits; it
+	// refreshes the node in the background, within a second.
+	// internal/searchindex covers the stat-walk net that catches edits it
+	// never hears about.
 	index.invalidate(root, "alpha")
 
-	results, err = index.search(project, "after")
+	searchEventually(t, index, project, "after", []string{"alpha"}, time.Second)
+	searchEventually(t, index, project, "before", []string{}, time.Second)
+}
+
+// The server's own writes never reach the watcher. The store reports them
+// instead, and a save is searchable within a second of returning.
+func TestAStoreWriteIsSearchableWithinASecond(t *testing.T) {
+	pm, info, st := searchLoadProject(t, 20)
+	// A search no longer waits out the first build (coldSearchWait), so the
+	// build is awaited here: the second this test measures starts at a save
+	// into a built index, not at a cold build on a loaded machine.
+	if !pm.AwaitSearchIndex(info.Path, 30*time.Second) {
+		t.Fatal("the project's search index was not built")
+	}
+	_, rev, err := st.LoadNodeContent("n0003")
 	if err != nil {
-		t.Fatalf("search after edit: %v", err)
+		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].NodeID != "alpha" {
-		t.Fatalf("results after edit = %+v", results)
+	if _, _, err := st.SaveNodeContent(identity.Actor{ID: "u", Name: "u"}, "n0003", "a freshly saved lighthouse\n", rev); err != nil {
+		t.Fatal(err)
 	}
-	results, err = index.search(project, "before")
-	if err != nil {
-		t.Fatalf("search old term: %v", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("stale results after edit = %+v", results)
+	began := time.Now()
+	for {
+		results, err := pm.SearchProjectNodes(context.Background(), info, "lighthouse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) == 1 && results[0].NodeID == "n0003" {
+			t.Logf("searchable after %v", time.Since(began))
+			return
+		}
+		if time.Since(began) > time.Second {
+			t.Fatalf("a saved node was not searchable within a second: %+v", results)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -80,7 +143,7 @@ func TestSearchIndexFindsTextDeepInALongNode(t *testing.T) {
 	writeNodeBody(t, root, "alpha", body)
 
 	project := ProjectInfo{Name: "main", Path: root}
-	results, err := newSearchIndex().search(project, "buried needle")
+	results, err := newTestSearchIndex(t).search(context.Background(), project, "buried needle")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -105,9 +168,9 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 	writeNodeBody(t, root, "beta", "unrelated body")
 
 	project := ProjectInfo{Name: "main", Path: root}
-	index := newSearchIndex()
+	index := newTestSearchIndex(t)
 	for _, query := range []string{"设计", "接口设计", "english prose", "alpha", "high"} {
-		indexed, err := index.search(project, query)
+		indexed, err := index.search(context.Background(), project, query)
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
@@ -118,16 +181,72 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 	}
 }
 
+func TestSearchProjectNodesReturnsSubpagePageID(t *testing.T) {
+	root := writeSearchProject(t, &engine.Node{ID: "design", Title: "遊戲設計"})
+	writeNodeBody(t, root, "design", "main page overview")
+	pageDir := filepath.Join(root, "nodes", "design.pages")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "cast.md"), []byte("小明是唯一的角色"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "world.md"), []byte("世界觀設定"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "pages.json"), []byte(`{"pages":[{"id":"cast","title":"角色名冊"},{"id":"world","title":"世界觀"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info := ProjectInfo{Name: "main", Path: root}
+	index := newTestSearchIndex(t)
+
+	for _, query := range []string{"小明", "overview", "角色名冊"} {
+		wantPage := "cast"
+		if query == "overview" {
+			wantPage = ""
+		}
+		indexed, err := index.search(context.Background(), info, query)
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		if len(indexed) != 1 || indexed[0].PageID != wantPage {
+			t.Fatalf("index.search(%q) = %+v, want pageId=%q", query, indexed, wantPage)
+		}
+		ranked, err := index.rank(context.Background(), info, query, 10)
+		if err != nil {
+			t.Fatalf("rank %q: %v", query, err)
+		}
+		if len(ranked) != 1 || ranked[0].PageID != wantPage {
+			t.Fatalf("index.rank(%q) = %+v, want pageId=%q", query, ranked, wantPage)
+		}
+		direct := SearchProjectNodesDirect(info, query)
+		if len(direct) != 1 || direct[0].PageID != wantPage {
+			t.Fatalf("SearchProjectNodesDirect(%q) = %+v, want pageId=%q", query, direct, wantPage)
+		}
+	}
+
+	pm, err := NewManagerAt(filepath.Dir(root), nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pm.Close)
+	cold := pm.searchWhileIndexing(info, "角色名冊")
+	if len(cold) != 1 || cold[0].NodeID != "design" || cold[0].PageID != "cast" {
+		t.Fatalf("searchWhileIndexing(\"角色名冊\") = %+v, want design/cast", cold)
+	}
+}
+
 func BenchmarkSearchWarmIndex(b *testing.B) {
 	root, project := benchmarkProject(b)
-	index := newSearchIndex()
-	if _, err := index.search(project, "needle"); err != nil {
+	index := newTestSearchIndex(b)
+	if _, err := index.search(context.Background(), project, "needle"); err != nil {
 		b.Fatal(err)
 	}
 	_ = root
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := index.search(project, "needle"); err != nil {
+		if _, err := index.search(context.Background(), project, "needle"); err != nil {
 			b.Fatal(err)
 		}
 	}

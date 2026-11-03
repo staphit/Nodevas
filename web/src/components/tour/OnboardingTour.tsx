@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useI18n } from "../../i18n";
 import { useApp, usePreference } from "../../store";
 import { TOUR_CHAPTERS, type TourChapter, type TourStep } from "./chapters";
 import { useStartScreenVisible } from "../StartScreen";
@@ -24,6 +25,7 @@ const HIGHLIGHT_PAD = 8;
 const POPOVER_GAP = 12;
 const VIEWPORT_MARGIN = 8;
 const WELCOME_DELAY = 800;
+const WELCOME_RECHECK = 400;
 const POINTER_TRIGGER_DELAY = 300;
 const DRAWER_TRIGGER_DELAY = 400;
 
@@ -62,12 +64,41 @@ function findStep(steps: TourStep[], from: number, dir: 1 | -1): number | null {
   return null;
 }
 
+/**
+ * True while the user is busy with something the click itself opened: a text
+ * field, or anything inside a menu, dialog or form. A chapter that started
+ * then would take the keyboard mid-sentence (Enter would step the tour instead
+ * of submitting), so the trigger lets it pass; the next press in the region
+ * tries again.
+ */
+function userIsBusy(): boolean {
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  if (active.closest(".tour-popover, .tour-welcome")) return false;
+  if (active instanceof HTMLElement && active.isContentEditable) return true;
+  if (active.matches("input, textarea, select")) return true;
+  return active.closest('[role="menu"], [role="dialog"], form') !== null;
+}
+
+/**
+ * True while another modal dialog is open (the command palette, a confirm,
+ * the start screen). The invitation is a modal too; opening it over one would
+ * leave two at once, and 開始導覽 would spotlight a pane the other still covers.
+ */
+function otherModalOpen(): boolean {
+  for (const dialog of document.querySelectorAll('[role="dialog"][aria-modal="true"], [role="alertdialog"]')) {
+    if (!dialog.closest(".tour-welcome, .tour-popover")) return true;
+  }
+  return false;
+}
+
 function boxesEqual(a: Box | null, b: Box | null): boolean {
   if (a === null || b === null) return a === b;
   return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 }
 
 export function OnboardingTour() {
+  const { t } = useI18n();
   const tourPrompt = usePreference("tourPrompt");
   const chaptersDoneRaw = usePreference("tourChaptersDone");
   const updateUIPreference = useApp((s) => s.updateUIPreference);
@@ -92,6 +123,8 @@ export function OnboardingTour() {
   const welcomeRef = useRef<HTMLDivElement | null>(null);
   const promptedRef = useRef(false);
   const pendingStartRef = useRef<number | null>(null);
+  // Where focus was before a chapter took it, so closing gives it back.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   // Live mirrors for the document-level pointerdown listener, so it never
   // acts on a stale closure.
@@ -114,6 +147,9 @@ export function OnboardingTour() {
     const usable = findStep(next.steps, 0, 1);
     if (usable === null) return;
     setTargetBox(null); // don't flash the previous chapter's cutout
+    const active = document.activeElement;
+    returnFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
     setStepIndex(usable);
     setChapter(next);
   }, []);
@@ -159,10 +195,18 @@ export function OnboardingTour() {
       return;
     }
     if (startScreenVisible) return;
-    const timer = window.setTimeout(() => {
+    // Another dialog opened meanwhile (Ctrl+K within the delay): ask again
+    // shortly, once it has closed, rather than stacking a second modal on it.
+    let timer = 0;
+    const invite = () => {
+      if (otherModalOpen()) {
+        timer = window.setTimeout(invite, WELCOME_RECHECK);
+        return;
+      }
       promptedRef.current = true;
       setWelcomeOpen(true);
-    }, WELCOME_DELAY);
+    };
+    timer = window.setTimeout(invite, WELCOME_DELAY);
     return () => window.clearTimeout(timer);
   }, [tourPrompt, startScreenVisible]);
 
@@ -236,6 +280,7 @@ export function OnboardingTour() {
           pendingStartRef.current = null;
           if (chapterRef.current || welcomeOpenRef.current) return;
           if (chaptersDoneRef.current.includes(candidate.id)) return;
+          if (userIsBusy()) return;
           startChapter(candidate);
         }, POINTER_TRIGGER_DELAY);
         return;
@@ -344,7 +389,7 @@ export function OnboardingTour() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [chapter, finishChapter, next, back]);
 
-  // Welcome dialog keyboard: Esc counts as「先不用」.
+  // Welcome dialog keyboard: Esc counts as "Not now".
   useEffect(() => {
     if (!welcomeOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -360,6 +405,14 @@ export function OnboardingTour() {
   useEffect(() => {
     if (chapter) popoverRef.current?.focus();
   }, [chapter, stepIndex]);
+  // When the chapter closes, focus goes back where it was instead of <body>.
+  const hasChapter = chapter !== null;
+  useEffect(() => {
+    if (hasChapter) return;
+    const back = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (back?.isConnected) back.focus();
+  }, [hasChapter]);
   useEffect(() => {
     if (welcomeOpen) welcomeRef.current?.focus();
   }, [welcomeOpen]);
@@ -419,20 +472,18 @@ export function OnboardingTour() {
           className="tour-welcome"
           role="dialog"
           aria-modal="true"
-          aria-label="歡迎使用 Nodevas"
+          aria-label={t("tour.welcome.title")}
           tabIndex={-1}
         >
-          <strong className="tour-title">歡迎使用 Nodevas</strong>
-          <p className="tour-body">
-            要花 30 秒認識一下介面嗎?之後點到各區塊時,會在第一次使用時給你簡短提示。
-          </p>
+          <strong className="tour-title">{t("tour.welcome.title")}</strong>
+          <p className="tour-body">{t("tour.welcome.body")}</p>
           <div className="tour-actions">
             <button type="button" className="tour-btn tour-btn--ghost" onClick={declineTour}>
-              先不用
+              {t("tour.welcome.decline")}
             </button>
             <span className="tour-actions-spacer" />
             <button type="button" className="tour-btn tour-btn--primary" onClick={acceptTour}>
-              開始導覽
+              {t("tour.welcome.accept")}
             </button>
           </div>
         </div>
@@ -470,11 +521,11 @@ export function OnboardingTour() {
         style={{ top: popoverPos.top, left: popoverPos.left }}
         role="dialog"
         aria-modal="true"
-        aria-label={step.title}
+        aria-label={t(step.titleKey)}
         tabIndex={-1}
       >
-        <strong className="tour-title">{step.title}</strong>
-        <p className="tour-body">{step.body}</p>
+        <strong className="tour-title">{t(step.titleKey)}</strong>
+        <p className="tour-body">{t(step.bodyKey)}</p>
         <div className="tour-dots" aria-hidden="true">
           {chapter.steps.map((s, index) => (
             <span
@@ -485,26 +536,26 @@ export function OnboardingTour() {
         </div>
         <div className="tour-actions">
           <button type="button" className="tour-btn tour-btn--ghost" onClick={finishChapter}>
-            略過
+            {t("tour.skip")}
           </button>
-          {/* 略過 only ends this chapter; someone who wants none of it should
+          {/* Skip only ends this chapter; someone who wants none of it should
             * not have to dismiss four more. */}
           <button
             type="button"
             className="tour-btn tour-btn--ghost"
             onClick={skipEverything}
-            title="不再顯示任何導覽提示"
+            title={t("tour.skipAllTitle")}
           >
-            全部略過
+            {t("tour.skipAll")}
           </button>
           <span className="tour-actions-spacer" />
           {hasPrev && (
             <button type="button" className="tour-btn" onClick={back}>
-              上一步
+              {t("tour.back")}
             </button>
           )}
           <button type="button" className="tour-btn tour-btn--primary" onClick={next}>
-            {isLast ? "完成" : "下一步"}
+            {isLast ? t("tour.done") : t("tour.next")}
           </button>
         </div>
       </div>

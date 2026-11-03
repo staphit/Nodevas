@@ -1,5 +1,5 @@
 /**
- * Impact checks [A-04].
+ * Impact checks.
  *
  * Answers "what breaks if I delete this?" before a destructive settings edit.
  * Pure reads — nothing here mutates.

@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"nodevas/internal/gitrepo"
+	"nodevas/internal/locale"
 	"nodevas/internal/secrets"
 )
 
@@ -53,9 +54,9 @@ const (
 )
 
 var (
-	ErrGitTokenRequired = errors.New("the git token must be entered again when the URL or the user changes")
-	ErrNoGitHistory     = errors.New("there is no history to push yet")
-	ErrGitNoBundles     = errors.New("a git remote holds branches, not bundles: clone the branch to restore it")
+	ErrGitTokenRequired = locale.Errorf("the git token must be entered again when the URL or the user changes", "網址或使用者變更時須重新輸入 git 權杖")
+	ErrNoGitHistory     = locale.Errorf("there is no history to push yet", "還沒有可推送的歷史紀錄")
+	ErrGitNoBundles     = locale.Errorf("a git remote holds branches, not bundles: clone the branch to restore it", "git 遠端保存的是分支而不是套件：請 clone 分支來還原")
 )
 
 // allowLocalGitURLs lets the tests push to a bare repository on disk (a path
@@ -90,13 +91,13 @@ type gitTarget struct {
 func parseGitURL(raw string) (gitTarget, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return gitTarget{}, errors.New("the git remote URL is required")
+		return gitTarget{}, locale.Errorf("the git remote URL is required", "需要 git 遠端網址")
 	}
 	if len(raw) > maxGitURLLength {
-		return gitTarget{}, errors.New("the git remote URL is too long")
+		return gitTarget{}, locale.Errorf("the git remote URL is too long", "git 遠端網址太長")
 	}
 	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return gitTarget{}, errors.New("the git remote URL contains spaces or control characters")
+		return gitTarget{}, locale.Errorf("the git remote URL contains spaces or control characters", "git 遠端網址含有空白或控制字元")
 	}
 	if allowLocalGitURLs && (strings.HasPrefix(raw, "file://") || filepath.IsAbs(raw)) {
 		return gitTarget{url: raw}, nil
@@ -104,26 +105,26 @@ func parseGitURL(raw string) (gitTarget, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		// url.Parse quotes its input in the error, so it is not passed on.
-		return gitTarget{}, errors.New("the git remote URL is not a valid https:// URL")
+		return gitTarget{}, locale.Errorf("the git remote URL is not a valid https:// URL", "git 遠端網址不是有效的 https:// 網址")
 	}
 	if !strings.EqualFold(parsed.Scheme, "https") {
-		return gitTarget{}, errors.New("the git remote must be an https:// URL (ssh, git://, http:// and file are not supported)")
+		return gitTarget{}, locale.Errorf("the git remote must be an https:// URL (ssh, git://, http:// and file are not supported)", "git 遠端須為 https:// 網址（不支援 ssh、git://、http:// 與 file）")
 	}
 	if parsed.User != nil {
-		return gitTarget{}, errors.New("put the user name and token in their own fields, not in the URL")
+		return gitTarget{}, locale.Errorf("put the user name and token in their own fields, not in the URL", "請把使用者名稱與權杖填在各自的欄位，不要放在網址裡")
 	}
 	host := strings.ToLower(parsed.Hostname())
 	if parsed.Opaque != "" || host == "" {
-		return gitTarget{}, errors.New("the git remote URL has no host")
+		return gitTarget{}, locale.Errorf("the git remote URL has no host", "git 遠端網址沒有主機")
 	}
 	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return gitTarget{}, errors.New("the git remote URL must not have a query or a fragment")
+		return gitTarget{}, locale.Errorf("the git remote URL must not have a query or a fragment", "git 遠端網址不能有查詢字串或片段")
 	}
 	port := parsed.Port()
 	if port == "" {
 		port = "443"
 	} else if number, err := strconv.Atoi(port); err != nil || number < 1 || number > 65535 {
-		return gitTarget{}, errors.New("the git remote URL has an invalid port")
+		return gitTarget{}, locale.Errorf("the git remote URL has an invalid port", "git 遠端網址的連接埠無效")
 	}
 	// The host git connects to and the one the pinned addresses are for
 	// must be spelled the same.
@@ -136,20 +137,20 @@ func parseGitURL(raw string) (gitTarget, error) {
 // colon would end it early.
 func validateGitUser(user string) error {
 	if len(user) > maxGitUserLength {
-		return errors.New("the git user name is too long")
+		return locale.Errorf("the git user name is too long", "git 使用者名稱太長")
 	}
 	if strings.ContainsRune(user, ':') || strings.ContainsFunc(user, unicode.IsControl) {
-		return errors.New("the git user name must not contain a colon or control characters")
+		return locale.Errorf("the git user name must not contain a colon or control characters", "git 使用者名稱不能含有冒號或控制字元")
 	}
 	return nil
 }
 
 func validateGitToken(token string) error {
 	if len(token) > maxGitTokenLength {
-		return errors.New("the git token is too long")
+		return locale.Errorf("the git token is too long", "git 權杖太長")
 	}
 	if strings.ContainsFunc(token, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return errors.New("the git token must not contain spaces or control characters")
+		return locale.Errorf("the git token must not contain spaces or control characters", "git 權杖不能含有空白或控制字元")
 	}
 	return nil
 }
@@ -181,20 +182,20 @@ func resolveGitHost(ctx context.Context, host string, allowPrivate bool) ([]net.
 		defer cancel()
 		found, err := lookupGitHost(lookupCtx, host)
 		if err == nil && len(found) == 0 {
-			err = errors.New("no address")
+			err = locale.Errorf("no address", "沒有位址")
 		}
 		if err != nil {
-			return nil, fmt.Errorf("resolve git host %q: %w", host, err)
+			return nil, locale.Errorf("resolve git host %q: %w", "解析 git 主機「%s」：%w", host, err)
 		}
 		ips = found
 	}
 	for _, ip := range ips {
 		if !allowPrivate && blockedGitIP(ip) {
-			return nil, fmt.Errorf("git host %q resolves to a private or local address", host)
+			return nil, locale.Errorf("git host %q resolves to a private or local address", "git 主機「%s」解析到私有或本機位址", host)
 		}
 		if !ip.IsGlobalUnicast() && !(allowPrivate &&
 			(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())) {
-			return nil, fmt.Errorf("git host %q resolves to a non-unicast address", host)
+			return nil, locale.Errorf("git host %q resolves to a non-unicast address", "git 主機「%s」解析到非單播位址", host)
 		}
 	}
 	return ips, nil
@@ -449,7 +450,7 @@ func (s *gitSession) compare(ctx context.Context, p gitProject, remote string) (
 		// is what gets compared.
 		out, err := runGit(ctx, p.repo, nil, "rev-parse", "--verify", "--quiet", tracking+"^{commit}")
 		if err != nil {
-			return remote, "", fmt.Errorf("read fetched branch %s: %w", p.branch, err)
+			return remote, "", locale.Errorf("read fetched branch %s: %w", "讀取抓取的分支 %s：%w", p.branch, err)
 		}
 		remote = strings.TrimSpace(string(out))
 		if remote == p.head {
@@ -543,7 +544,7 @@ func gitBranchComponent(project, workspaceLabel string) string {
 // error, so it is visible rather than silently overwriting the other.
 func (m *RemoteManager) gitProjects(ctx context.Context) ([]gitProject, []GitProjectStatus, error) {
 	if m.pm == nil {
-		return nil, nil, errors.New("project manager is unavailable")
+		return nil, nil, locale.Errorf("project manager is unavailable", "無法使用專案管理器")
 	}
 	infos, err := m.pm.List()
 	if err != nil {
@@ -562,18 +563,16 @@ func (m *RemoteManager) gitProjects(ctx context.Context) ([]gitProject, []GitPro
 		}
 		project, ok, err := openGitProject(ctx, info.Name, info.Path, label)
 		if err != nil {
-			clashes = append(clashes, GitProjectStatus{Project: info.Name, Error: err.Error()})
+			clashes = append(clashes, GitProjectStatus{Project: info.Name}.failed(err))
 			continue
 		}
 		if !ok {
 			continue
 		}
 		if owner, clash := taken[project.branch]; clash {
-			clashes = append(clashes, GitProjectStatus{
-				Project: info.Name,
-				Branch:  project.branch,
-				Error:   fmt.Sprintf("branch %s is already used by project %q; rename one of them", project.branch, owner),
-			})
+			clashes = append(clashes, GitProjectStatus{Project: info.Name, Branch: project.branch}.failed(locale.Errorf(
+				"branch %s is already used by project %q; rename one of them",
+				"分支 %s 已被專案「%s」使用；請將其中一個改名", project.branch, owner)))
 			continue
 		}
 		taken[project.branch] = info.Name
@@ -588,7 +587,7 @@ func openGitProject(ctx context.Context, name, root, workspaceLabel string) (git
 	}
 	repo, err := gitrepo.Open(ctx, root)
 	if err != nil {
-		return gitProject{}, false, fmt.Errorf("open history of %s: %w", name, err)
+		return gitProject{}, false, locale.Errorf("open history of %s: %w", "開啟 %s 的歷史紀錄：%w", name, err)
 	}
 	out, err := runGit(ctx, repo, nil, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	if err != nil {
@@ -615,6 +614,22 @@ type GitProjectStatus struct {
 	// Error is why the state could not be worked out.
 	Error    string         `json:"error,omitempty"`
 	LastPush *GitPushResult `json:"lastPush,omitempty"`
+	// err is Error as the error it was, worded for any reader.
+	err error
+}
+
+// failed is s that could not be worked out because of err.
+func (s GitProjectStatus) failed(err error) GitProjectStatus {
+	s.Error, s.err = err.Error(), err
+	return s
+}
+
+// failure is why s could not be worked out, or nil.
+func (s GitProjectStatus) failure() error {
+	if s.err == nil && s.Error != "" {
+		return locale.Errorf("%s", "%s", s.Error)
+	}
+	return s.err
 }
 
 // GitPushResult is how the last push of a project went.
@@ -703,7 +718,7 @@ func (m *RemoteManager) runGitBackup(ctx context.Context, cfg Config, push bool,
 		}
 		status.RemoteCommit = remote
 		if err != nil {
-			status.Error = err.Error()
+			status = status.failed(err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -760,10 +775,10 @@ func onlyProject(projects []gitProject, clashes []GitProjectStatus, name string)
 	}
 	for _, clash := range clashes {
 		if clash.Project == name {
-			return nil, nil, errors.New(clash.Error)
+			return nil, nil, clash.failure()
 		}
 	}
-	return nil, nil, fmt.Errorf("project %q: %w", name, ErrNoGitHistory)
+	return nil, nil, locale.Errorf("project %q: %w", "專案「%s」：%w", name, ErrNoGitHistory)
 }
 
 // recordGitPushes stores the push results. A full pass with no failure also
@@ -853,8 +868,8 @@ func (m *RemoteManager) PushGitProject(ctx context.Context, project string) (Git
 	if len(run.failed) > 0 {
 		return status, run.failed[0]
 	}
-	if status.Error != "" {
-		return status, errors.New(status.Error)
+	if err := status.failure(); err != nil {
+		return status, err
 	}
 	if len(run.held) > 0 {
 		return status, ErrSyncConflict
@@ -873,7 +888,7 @@ func (m *RemoteManager) KeepLocalGit(ctx context.Context, project string) (strin
 	defer m.releaseBackup()
 	cfg := m.Load()
 	if cfg.Kind != "git" {
-		return "", errors.New("the backup is not a git remote")
+		return "", locale.Errorf("the backup is not a git remote", "這個備份不是 git 遠端")
 	}
 	session, err := m.openGitSession(ctx, cfg)
 	if err != nil {
@@ -901,7 +916,7 @@ func (m *RemoteManager) KeepLocalGit(ctx context.Context, project string) (strin
 func (m *RemoteManager) TestGitConnection(ctx context.Context) (int, error) {
 	cfg := m.Load()
 	if cfg.Kind != "git" {
-		return 0, errors.New("the backup is not a git remote")
+		return 0, locale.Errorf("the backup is not a git remote", "這個備份不是 git 遠端")
 	}
 	session, err := m.openGitSession(ctx, cfg)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +17,56 @@ type miniLMProcess struct {
 	stdin  io.WriteCloser
 	output *bufio.Scanner
 	done   chan struct{}
+	// stderr keeps the helper's last words, so a failure can say why
+	// instead of guessing.
+	stderr *tailBuffer
+}
+
+// tailBufferSize is how much of the helper's stderr a failure can quote.
+const tailBufferSize = 4 << 10
+
+// tailBuffer keeps the last tailBufferSize bytes written to it.
+type tailBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if extra := len(t.buf) - tailBufferSize; extra > 0 {
+		t.buf = append(t.buf[:0:0], t.buf[extra:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
+}
+
+// helperFailure turns the helper's stderr into the error a user can act on.
+// Only a missing module earns the install advice; anything else quotes the
+// helper's own last line.
+func helperFailure(stderr string) error {
+	if strings.Contains(stderr, "ModuleNotFoundError") || strings.Contains(stderr, "ImportError") ||
+		strings.Contains(stderr, "No module named") {
+		return fmt.Errorf("MiniLM helper failed; install scripts/rag-requirements.txt in --rag-python's environment (diagnostics on stderr); retry to restart the worker")
+	}
+	lines := strings.Split(strings.ReplaceAll(stderr, "\r\n", "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if runes := []rune(line); len(runes) > 300 {
+			line = string(runes[:300]) + "…"
+		}
+		return fmt.Errorf("MiniLM helper failed: %s; retry to restart the worker", line)
+	}
+	return fmt.Errorf("MiniLM helper failed (no diagnostics); retry to restart the worker")
 }
 
 // MiniLMWorker owns one lazy Python process. It serializes requests, closes on
@@ -43,7 +94,12 @@ func (w *MiniLMWorker) startLocked() (*miniLMProcess, error) {
 	}
 	cmd := w.newCommand()
 	configureWorkerCommand(cmd)
-	cmd.Stderr = w.stderr
+	tail := &tailBuffer{}
+	if w.stderr != nil {
+		cmd.Stderr = io.MultiWriter(w.stderr, tail)
+	} else {
+		cmd.Stderr = tail
+	}
 	cmd.WaitDelay = 2 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -59,7 +115,7 @@ func (w *MiniLMWorker) startLocked() (*miniLMProcess, error) {
 		stdout.Close()
 		return nil, fmt.Errorf("start MiniLM: %w; set --rag-python to a Python environment with chromadb installed", err)
 	}
-	p := &miniLMProcess{cmd: cmd, stdin: stdin, output: bufio.NewScanner(stdout), done: make(chan struct{})}
+	p := &miniLMProcess{cmd: cmd, stdin: stdin, output: bufio.NewScanner(stdout), done: make(chan struct{}), stderr: tail}
 	// A 32-vector response is normally under 300 KiB. Reject runaway output.
 	p.output.Buffer(make([]byte, 4096), 2<<20)
 	go func() { _ = cmd.Wait(); close(p.done) }()
@@ -159,7 +215,13 @@ func (w *MiniLMWorker) Embed(ctx context.Context, input []string) ([][]float64, 
 		if w.process == p {
 			w.stopLocked()
 		}
-		return nil, fmt.Errorf("MiniLM helper failed; install scripts/rag-requirements.txt in --rag-python's environment (diagnostics on stderr); retry to restart the worker")
+		// Wait (bounded by the command's WaitDelay) for the helper to be
+		// reaped, so its stderr has been copied in full before quoting it.
+		select {
+		case <-p.done:
+		case <-time.After(3 * time.Second):
+		}
+		return nil, helperFailure(p.stderr.String())
 	}
 	if !w.closed && w.process == p {
 		w.idle = time.AfterFunc(w.idleTimeout, func() {

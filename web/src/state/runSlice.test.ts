@@ -87,14 +87,14 @@ describe("journal undo", () => {
 
     await useApp.getState().setLifecycleStatus("a", "done");
     expect(useApp.getState().canUndo).toBe(true);
-    expect(useApp.getState().undoLabel).toBe("實際狀態變更");
+    expect(useApp.getState().undoLabel).toBe("Actual status change");
 
     await expect(useApp.getState().undoLast()).resolves.toBe(true);
 
     expect(api.setStatus).toHaveBeenLastCalledWith(
       "a",
       "started",
-      "撤銷：回到先前的實際狀態",
+      "Undo: back to the earlier actual status",
     );
     // The compensating write must not push another undo step.
     expect(useApp.getState().canUndo).toBe(false);
@@ -113,11 +113,11 @@ describe("journal undo", () => {
     await useApp.getState().setLifecycleStatus("a", "done");
     await useApp.getState().undoLast();
     expect(useApp.getState().canRedo).toBe(true);
-    expect(useApp.getState().redoLabel).toBe("實際狀態變更");
+    expect(useApp.getState().redoLabel).toBe("Actual status change");
 
     await expect(useApp.getState().redoLast()).resolves.toBe(true);
 
-    expect(api.setStatus).toHaveBeenLastCalledWith("a", "done", "重做：重新套用實際狀態");
+    expect(api.setStatus).toHaveBeenLastCalledWith("a", "done", "Redo: apply the actual status again");
     expect(useApp.getState().canRedo).toBe(false);
     expect(useApp.getState().canUndo).toBe(true);
   });
@@ -159,14 +159,14 @@ describe("journal undo", () => {
       status: "saved",
       operation: "lifecycle.move",
     });
-    expect(useApp.getState().undoLabel).toBe("實際時間調整");
+    expect(useApp.getState().undoLabel).toBe("Actual time change");
 
     await useApp.getState().undoLast();
 
     expect(api.moveEvent).toHaveBeenLastCalledWith(
       "ev-1",
       "2026-08-01T00:00:00Z",
-      "撤銷：回到先前的時間",
+      "Undo: back to the earlier time",
     );
   });
 });

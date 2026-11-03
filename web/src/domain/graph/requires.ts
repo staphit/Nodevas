@@ -1,5 +1,5 @@
 /**
- * `requires` expression helpers [A-04].
+ * `requires` expression helpers.
  *
  * The expression on a node is the truth; edges are its visual cache. These
  * helpers are shared by the canvas (which shows the operator on the gate glyph)
@@ -377,6 +377,13 @@ function falseBlockers(expression: RequiresExpr, done: ReadonlySet<string>): str
     }
   }
   return pending.length ? pending : completed;
+}
+
+/** The nodes a requires expression names, in order; none when it does not
+ * parse. The expression is the truth, so a node named here is a
+ * prerequisite even before its wire is drawn. */
+export function requiresNodeRefs(source: string | undefined): string[] {
+  return evaluateRequires(source, new Set()).nodeRefs;
 }
 
 /** Evaluates exactly the DSL accepted by Go; syntax errors fail closed. */

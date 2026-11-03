@@ -6,7 +6,6 @@ package fsbrowse
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
@@ -17,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // postFSOpen opens an existing directory in the operating system”s file
@@ -34,7 +35,7 @@ func (a *API) postFSOpen(c *gin.Context) {
 	}
 	raw := strings.TrimSpace(body.Path)
 	if raw == "" {
-		httpx.Err(c, http.StatusBadRequest, errors.New("需要資料夾路徑"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("a folder path is required", "需要資料夾路徑"))
 		return
 	}
 	abs, err := filepath.Abs(filepath.Clean(raw))
@@ -44,11 +45,11 @@ func (a *API) postFSOpen(c *gin.Context) {
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("資料夾 %q 不存在或無法存取", abs))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("folder %q does not exist or cannot be accessed", "資料夾 %q 不存在或無法存取", abs))
 		return
 	}
 	if !info.IsDir() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("路徑 %q 不是資料夾", abs))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("path %q is not a folder", "路徑 %q 不是資料夾", abs))
 		return
 	}
 	opener := a.openDir
@@ -56,7 +57,7 @@ func (a *API) postFSOpen(c *gin.Context) {
 		opener = OpenDirectory
 	}
 	if err := opener(abs); err != nil {
-		httpx.Err(c, http.StatusUnprocessableEntity, fmt.Errorf("無法開啟檔案管理員：%w", err))
+		httpx.Err(c, http.StatusUnprocessableEntity, locale.Errorf("could not open the file manager: %w", "無法開啟檔案管理員：%w", err))
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "path": abs})
@@ -79,12 +80,12 @@ func (a *API) postFSMkdir(c *gin.Context) {
 	parent := strings.TrimSpace(body.Path)
 	name := strings.TrimSpace(body.Name)
 	if parent == "" || name == "" {
-		httpx.Err(c, http.StatusBadRequest, errors.New("需要父資料夾路徑與新資料夾名稱"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("a parent folder path and a new folder name are required", "需要父資料夾路徑與新資料夾名稱"))
 		return
 	}
 	if name != filepath.Base(name) || name == "." || name == ".." ||
 		strings.ContainsAny(name, `\/:*?"<>|`) {
-		httpx.Err(c, http.StatusBadRequest, errors.New("資料夾名稱含有不允許的字元"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the folder name contains characters that are not allowed", "資料夾名稱含有不允許的字元"))
 		return
 	}
 	abs, err := filepath.Abs(filepath.Clean(parent))
@@ -95,35 +96,35 @@ func (a *API) postFSMkdir(c *gin.Context) {
 	info, statErr := os.Stat(abs)
 	if statErr != nil {
 		if errors.Is(statErr, os.ErrPermission) {
-			httpx.Err(c, http.StatusForbidden, fmt.Errorf("無法存取父資料夾 %q：權限不足", abs))
+			httpx.Err(c, http.StatusForbidden, locale.Errorf("cannot access parent folder %q: permission denied", "無法存取父資料夾 %q：權限不足", abs))
 		} else {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("父資料夾 %q 不存在", abs))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("parent folder %q does not exist", "父資料夾 %q 不存在", abs))
 		}
 		return
 	}
 	if !info.IsDir() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("父路徑 %q 不是資料夾", abs))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("parent path %q is not a folder", "父路徑 %q 不是資料夾", abs))
 		return
 	}
 	target := filepath.Join(abs, name)
 	if _, err := os.Stat(target); err == nil {
-		httpx.Err(c, http.StatusConflict, fmt.Errorf("資料夾 %q 已存在", name))
+		httpx.Err(c, http.StatusConflict, locale.Errorf("folder %q already exists", "資料夾 %q 已存在", name))
 		return
 	} else if !errors.Is(err, os.ErrNotExist) {
 		status := http.StatusBadRequest
 		if errors.Is(err, os.ErrPermission) {
 			status = http.StatusForbidden
 		}
-		httpx.Err(c, status, fmt.Errorf("無法檢查資料夾 %q：%w", target, err))
+		httpx.Err(c, status, locale.Errorf("could not check folder %q: %w", "無法檢查資料夾 %q：%w", target, err))
 		return
 	}
 	if err := os.Mkdir(target, 0o755); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			httpx.Err(c, http.StatusConflict, fmt.Errorf("資料夾 %q 已存在", name))
+			httpx.Err(c, http.StatusConflict, locale.Errorf("folder %q already exists", "資料夾 %q 已存在", name))
 			return
 		}
 		if errors.Is(err, os.ErrPermission) {
-			httpx.Err(c, http.StatusForbidden, fmt.Errorf("無法在 %q 建立資料夾：權限不足", abs))
+			httpx.Err(c, http.StatusForbidden, locale.Errorf("cannot create a folder in %q: permission denied", "無法在 %q 建立資料夾：權限不足", abs))
 			return
 		}
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -198,6 +199,6 @@ func (a *API) refuseHostFilesystem(c *gin.Context) bool {
 		return false
 	}
 	httpx.Err(c, http.StatusForbidden,
-		errors.New("browsing the server filesystem is disabled on a networked server"))
+		locale.Errorf("browsing the server filesystem is disabled on a networked server", "網路伺服器停用了瀏覽伺服器檔案系統"))
 	return true
 }

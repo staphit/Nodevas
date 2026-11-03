@@ -16,7 +16,7 @@ export default defineConfig({
   // Screenshot and video runs, not test suites — they have their own configs
   // (playwright.mobile.config.ts, playwright.demo.config.ts) and have no
   // place in an e2e pass.
-  testIgnore: /(mobile-preview|demo-videos)\.spec\.ts/,
+  testIgnore: /(mobile-preview|demo-videos|demo-stills)\.spec\.ts/,
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false,

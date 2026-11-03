@@ -137,7 +137,7 @@ func TestRunHandoffRejectsForeignBranches(t *testing.T) {
 	gitT(t, env.repo, "branch", "nodevas/handoff/moved", "main")
 	dataDir := env.client.Config.DataDir
 	if err := registerHandoff(context.Background(), dataDir, handoffEntry{
-		Branch: "nodevas/handoff/moved", RepoID: "r1", RepoPath: env.repo, Commit: strings.Repeat("0", 40),
+		Branch: "nodevas/handoff/moved", RepoID: "r1", RepoPath: env.repo, NodeID: "n-1", Commit: strings.Repeat("0", 40),
 		RunID: "moved", CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestRunHandoffRejectsForeignBranches(t *testing.T) {
 			t.Errorf("%s: decline reason %q", id, decline.Reason)
 		}
 	}
-	// Only implement runs continue a handoff.
+	// Only implement and Tester runs continue a handoff.
 	review := testJob("run-review", "ok:")
 	review.Kind, review.HandoffBranch = runnerwire.JobPlan, "nodevas/handoff/forged"
 	env.hub.offer(review)
@@ -217,5 +217,40 @@ func TestPlanTextAndShellCommand(t *testing.T) {
 	if got := redactNote("export OPENAI_API_KEY=abc123 and DB_PASSWORD: 'x y' but PATH=/usr/bin"); got !=
 		"export OPENAI_API_KEY=[redacted] and DB_PASSWORD: [redacted] but PATH=/usr/bin" {
 		t.Errorf("redactNote = %q", got)
+	}
+}
+
+// A Tester run that stops at its limit hands its partial tests on, as an
+// implement run does, and the hub offers the next Tester run that handoff
+// (runs.canHandOff): the runner continues it instead of declining.
+func TestTesterRunContinuesItsHandoff(t *testing.T) {
+	env := startPRRunner(t, nil, nil)
+	env.hub.hello()
+	first := testJob("run-tq", "edit-quota: write the tests")
+	first.Kind, first.Role = runnerwire.JobTest, "tester"
+	env.hub.offer(first)
+	result := env.hub.wait("run-tq", runnerwire.TypeFinish).Result
+	if result.HandoffBranch != "nodevas/handoff/run-tq" {
+		t.Fatalf("result = %+v", result)
+	}
+	next := testJob("run-tnext", "continue: finish the tests")
+	next.Kind, next.Role = runnerwire.JobTest, "tester"
+	next.HandoffBranch, next.HandoffNote = result.HandoffBranch, result.HandoffNote
+	env.hub.offer(next)
+	for _, msg := range env.hub.messages("run-tnext") {
+		if msg.Type == runnerwire.TypeDecline {
+			t.Fatalf("declined: %s", msg.Reason)
+		}
+	}
+	done := env.hub.wait("run-tnext", runnerwire.TypeFinish).Result
+	if done.Status != runnerwire.RunSucceeded {
+		t.Fatalf("continuing Tester run = %+v", done)
+	}
+	if stdin := env.recorded(t, "run-tnext", "stdin"); !strings.Contains(stdin, "You are continuing another agent's work") ||
+		!strings.Contains(stdin, "Your job: write tests only") {
+		t.Errorf("prompt:\n%s", stdin)
+	}
+	if log := env.recorded(t, "run-tnext", "log"); !strings.Contains(log, "Fix it") {
+		t.Errorf("the worktree did not start from the handoff: %q", log)
 	}
 }

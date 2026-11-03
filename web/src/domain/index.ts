@@ -16,3 +16,4 @@ export * as logicGateOps from "./graph/logicGate";
 export * as nodeOps from "./graph/node";
 export * as planOps from "./graph/plan";
 export * as workflowOps from "./graph/workflow";
+export * from "./graph/nodeTypes";

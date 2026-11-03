@@ -14,8 +14,8 @@ import (
 	"nodevas/internal/runnerwire"
 )
 
-// A read-only run (a review or a plan) checks out content that is not the
-// owner's, and agent CLIs run programs from config they find in the
+// A read-only run (a review, a plan or a judge) checks out content that is
+// not the owner's, and agent CLIs run programs from config they find in the
 // directory they run in. See adapter/repoconfig.go for what each CLI reads
 // and which have a switch for it; for the rest, the runner removes that
 // config from the worktree before the agent starts and again after it exits,
@@ -122,9 +122,10 @@ func repoConfigTarget(root *os.Root, path string) (string, error) {
 }
 
 // changedFiles is `git status --porcelain` of a read-only run's worktree,
-// leaving out the agent config the runner removed there.
+// leaving out the agent config the runner removed there. It does not look
+// inside submodules (see hardenedArgs).
 func changedFiles(ctx context.Context, dir string) (string, error) {
-	args := []string{"status", "--porcelain", "--", "."}
+	args := []string{"status", "--porcelain", "--ignore-submodules=dirty", "--", "."}
 	for _, path := range adapter.RepoConfigPaths() {
 		args = append(args, ":(exclude,literal)"+path)
 	}

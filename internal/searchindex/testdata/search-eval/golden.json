@@ -1,0 +1,1692 @@
+{
+ "generator": "FTS5 bm25(search_fts, 1.0, 1.0), SQLite index at d532b16",
+ "limit": 50,
+ "summary": {
+  "r1": 0.43333333333333335,
+  "r3": 0.6333333333333333,
+  "r5": 0.8,
+  "mrr": 0.575917102055033
+ },
+ "answers": [
+  {
+   "id": "q01",
+   "ranked": [
+    {
+     "id": "s-10",
+     "score": 8.890334813475738,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 8.049287516270272,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 6.713779005786943,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 6.2017278628606665,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 6.075862244278122,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 5.226671812431112,
+     "match": "terms"
+    },
+    {
+     "id": "s-29",
+     "score": 4.838128693477114,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 4.732590231090709,
+     "match": "terms"
+    },
+    {
+     "id": "s-27",
+     "score": 4.528268968259003,
+     "match": "terms"
+    },
+    {
+     "id": "s-06",
+     "score": 4.268379383462462,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 11
+  },
+  {
+   "id": "q02",
+   "ranked": [
+    {
+     "id": "note-03",
+     "score": 11.517070227743982,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 10.620324915594963,
+     "match": "terms"
+    },
+    {
+     "id": "s-22",
+     "score": 10.10430443425113,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 9.079963526724924,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 7.032674263836664,
+     "match": "terms"
+    },
+    {
+     "id": "s-06",
+     "score": 6.171651880270044,
+     "match": "terms"
+    },
+    {
+     "id": "s-07",
+     "score": 5.800397838215087,
+     "match": "terms"
+    },
+    {
+     "id": "s-15",
+     "score": 5.591154213906053,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 5.427632459624814,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 5.226668386455623,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q03",
+   "ranked": [
+    {
+     "id": "note-08",
+     "score": 29.81664274316247,
+     "match": "terms"
+    },
+    {
+     "id": "s-01",
+     "score": 13.682611545938936,
+     "match": "terms"
+    },
+    {
+     "id": "s-40",
+     "score": 11.753790523426126,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 9.467006191380968,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 9.430143327253287,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 8.309687510312612,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 8.198810453063805,
+     "match": "terms"
+    },
+    {
+     "id": "s-38",
+     "score": 8.181957833942992,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 8.175642246737004,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 7.526432037521065,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q04",
+   "ranked": [
+    {
+     "id": "note-05",
+     "score": 16.021641736525666,
+     "match": "terms"
+    },
+    {
+     "id": "s-35",
+     "score": 15.780634236620608,
+     "match": "terms"
+    },
+    {
+     "id": "s-19",
+     "score": 11.326969839726752,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 9.571508286711495,
+     "match": "terms"
+    },
+    {
+     "id": "s-30",
+     "score": 9.177568045206703,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 7.5717105323998535,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 7.2620291976505165,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 6.875508841680302,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 6.52314114261938,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 5.671357584511071,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q05",
+   "ranked": [
+    {
+     "id": "note-07",
+     "score": 47.051065189961854,
+     "match": "terms"
+    },
+    {
+     "id": "s-36",
+     "score": 15.259546046925037,
+     "match": "terms"
+    },
+    {
+     "id": "s-08",
+     "score": 10.506879688412337,
+     "match": "terms"
+    },
+    {
+     "id": "s-30",
+     "score": 9.858041531174274,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 8.636011818022219,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 8.498679128024989,
+     "match": "terms"
+    },
+    {
+     "id": "s-40",
+     "score": 7.729943544247747,
+     "match": "terms"
+    },
+    {
+     "id": "s-39",
+     "score": 7.49864094575699,
+     "match": "terms"
+    },
+    {
+     "id": "s-19",
+     "score": 7.356101614282141,
+     "match": "terms"
+    },
+    {
+     "id": "s-07",
+     "score": 6.521273814818404,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q06",
+   "ranked": [
+    {
+     "id": "note-06",
+     "score": 18.481236884563096,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 12.321017556721397,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 7.067517862740866,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 7.043278250304304,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 6.901261845916983,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 6.798451939905148,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 6.244004371077773,
+     "match": "terms"
+    },
+    {
+     "id": "s-18",
+     "score": 5.631819184135665,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 5.482379808057896,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 4.6098115982753285,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q07",
+   "ranked": [
+    {
+     "id": "s-20",
+     "score": 11.04487808526862,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 10.825777430284365,
+     "match": "terms"
+    },
+    {
+     "id": "s-19",
+     "score": 10.704776664512012,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 8.452094800357,
+     "match": "terms"
+    },
+    {
+     "id": "s-17",
+     "score": 8.164393993350469,
+     "match": "terms"
+    },
+    {
+     "id": "s-28",
+     "score": 8.117804537094463,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 8.03186630947173,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 8.00127952050192,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 7.982298081228796,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 7.338710003399057,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q08",
+   "ranked": [
+    {
+     "id": "s-40",
+     "score": 9.484884485059604,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 7.243467638822038,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 7.04562033328447,
+     "match": "terms"
+    },
+    {
+     "id": "note-01",
+     "score": 5.974215299306535,
+     "match": "terms"
+    },
+    {
+     "id": "s-01",
+     "score": 5.591374925518457,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 5.074309096870005,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 4.246345329500324,
+     "match": "terms"
+    },
+    {
+     "id": "s-23",
+     "score": 3.1618882473862153,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 2.9560228425459383,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 2.813912732648704,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q09",
+   "ranked": [
+    {
+     "id": "s-27",
+     "score": 3.546195684372068,
+     "match": "terms"
+    },
+    {
+     "id": "s-28",
+     "score": 1.4573274366901932,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 1.413667828428395,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 1.3875388469675922,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 1.3840504523991277,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 1.3668683171964453,
+     "match": "terms"
+    },
+    {
+     "id": "s-36",
+     "score": 1.3612353506148223,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 1.1418623384220117,
+     "match": "terms"
+    },
+    {
+     "id": "s-07",
+     "score": 0.9224787833599678,
+     "match": "terms"
+    },
+    {
+     "id": "s-08",
+     "score": 0.9161073899702912,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 25
+  },
+  {
+   "id": "q10",
+   "ranked": [
+    {
+     "id": "s-04",
+     "score": 10.381276158186017,
+     "match": "terms"
+    },
+    {
+     "id": "s-01",
+     "score": 7.0209731973685425,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 6.612630328127356,
+     "match": "terms"
+    },
+    {
+     "id": "s-21",
+     "score": 6.533844552598442,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 6.392897613253745,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 5.843888289532994,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 4.366965982651415,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 4.246464933942019,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 4.181737609521295,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 4.089584261176589,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 5
+  },
+  {
+   "id": "q11",
+   "ranked": [
+    {
+     "id": "note-05",
+     "score": 11.458649823747598,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 10.531503866284988,
+     "match": "terms"
+    },
+    {
+     "id": "note-01",
+     "score": 8.350329145279895,
+     "match": "terms"
+    },
+    {
+     "id": "s-01",
+     "score": 6.14458392437809,
+     "match": "terms"
+    },
+    {
+     "id": "s-38",
+     "score": 5.454645646481096,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 5.445227084818237,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 5.4219865015083055,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 5.219895660864293,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 4.455775427511786,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 4.331523982355138,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 2
+  },
+  {
+   "id": "q12",
+   "ranked": [
+    {
+     "id": "s-27",
+     "score": 18.645480475843673,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 15.24380082738161,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 11.343304959946423,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 10.785347474492411,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 10.561886695734051,
+     "match": "terms"
+    },
+    {
+     "id": "s-26",
+     "score": 9.527803501546865,
+     "match": "terms"
+    },
+    {
+     "id": "s-19",
+     "score": 9.386804610441068,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 9.382681079501355,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 8.441927422169618,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 7.664424579646915,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q13",
+   "ranked": [
+    {
+     "id": "s-05",
+     "score": 13.330873959600504,
+     "match": "terms"
+    },
+    {
+     "id": "s-17",
+     "score": 8.383638262245613,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 6.684313366499682,
+     "match": "terms"
+    },
+    {
+     "id": "s-19",
+     "score": 5.836914942112399,
+     "match": "terms"
+    },
+    {
+     "id": "s-33",
+     "score": 5.093196465631958,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 5.025033947091249,
+     "match": "terms"
+    },
+    {
+     "id": "s-27",
+     "score": 4.824039661202332,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 4.808075659206989,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 4.443949714082796,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 4.137493927556466,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 6
+  },
+  {
+   "id": "q14",
+   "ranked": [
+    {
+     "id": "s-32",
+     "score": 15.452689064028528,
+     "match": "terms"
+    },
+    {
+     "id": "s-26",
+     "score": 8.742895387395038,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 7.558580871456954,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 7.041556672280468,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 6.678331221420748,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 5.6354518475605735,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 4.760216751610812,
+     "match": "terms"
+    },
+    {
+     "id": "s-33",
+     "score": 4.649346906891801,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 4.334066960694319,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 4.19113337754622,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 5
+  },
+  {
+   "id": "q15",
+   "ranked": [
+    {
+     "id": "s-38",
+     "score": 19.709511565112575,
+     "match": "terms"
+    },
+    {
+     "id": "s-01",
+     "score": 17.829550774419502,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 13.832638455933967,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 11.462051231830866,
+     "match": "terms"
+    },
+    {
+     "id": "s-06",
+     "score": 10.056887532832814,
+     "match": "terms"
+    },
+    {
+     "id": "s-15",
+     "score": 9.870765314754813,
+     "match": "terms"
+    },
+    {
+     "id": "s-27",
+     "score": 9.023725023606652,
+     "match": "terms"
+    },
+    {
+     "id": "note-01",
+     "score": 8.283974802154319,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 8.220916583705362,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 6.383176297859751,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q16",
+   "ranked": [
+    {
+     "id": "s-01",
+     "score": 14.434884351429016,
+     "match": "terms"
+    },
+    {
+     "id": "s-36",
+     "score": 8.723546518700665,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 6.127738045822457,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 6.054714665630154,
+     "match": "terms"
+    },
+    {
+     "id": "s-18",
+     "score": 6.013290915278363,
+     "match": "terms"
+    },
+    {
+     "id": "s-15",
+     "score": 5.785740444576941,
+     "match": "terms"
+    },
+    {
+     "id": "s-07",
+     "score": 5.680843302204389,
+     "match": "terms"
+    },
+    {
+     "id": "s-03",
+     "score": 5.402555145285362,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 5.131605802293331,
+     "match": "terms"
+    },
+    {
+     "id": "s-25",
+     "score": 4.619752706328489,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 5
+  },
+  {
+   "id": "q17",
+   "ranked": [
+    {
+     "id": "s-03",
+     "score": 16.037804306634282,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 11.686003801923762,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 11.084672485983024,
+     "match": "terms"
+    },
+    {
+     "id": "s-17",
+     "score": 11.080381180990676,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 10.700275343510018,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 9.026801453036338,
+     "match": "terms"
+    },
+    {
+     "id": "s-35",
+     "score": 8.966443865185568,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 8.342910122366566,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 8.290348729412468,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 8.13787228784263,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 22
+  },
+  {
+   "id": "q18",
+   "ranked": [
+    {
+     "id": "s-09",
+     "score": 12.774823764910487,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 9.798061999209734,
+     "match": "terms"
+    },
+    {
+     "id": "s-08",
+     "score": 8.190035967967546,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 7.325964563506141,
+     "match": "terms"
+    },
+    {
+     "id": "s-23",
+     "score": 6.888176704357665,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 6.472844025411532,
+     "match": "terms"
+    },
+    {
+     "id": "s-02",
+     "score": 5.843891105892054,
+     "match": "terms"
+    },
+    {
+     "id": "s-33",
+     "score": 4.733188165247121,
+     "match": "terms"
+    },
+    {
+     "id": "note-01",
+     "score": 4.540392631291136,
+     "match": "terms"
+    },
+    {
+     "id": "s-32",
+     "score": 3.9255224534394535,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 29
+  },
+  {
+   "id": "q19",
+   "ranked": [
+    {
+     "id": "s-32",
+     "score": 17.14915688567937,
+     "match": "terms"
+    },
+    {
+     "id": "s-15",
+     "score": 16.013196465259888,
+     "match": "terms"
+    },
+    {
+     "id": "s-22",
+     "score": 14.874013834014043,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 13.735136989270869,
+     "match": "terms"
+    },
+    {
+     "id": "s-06",
+     "score": 12.154705444139337,
+     "match": "terms"
+    },
+    {
+     "id": "s-40",
+     "score": 11.460668619320407,
+     "match": "terms"
+    },
+    {
+     "id": "s-10",
+     "score": 10.863148321687493,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 10.347975549686893,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 8.88043983660018,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 7.906410979335832,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 5
+  },
+  {
+   "id": "q20",
+   "ranked": [
+    {
+     "id": "s-14",
+     "score": 17.045355912426377,
+     "match": "terms"
+    },
+    {
+     "id": "s-25",
+     "score": 16.478233834916523,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 16.04834049320147,
+     "match": "terms"
+    },
+    {
+     "id": "s-28",
+     "score": 12.432719977062435,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 11.891389298491328,
+     "match": "terms"
+    },
+    {
+     "id": "s-32",
+     "score": 11.884020421721749,
+     "match": "terms"
+    },
+    {
+     "id": "s-33",
+     "score": 11.263199337535218,
+     "match": "terms"
+    },
+    {
+     "id": "s-15",
+     "score": 11.193695858938126,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 10.281410120409381,
+     "match": "terms"
+    },
+    {
+     "id": "s-27",
+     "score": 10.261859000123033,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 5
+  },
+  {
+   "id": "q21",
+   "ranked": [
+    {
+     "id": "s-16",
+     "score": 39.85623103781255,
+     "match": "terms"
+    },
+    {
+     "id": "s-23",
+     "score": 26.39080331358223,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 25.840054348129026,
+     "match": "terms"
+    },
+    {
+     "id": "note-08",
+     "score": 25.521764989871766,
+     "match": "terms"
+    },
+    {
+     "id": "s-25",
+     "score": 14.774058196581043,
+     "match": "terms"
+    },
+    {
+     "id": "s-29",
+     "score": 12.582690769982069,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 10.613555979580749,
+     "match": "terms"
+    },
+    {
+     "id": "s-40",
+     "score": 9.72018381297683,
+     "match": "terms"
+    },
+    {
+     "id": "s-06",
+     "score": 9.568942849275565,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 9.253768052248665,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 2
+  },
+  {
+   "id": "q22",
+   "ranked": [
+    {
+     "id": "s-39",
+     "score": 9.586460233082612,
+     "match": "terms"
+    },
+    {
+     "id": "s-40",
+     "score": 9.451757713564792,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 8.986138594141087,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 8.596217538863373,
+     "match": "terms"
+    },
+    {
+     "id": "s-23",
+     "score": 8.42892647732878,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 8.067380030350032,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 8.019305556655183,
+     "match": "terms"
+    },
+    {
+     "id": "s-38",
+     "score": 6.579602546964215,
+     "match": "terms"
+    },
+    {
+     "id": "s-37",
+     "score": 6.314745571046618,
+     "match": "terms"
+    },
+    {
+     "id": "s-25",
+     "score": 5.800092339184473,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q23",
+   "ranked": [
+    {
+     "id": "s-16",
+     "score": 13.291258578064182,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 12.114589799699337,
+     "match": "terms"
+    },
+    {
+     "id": "s-12",
+     "score": 11.822082007832918,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 11.771786082202013,
+     "match": "terms"
+    },
+    {
+     "id": "note-01",
+     "score": 11.634302374922846,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 10.738988586872598,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 10.406506363581686,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 9.46377072634587,
+     "match": "terms"
+    },
+    {
+     "id": "s-07",
+     "score": 8.712277466404801,
+     "match": "terms"
+    },
+    {
+     "id": "note-08",
+     "score": 7.582960407254419,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 15
+  },
+  {
+   "id": "q24",
+   "ranked": [
+    {
+     "id": "s-15",
+     "score": 18.987183038481746,
+     "match": "terms"
+    },
+    {
+     "id": "s-13",
+     "score": 15.798629414968627,
+     "match": "terms"
+    },
+    {
+     "id": "s-17",
+     "score": 14.957163297216635,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 10.054816422578456,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 9.223888703184828,
+     "match": "terms"
+    },
+    {
+     "id": "s-31",
+     "score": 9.088824511932557,
+     "match": "terms"
+    },
+    {
+     "id": "s-11",
+     "score": 8.579788113876642,
+     "match": "terms"
+    },
+    {
+     "id": "note-08",
+     "score": 8.337782241943994,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 7.774148805872973,
+     "match": "terms"
+    },
+    {
+     "id": "s-27",
+     "score": 7.093894399640216,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 2
+  },
+  {
+   "id": "q25",
+   "ranked": [
+    {
+     "id": "s-02",
+     "score": 25.721793983791176,
+     "match": "terms"
+    },
+    {
+     "id": "s-09",
+     "score": 14.963762233477548,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 13.11812868139027,
+     "match": "terms"
+    },
+    {
+     "id": "s-04",
+     "score": 10.825480486328681,
+     "match": "terms"
+    },
+    {
+     "id": "s-36",
+     "score": 9.832562662459646,
+     "match": "terms"
+    },
+    {
+     "id": "s-14",
+     "score": 8.147692302743454,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 7.599913181805002,
+     "match": "terms"
+    },
+    {
+     "id": "s-03",
+     "score": 6.160942528304802,
+     "match": "terms"
+    },
+    {
+     "id": "s-05",
+     "score": 5.948944976516451,
+     "match": "terms"
+    },
+    {
+     "id": "s-20",
+     "score": 5.7349888518753405,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q26",
+   "ranked": [
+    {
+     "id": "en-03",
+     "score": 46.09761987055824,
+     "match": "terms"
+    },
+    {
+     "id": "en-01",
+     "score": 45.76408106473059,
+     "match": "terms"
+    },
+    {
+     "id": "en-02",
+     "score": 42.43435044676867,
+     "match": "terms"
+    },
+    {
+     "id": "en-04",
+     "score": 38.26507360147502,
+     "match": "terms"
+    },
+    {
+     "id": "note-05",
+     "score": 6.672815761058933,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 6.332923264760796,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 5.722181840998311,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 3.68473320363025,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 3.5830595436996533,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 3.5284423461591916,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 2
+  },
+  {
+   "id": "q27",
+   "ranked": [
+    {
+     "id": "en-02",
+     "score": 56.718061885148245,
+     "match": "terms"
+    },
+    {
+     "id": "en-04",
+     "score": 53.05572912012502,
+     "match": "terms"
+    },
+    {
+     "id": "en-03",
+     "score": 48.78462527151214,
+     "match": "terms"
+    },
+    {
+     "id": "en-01",
+     "score": 44.42921709770741,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 8.61021673957394,
+     "match": "terms"
+    },
+    {
+     "id": "note-05",
+     "score": 8.250302742397535,
+     "match": "terms"
+    },
+    {
+     "id": "note-09",
+     "score": 7.337510363168693,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 1.921488712199088,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 1.8684685681493634,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 1.8399871365467773,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  },
+  {
+   "id": "q28",
+   "ranked": [
+    {
+     "id": "en-03",
+     "score": 46.260520380155036,
+     "match": "terms"
+    },
+    {
+     "id": "en-04",
+     "score": 43.030259419009205,
+     "match": "terms"
+    },
+    {
+     "id": "en-02",
+     "score": 39.32178359562898,
+     "match": "terms"
+    },
+    {
+     "id": "en-01",
+     "score": 39.05761839396928,
+     "match": "terms"
+    },
+    {
+     "id": "note-05",
+     "score": 11.80046044099085,
+     "match": "terms"
+    },
+    {
+     "id": "s-16",
+     "score": 3.524517303913728,
+     "match": "terms"
+    },
+    {
+     "id": "note-10",
+     "score": 2.381996417449172,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 2.267443826886258,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 2.2048776683637943,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 2.171268295418101,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 2
+  },
+  {
+   "id": "q29",
+   "ranked": [
+    {
+     "id": "en-01",
+     "score": 45.59291939415177,
+     "match": "terms"
+    },
+    {
+     "id": "en-04",
+     "score": 42.798104852498376,
+     "match": "terms"
+    },
+    {
+     "id": "en-03",
+     "score": 35.194231051462715,
+     "match": "terms"
+    },
+    {
+     "id": "en-02",
+     "score": 34.48170032119459,
+     "match": "terms"
+    },
+    {
+     "id": "note-05",
+     "score": 16.340264847932293,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 14.021268979379334,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 13.634377047123136,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 13.426545901013348,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 13.130667530357014,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 12.921296732117375,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 3
+  },
+  {
+   "id": "q30",
+   "ranked": [
+    {
+     "id": "en-01",
+     "score": 39.93915859278727,
+     "match": "terms"
+    },
+    {
+     "id": "en-02",
+     "score": 29.948647454549263,
+     "match": "terms"
+    },
+    {
+     "id": "en-03",
+     "score": 24.61256718720383,
+     "match": "terms"
+    },
+    {
+     "id": "en-04",
+     "score": 23.215333717031815,
+     "match": "terms"
+    },
+    {
+     "id": "note-05",
+     "score": 10.370960912168515,
+     "match": "terms"
+    },
+    {
+     "id": "note-07",
+     "score": 4.188918063586189,
+     "match": "terms"
+    },
+    {
+     "id": "note-06",
+     "score": 4.073332303623926,
+     "match": "terms"
+    },
+    {
+     "id": "note-04",
+     "score": 4.011241785459024,
+     "match": "terms"
+    },
+    {
+     "id": "note-02",
+     "score": 3.9228467521381862,
+     "match": "terms"
+    },
+    {
+     "id": "note-03",
+     "score": 3.8602962575284954,
+     "match": "terms"
+    }
+   ],
+   "firstGold": 1
+  }
+ ]
+}

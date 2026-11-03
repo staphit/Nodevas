@@ -22,10 +22,10 @@ import (
 func transferFixture(t *testing.T) (*Server, *project.ProjectManager) {
 	t.Helper()
 	pm := projectManagerForTest(t)
-	if err := pm.Activate("other", true, ""); err != nil {
+	if err := pm.Activate("other", true, "", ""); err != nil {
 		t.Fatalf("create other project: %v", err)
 	}
-	if err := pm.Activate("main", false, ""); err != nil {
+	if err := pm.Activate("main", false, "", ""); err != nil {
 		t.Fatalf("switch back to main: %v", err)
 	}
 
@@ -441,7 +441,7 @@ func TestTransferRejectsUnknownTargetAndNodes(t *testing.T) {
 // a selection that was cut from project A.
 func TestTransferAcceptsAnExplicitSource(t *testing.T) {
 	server, pm := transferFixture(t)
-	if err := pm.Activate("other", false, ""); err != nil {
+	if err := pm.Activate("other", false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 

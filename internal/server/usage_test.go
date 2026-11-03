@@ -8,6 +8,7 @@ import (
 
 	"nodevas/internal/realtime"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 	"nodevas/internal/usage"
 )
 
@@ -124,3 +125,58 @@ func TestSessionUsageThroughTheRunnerProxy(t *testing.T) {
 		t.Fatalf("repriced = %+v", got.Totals)
 	}
 }
+
+// B-07: an interactive run's agent session reports its tokens through the
+// proxy with the run's id: the run records them and their cost.
+func TestInteractiveRunRecordsSessionUsage(t *testing.T) {
+	server, _, inbox, database, users := accountServerPartsForTest(t)
+	if err := users.AddWithEmail(t.Context(), "bea", "correct-horse-battery", "", "bea@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	server.UseRunnersDB(database)
+	server.UseAgentsDB(database)
+	s := &runnerTestServer{server: server, handler: server.Handler(), inbox: inbox}
+	bea := s.signIn(t, "bea@example.test")
+	runner := s.create(t, bea, "bea-pc")
+
+	st := server.runs.Store()
+	rec, err := st.Create(t.Context(), runs.New{
+		Project: ".", NodeID: "n1", NodeTitle: "Fix", RunnerID: runner.Runner.ID, RunnerName: "bea-pc",
+		OwnerID: runner.Runner.OwnerID, Agent: "claude", Model: "default", RepoID: "repo-1", RepoName: "repo",
+		JobPrompt: "# Fix", CreatedBy: runner.Runner.OwnerID, CreatedByName: "bea", Mode: runnerwire.ModeInteractive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Transition(t.Context(), rec.ID, runnerwire.RunOffered, runs.Change{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Transition(t.Context(), rec.ID, runnerwire.RunRunning, runs.Change{Runner: runner.Runner.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	header := map[string]string{"Authorization": "Bearer " + runner.Token, runnerwire.RunIDHeader: rec.ID}
+	post := func(path, body string) int {
+		t.Helper()
+		return s.do(t, nil, http.MethodPost, runnerwire.ProxyPathPrefix+path, body, header).Code
+	}
+	if code := post("agents/heartbeat", `{"sessionId":"claude:run1","name":"run-claude","agent":"claude"}`); code != http.StatusOK {
+		t.Fatalf("heartbeat = %d", code)
+	}
+	if code := post("agents/sessions/claude:run1/usage", `{"agent":"claude","models":[{"model":"claude-sonnet-4","inputTokens":1000,"outputTokens":200}]}`); code != http.StatusOK {
+		t.Fatalf("usage = %d", code)
+	}
+	got, err := st.Get(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage == nil || got.Usage.InputTokens != 1000 || got.Usage.OutputTokens != 200 || !near6(got.CostUSD, 0.006) || got.CostEstimated {
+		t.Fatalf("interactive run usage = %+v cost %v estimated %v, want 1000/200 at $0.006", got.Usage, got.CostUSD, got.CostEstimated)
+	}
+	var tied string
+	if err := database.QueryRow(`SELECT run_id FROM agent_session_usage WHERE session_id = 'claude:run1'`).Scan(&tied); err != nil || tied != rec.ID {
+		t.Fatalf("session usage run_id = %q, %v", tied, err)
+	}
+}
+
+func near6(a, b float64) bool { return a-b < 1e-6 && b-a < 1e-6 }

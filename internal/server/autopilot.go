@@ -26,6 +26,8 @@ func (s *Server) startAutopilot(database *db.DB) {
 		BoardChanged: func(project string) {
 			s.broadcastProject(project, "state-changed", "")
 		},
+		Route:   s.autopilotRoute,
+		MayWork: s.AccountMayWrite,
 	})
 	s.runs.Observe(s.autopilot.Observe)
 	ctx, cancel := context.WithCancel(context.Background())

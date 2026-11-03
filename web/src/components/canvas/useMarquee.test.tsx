@@ -131,4 +131,31 @@ describe("useMarquee", () => {
 
     expect(multi).toHaveBeenCalledWith(["node-1", "node-2"]);
   });
+
+  // A culled board has no element for a card outside the view, so the cards
+  // the marquee reaches beyond what is mounted come from the layout instead.
+  it("adds the unmounted cards the layout puts inside the marquee", () => {
+    const multi = vi.fn();
+    const nodesInRect = vi.fn(() => ["node-1", "far-away"]);
+    const { result } = renderHook(() =>
+      useMarquee({
+        enabled: true,
+        pointFromClient: (x, y) => ({ x: x * 2, y: y * 2 }),
+        nodesInRect,
+        onSingleSelect: vi.fn(),
+        onMultiSelect: multi,
+        onClearSelection: vi.fn(),
+      }),
+    );
+    const board = boardWithCards(1);
+
+    act(() => {
+      result.current.handlers.onPointerDown(event(board));
+      result.current.handlers.onPointerUp(event(board, { clientX: 120, clientY: 70 }));
+    });
+
+    // Board space, through pointFromClient: (10,10)–(120,70) doubled.
+    expect(nodesInRect).toHaveBeenCalledWith({ left: 20, right: 240, top: 20, bottom: 140 });
+    expect(multi).toHaveBeenCalledWith(["node-1", "far-away"]);
+  });
 });

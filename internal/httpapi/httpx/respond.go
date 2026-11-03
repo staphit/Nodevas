@@ -16,13 +16,14 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"nodevas/internal/store"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // MaxRequestBody caps any JSON request body.
@@ -31,8 +32,12 @@ const MaxRequestBody = 16 << 20
 // writeErr is the one place an error becomes a response body, so the shape
 // {"error": "..."} is the same everywhere. A 5xx is logged and its detail
 // withheld: the caller gets the status text, the operator gets the cause.
+//
+// The message is in the reader's language (Language): the hub's own
+// sentences in err are worded in both (locale.Errorf).
 func Err(c *gin.Context, status int, err error) {
-	message := err.Error()
+	status = carriedStatus(status, err)
+	message := locale.Render(err, Language(c.Request))
 	if status >= 500 {
 		log.Printf("request failed: %v", err)
 		message = http.StatusText(status)
@@ -42,6 +47,18 @@ func Err(c *gin.Context, status int, err error) {
 	c.AbortWithStatusJSON(status, map[string]string{"error": message})
 }
 
+// carriedStatus is the status to answer err with when a handler gave status.
+// A handler answers 500 for whatever it did not expect; an error that knows it
+// is the caller's to fix (a graph.yaml that does not parse, say) is answered
+// with its own 4xx instead of being withheld as a server failure.
+func carriedStatus(status int, err error) int {
+	var carried statusError
+	if status >= 500 && errors.As(err, &carried) && carried.Status() < 500 {
+		return carried.Status()
+	}
+	return status
+}
+
 // Coded is Err with a machine-readable reason alongside the prose.
 //
 // A status code is often not specific enough to act on: "somebody else already
@@ -49,7 +66,8 @@ func Err(c *gin.Context, status int, err error) {
 // caller's next move differs completely between them. The prose is for a person
 // or a model to read; the code is for a program to branch on.
 func Coded(c *gin.Context, status int, code string, err error, extras map[string]any) {
-	message := err.Error()
+	status = carriedStatus(status, err)
+	message := locale.Render(err, Language(c.Request))
 	if status >= 500 {
 		log.Printf("request failed: %v", err)
 		message = http.StatusText(status)
@@ -83,14 +101,14 @@ func DecodeJSONLimit(c *gin.Context, dst any, limit int64) bool {
 	if err := decoder.Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			Err(c, http.StatusRequestEntityTooLarge, errors.New("request body is too large"))
+			Err(c, http.StatusRequestEntityTooLarge, locale.Errorf("request body is too large", "請求內容太大"))
 		} else {
-			Err(c, http.StatusBadRequest, fmt.Errorf("invalid JSON body: %w", err))
+			Err(c, http.StatusBadRequest, locale.Errorf("invalid JSON body: %w", "JSON 內容無效：%w", err))
 		}
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		Err(c, http.StatusBadRequest, errors.New("request body must contain one JSON value"))
+		Err(c, http.StatusBadRequest, locale.Errorf("request body must contain one JSON value", "請求內容只能有一個 JSON 值"))
 		return false
 	}
 	return true

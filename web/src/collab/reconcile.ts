@@ -1,5 +1,5 @@
 /**
- * Merging a file that changed on disk into a live document [P2].
+ * Merging a file that changed on disk into a live document.
  *
  * While two people edit a node through the CRDT, the file underneath them can
  * still move: somebody saves it from vim, an agent rewrites it, a `git checkout`

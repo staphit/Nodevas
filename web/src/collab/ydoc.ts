@@ -1,5 +1,5 @@
 /**
- * The live document, client side [P2].
+ * The live document, client side.
  *
  * One `Y.Doc` per open node, driven by the phase-2c document protocol: the hub
  * relays opaque Yjs updates, elects one leader to write the file, and asks that

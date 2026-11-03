@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -114,6 +115,12 @@ func (h *Hub) RecordSessionChange(ctx context.Context, in SessionChangeInput) (r
 	if err != nil {
 		return runnerwire.SessionChange{}, err
 	}
+	// Sessions are keyed by the project's room (its root), as Touch keys them.
+	actionKey := in.Room
+	if actionKey == "" {
+		actionKey = in.Project
+	}
+	h.LogAction(actionKey, in.Session.ID, in.Session.RunID, ActionChanges, in.NodeID, strconv.Itoa(len(out.Files)))
 	room := in.Room
 	if room == "" {
 		room = in.Project

@@ -1,5 +1,5 @@
 /**
- * Live collaboration state [P2].
+ * Live collaboration state.
  *
  * Everything here mirrors what the server pushes down the websocket: who else
  * is in this project, and which documents they hold open. It is display and

@@ -98,42 +98,81 @@ export function useBoardColumns({
     };
     const cols: Col[] = [];
     const placed = new Map<string, Col>();
-    const freeColumn = (preferred: number, row: number, width: number, height: number) => {
-      for (let offset = 0; offset <= MAX_COL; offset++) {
-        const candidate = (preferred + offset) % (MAX_COL + 1);
-        const overlaps = cols.some(
-          (column) =>
-            Math.abs((candidate - column.index) * COL_W) <
-              (width + column.width) / 2 + CARD_GAP_X &&
-            Math.abs((row - column.row) * ROW_H) <
-              (height + column.height) / 2 + CARD_GAP_Y,
-        );
-        if (!overlaps) return candidate;
-      }
-      return preferred;
+    // Cards bucketed by whole cell. Two cards can only come within a gap of
+    // each other when their cells are at most three apart either way (the
+    // widest card is 360px on 164px columns, the tallest 180px on 80px rows),
+    // so a slot check reads 49 buckets instead of every card on the board.
+    const REACH = 3;
+    const buckets = new Map<number, Col[]>();
+    const bucketKey = (col: number, row: number) =>
+      Math.floor(row) * (MAX_COL + 1 + 2 * REACH) + Math.floor(col);
+    const occupy = (col: Col) => {
+      const key = bucketKey(col.index, col.row);
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(col);
+      else buckets.set(key, [col]);
+      placed.set(col.node.id, col);
+      cols.push(col);
     };
+    const nearby = (col: number, row: number, hit: (column: Col) => boolean) => {
+      for (let dr = -REACH; dr <= REACH; dr++) {
+        for (let dc = -REACH; dc <= REACH; dc++) {
+          if (buckets.get(bucketKey(col + dc, row + dr))?.some(hit)) return true;
+        }
+      }
+      return false;
+    };
+    const blocked = (candidate: number, row: number, width: number, height: number) =>
+      nearby(
+        candidate,
+        row,
+        (column) =>
+          Math.abs((candidate - column.index) * COL_W) <
+            (width + column.width) / 2 + CARD_GAP_X &&
+          Math.abs((row - column.row) * ROW_H) < (height + column.height) / 2 + CARD_GAP_Y,
+      );
+    // A saved card whose centre sits within half a card of one already placed
+    // is hidden under it. A drop onto another card is refused and a resize
+    // keeps the centre, so only a broken layout writes that; such cards are
+    // laid out afresh instead of staying unclickable underneath.
+    const buried = (col: number, row: number, width: number, height: number) =>
+      nearby(
+        col,
+        row,
+        (column) =>
+          Math.abs((col - column.index) * COL_W) < Math.min(width, column.width) / 2 &&
+          Math.abs((row - column.row) * ROW_H) < Math.min(height, column.height) / 2,
+      );
     for (const [id, p] of [...posOf.entries()].sort(
       (a, b) => a[1].col - b[1].col || a[1].row - b[1].row,
     )) {
-      const col: Col = { node: byId.get(id)!, row: p.row, index: p.col, ...nodeSize(id) };
-      placed.set(id, col);
-      cols.push(col);
+      const size = nodeSize(id);
+      if (buried(p.col, p.row, size.width, size.height)) continue;
+      occupy({ node: byId.get(id)!, row: p.row, index: p.col, ...size });
     }
+    // Where each row's next free slot may be: every cell left of it is taken.
+    // A row that fills up passes its cards on to the rows below it (and then
+    // to the ones above), so an overflowing row never piles cards onto a cell.
     const nextColByRow = new Map<number, number>();
+    const freeSlot = (preferredRow: number, width: number, height: number) => {
+      for (let step = 0; step <= MAX_ROW; step++) {
+        const row = (preferredRow + step) % (MAX_ROW + 1);
+        for (let col = nextColByRow.get(row) ?? 0; col <= MAX_COL; col++) {
+          if (!blocked(col, row, width, height)) return { col, row };
+        }
+        nextColByRow.set(row, MAX_COL + 1);
+      }
+      return null;
+    };
     for (const id of dfsOrder) {
       if (placed.has(id)) continue;
-      const row = Math.min(depthOf.get(id) ?? 0, MAX_ROW);
+      const depthRow = Math.min(depthOf.get(id) ?? 0, MAX_ROW);
       const size = nodeSize(id);
-      const next = freeColumn(nextColByRow.get(row) ?? 0, row, size.width, size.height);
-      nextColByRow.set(row, Math.min(next + 1, MAX_COL));
-      const col: Col = {
-        node: byId.get(id)!,
-        row,
-        index: next,
-        ...size,
-      };
-      placed.set(id, col);
-      cols.push(col);
+      // A board with every one of its 100k cells taken has nowhere left;
+      // the card then shares its depth row's first cell.
+      const slot = freeSlot(depthRow, size.width, size.height) ?? { col: 0, row: depthRow };
+      nextColByRow.set(slot.row, slot.col + 1);
+      occupy({ node: byId.get(id)!, row: slot.row, index: slot.col, ...size });
     }
     cols.sort((a, b) => a.index - b.index || a.row - b.row || a.node.id.localeCompare(b.node.id));
     const maxCol = cols.reduce((m, c) => Math.max(m, c.index), 0);

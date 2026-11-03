@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 const (
@@ -84,14 +84,14 @@ func deleteCleanupUnavailable(err error) error {
 // is removed. Callers hold s.mu.
 func (s *Store) queueDeleteCleanupsLocked(records []deleteCleanupRecord) ([]queuedDeleteCleanup, error) {
 	if len(records) == 0 {
-		return nil, errors.New("delete cleanup has no records")
+		return nil, locale.Errorf("delete cleanup has no records", "刪除清理沒有任何紀錄")
 	}
 	queued, err := s.loadDeleteCleanupQueueLocked()
 	if err != nil {
 		return nil, err
 	}
 	if len(queued)+len(records) > maxDeleteCleanupRecords {
-		return nil, fmt.Errorf("delete cleanup queue would exceed its maximum of %d records", maxDeleteCleanupRecords)
+		return nil, locale.Errorf("delete cleanup queue would exceed its maximum of %d records", "刪除清理佇列會超過上限 %d 筆紀錄", maxDeleteCleanupRecords)
 	}
 	totalBytes := int64(0)
 	for _, item := range queued {
@@ -104,21 +104,21 @@ func (s *Store) queueDeleteCleanupsLocked(records []deleteCleanupRecord) ([]queu
 		}
 		data, err := json.Marshal(record)
 		if err != nil {
-			return nil, fmt.Errorf("encode delete cleanup: %w", err)
+			return nil, locale.Errorf("encode delete cleanup: %w", "編碼刪除清理紀錄：%w", err)
 		}
 		data = append(data, '\n')
 		if len(data) > maxDeleteCleanupRecordBytes {
-			return nil, fmt.Errorf("delete cleanup record exceeds %d bytes", maxDeleteCleanupRecordBytes)
+			return nil, locale.Errorf("delete cleanup record exceeds %d bytes", "刪除清理紀錄超過 %d 位元組", maxDeleteCleanupRecordBytes)
 		}
 		totalBytes += int64(len(data))
 		if totalBytes > maxDeleteCleanupQueueBytes {
-			return nil, fmt.Errorf("delete cleanup queue would exceed %d bytes", maxDeleteCleanupQueueBytes)
+			return nil, locale.Errorf("delete cleanup queue would exceed %d bytes", "刪除清理佇列會超過 %d 位元組", maxDeleteCleanupQueueBytes)
 		}
 		encoded[index] = data
 	}
 	dir := s.deleteCleanupDir()
 	if err := MkdirAllProjectPath(s.root, dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create delete cleanup queue: %w", err)
+		return nil, locale.Errorf("create delete cleanup queue: %w", "建立刪除清理佇列：%w", err)
 	}
 	written := make([]queuedDeleteCleanup, 0, len(records))
 	rollback := func() {
@@ -135,7 +135,7 @@ func (s *Store) queueDeleteCleanupsLocked(records []deleteCleanupRecord) ([]queu
 		path := filepath.Join(dir, name)
 		if err := s.WriteAtomic(path, encoded[index]); err != nil {
 			rollback()
-			return nil, fmt.Errorf("persist delete cleanup: %w", err)
+			return nil, locale.Errorf("persist delete cleanup: %w", "儲存刪除清理紀錄：%w", err)
 		}
 		written = append(written, queuedDeleteCleanup{path: path, record: record, size: int64(len(encoded[index]))})
 	}
@@ -157,7 +157,7 @@ func nodeDeleteCleanupRecords(ids []string) ([]deleteCleanupRecord, error) {
 			continue
 		}
 		if len(current.Nodes) == 0 {
-			return nil, fmt.Errorf("node id does not fit in delete cleanup record")
+			return nil, locale.Errorf("node id does not fit in delete cleanup record", "節點代號放不進刪除清理紀錄")
 		}
 		records = append(records, current)
 		current = deleteCleanupRecord{Kind: deleteCleanupKindNodes, Nodes: []string{id}}
@@ -171,7 +171,7 @@ func nodeDeleteCleanupRecords(ids []string) ([]deleteCleanupRecord, error) {
 func randomDeleteCleanupName() (string, error) {
 	var token [16]byte
 	if _, err := rand.Read(token[:]); err != nil {
-		return "", fmt.Errorf("create delete cleanup id: %w", err)
+		return "", locale.Errorf("create delete cleanup id: %w", "建立刪除清理代號：%w", err)
 	}
 	return "delete-" + hex.EncodeToString(token[:]) + ".json", nil
 }
@@ -180,25 +180,25 @@ func validateDeleteCleanupRecord(record deleteCleanupRecord) error {
 	switch record.Kind {
 	case deleteCleanupKindNodes:
 		if len(record.Nodes) == 0 || len(record.Nodes) > MaxGraphNodes || record.NodeID != "" || record.PageID != "" || record.Format != "" {
-			return errors.New("invalid node delete cleanup record")
+			return locale.Errorf("invalid node delete cleanup record", "節點刪除清理紀錄無效")
 		}
 		seen := make(map[string]bool, len(record.Nodes))
 		for _, id := range record.Nodes {
 			if !engine.ValidNodeID(id) || seen[id] {
-				return errors.New("invalid node id in delete cleanup record")
+				return locale.Errorf("invalid node id in delete cleanup record", "刪除清理紀錄中的節點代號無效")
 			}
 			seen[id] = true
 		}
 	case deleteCleanupKindPage:
 		if len(record.Nodes) != 0 || !engine.ValidNodeID(record.NodeID) || !engine.ValidNodeID(record.PageID) {
-			return errors.New("invalid page delete cleanup record")
+			return locale.Errorf("invalid page delete cleanup record", "頁面刪除清理紀錄無效")
 		}
 		format, err := NormalizePageFormat(record.Format)
 		if err != nil || format != record.Format {
-			return errors.New("invalid page format in delete cleanup record")
+			return locale.Errorf("invalid page format in delete cleanup record", "刪除清理紀錄中的頁面格式無效")
 		}
 	default:
-		return errors.New("invalid delete cleanup kind")
+		return locale.Errorf("invalid delete cleanup kind", "刪除清理種類無效")
 	}
 	return nil
 }
@@ -208,14 +208,14 @@ func decodeDeleteCleanupRecord(data []byte) (deleteCleanupRecord, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
-		return record, fmt.Errorf("decode delete cleanup: %w", err)
+		return record, locale.Errorf("decode delete cleanup: %w", "解讀刪除清理紀錄：%w", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return record, errors.New("decode delete cleanup: trailing value")
+			return record, locale.Errorf("decode delete cleanup: trailing value", "解讀刪除清理紀錄：結尾有多餘的值")
 		}
-		return record, fmt.Errorf("decode delete cleanup: %w", err)
+		return record, locale.Errorf("decode delete cleanup: %w", "解讀刪除清理紀錄：%w", err)
 	}
 	if err := validateDeleteCleanupRecord(record); err != nil {
 		return record, err
@@ -230,37 +230,37 @@ func (s *Store) loadDeleteCleanupQueueLocked() ([]queuedDeleteCleanup, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read delete cleanup queue: %w", err)
+		return nil, locale.Errorf("read delete cleanup queue: %w", "讀取刪除清理佇列：%w", err)
 	}
 	if len(entries) > maxDeleteCleanupRecords {
-		return nil, fmt.Errorf("delete cleanup queue has %d records, maximum %d", len(entries), maxDeleteCleanupRecords)
+		return nil, locale.Errorf("delete cleanup queue has %d records, maximum %d", "刪除清理佇列有 %d 筆紀錄，上限 %d", len(entries), maxDeleteCleanupRecords)
 	}
 	queued := make([]queuedDeleteCleanup, 0, len(entries))
 	totalBytes := int64(0)
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || entry.Type()&os.ModeType != 0 || !strings.HasPrefix(name, "delete-") || !strings.HasSuffix(name, ".json") {
-			return nil, fmt.Errorf("delete cleanup queue contains invalid entry %q", name)
+			return nil, locale.Errorf("delete cleanup queue contains invalid entry %q", "刪除清理佇列含有無效項目「%s」", name)
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return nil, fmt.Errorf("stat delete cleanup %q: %w", name, err)
+			return nil, locale.Errorf("stat delete cleanup %q: %w", "查看刪除清理「%s」：%w", name, err)
 		}
 		if info.Size() < 1 || info.Size() > maxDeleteCleanupRecordBytes {
-			return nil, fmt.Errorf("delete cleanup %q has invalid size %d", name, info.Size())
+			return nil, locale.Errorf("delete cleanup %q has invalid size %d", "刪除清理「%s」的大小 %d 無效", name, info.Size())
 		}
 		totalBytes += info.Size()
 		if totalBytes > maxDeleteCleanupQueueBytes {
-			return nil, fmt.Errorf("delete cleanup queue exceeds %d bytes", maxDeleteCleanupQueueBytes)
+			return nil, locale.Errorf("delete cleanup queue exceeds %d bytes", "刪除清理佇列超過 %d 位元組", maxDeleteCleanupQueueBytes)
 		}
 		path := filepath.Join(dir, name)
 		data, err := ReadProjectFileLimit(s.root, path, maxDeleteCleanupRecordBytes)
 		if err != nil {
-			return nil, fmt.Errorf("read delete cleanup %q: %w", name, err)
+			return nil, locale.Errorf("read delete cleanup %q: %w", "讀取刪除清理「%s」：%w", name, err)
 		}
 		record, err := decodeDeleteCleanupRecord(data)
 		if err != nil {
-			return nil, fmt.Errorf("invalid delete cleanup %q: %w", name, err)
+			return nil, locale.Errorf("invalid delete cleanup %q: %w", "刪除清理「%s」無效：%w", name, err)
 		}
 		queued = append(queued, queuedDeleteCleanup{path: path, record: record, size: info.Size()})
 	}
@@ -279,7 +279,7 @@ func (s *Store) finishDeleteCleanupLocked(queued queuedDeleteCleanup) error {
 		return err
 	}
 	if err := s.removePath(queued.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove completed delete cleanup marker: %w", err)
+		return locale.Errorf("remove completed delete cleanup marker: %w", "移除已完成的刪除清理標記：%w", err)
 	}
 	return nil
 }
@@ -292,10 +292,10 @@ func (s *Store) removeDeleteArtifactsLocked(record deleteCleanupRecord) error {
 			source := s.NodePath(id)
 			s.markSelfWrite(source)
 			if err := s.removePath(source); err != nil && !errors.Is(err, os.ErrNotExist) {
-				errs = append(errs, fmt.Errorf("remove node source: %w", err))
+				errs = append(errs, locale.Errorf("remove node source: %w", "移除節點原始檔：%w", err))
 			}
 			if err := s.DeleteDraft(id); err != nil {
-				errs = append(errs, fmt.Errorf("remove node draft: %w", err))
+				errs = append(errs, locale.Errorf("remove node draft: %w", "移除節點草稿：%w", err))
 			}
 		}
 	case deleteCleanupKindPage:
@@ -307,7 +307,7 @@ func (s *Store) removeDeleteArtifactsLocked(record deleteCleanupRecord) error {
 		path := filepath.Join(dir, record.PageID+extension)
 		s.markSelfWrite(path)
 		if err := s.removePath(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("remove page source: %w", err))
+			errs = append(errs, locale.Errorf("remove page source: %w", "移除頁面原始檔：%w", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -350,21 +350,21 @@ func (s *Store) deleteCleanupCommittedLocked(record deleteCleanupRecord) (bool, 
 		}
 		var manifest nodePagesManifest
 		if err := json.Unmarshal(data, &manifest); err != nil {
-			return false, fmt.Errorf("node pages manifest: %w", err)
+			return false, locale.Errorf("node pages manifest: %w", "節點頁面清單：%w", err)
 		}
 		if len(manifest.Pages) > maxNodePages {
-			return false, fmt.Errorf("node %q has too many pages", record.NodeID)
+			return false, locale.Errorf("node %q has too many pages", "節點「%s」的頁面太多", record.NodeID)
 		}
 		seen := make(map[string]bool, len(manifest.Pages))
 		for _, page := range manifest.Pages {
 			if !engine.ValidNodeID(page.ID) || seen[page.ID] {
-				return false, fmt.Errorf("node %q has invalid page id", record.NodeID)
+				return false, locale.Errorf("node %q has invalid page id", "節點「%s」的頁面代號無效", record.NodeID)
 			}
 			if title := strings.TrimSpace(page.Title); title == "" || len(title) > 256 {
-				return false, fmt.Errorf("node %q page %q has invalid title", record.NodeID, page.ID)
+				return false, locale.Errorf("node %q page %q has invalid title", "節點「%s」的頁面「%s」標題無效", record.NodeID, page.ID)
 			}
 			if _, err := NormalizePageFormat(page.Format); err != nil {
-				return false, fmt.Errorf("node %q page %q has invalid format", record.NodeID, page.ID)
+				return false, locale.Errorf("node %q page %q has invalid format", "節點「%s」的頁面「%s」格式無效", record.NodeID, page.ID)
 			}
 			seen[page.ID] = true
 			if page.ID == record.PageID {
@@ -373,7 +373,7 @@ func (s *Store) deleteCleanupCommittedLocked(record deleteCleanupRecord) (bool, 
 		}
 		return true, nil
 	default:
-		return false, errors.New("invalid delete cleanup kind")
+		return false, locale.Errorf("invalid delete cleanup kind", "刪除清理種類無效")
 	}
 }
 

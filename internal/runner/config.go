@@ -34,12 +34,21 @@ type Config struct {
 	// token, for a hub behind Access. The edge checks them; the hub never does.
 	AccessClientID     string `json:"accessClientId,omitempty"`
 	AccessClientSecret string `json:"accessClientSecret,omitempty"`
+	// HTTPLoopbackHub is the owner's word that a plain-http hub on this
+	// machine may have the token although `nodevas serve` did not start this
+	// runner (`nodevas runner set httpLoopbackHub on`).
+	HTTPLoopbackHub bool `json:"httpLoopbackHub,omitempty"`
 	// Name is an optional label for log lines; the hub's name for the runner
 	// is the one it was created under.
 	Name string `json:"name,omitempty"`
 	// Repos are the repositories the owner allowed runs in, added with
 	// `nodevas runner repo add` on this machine and nowhere else.
 	Repos []runnerwire.Repo `json:"repos,omitempty"`
+	// repoTests are the repos' test commands and timeouts (verify.go),
+	// stored in each repo's runner.json entry and read once at start: an
+	// agent that rewrites runner.json mid-run changes nothing until the
+	// runner restarts. They never go into the hello.
+	repoTests map[string]repoTest
 	// Models replaces the built-in model list for an agent kind.
 	Models map[string][]runnerwire.Model `json:"models,omitempty"`
 
@@ -78,6 +87,12 @@ type Config struct {
 	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
 	// (adapter.AntigravityModes).
 	AntigravityMode string `json:"antigravityMode,omitempty"`
+	// PermissionRelay sends a headless run's tool-permission prompts to
+	// Nodevas, where a person allows or denies them, instead of refusing
+	// them: Claude Code (--permission-prompt-tool), the Antigravity CLI (its
+	// gate) and OpenCode over ACP. Off by default; the runner's own limits
+	// (read-only runs, plan modes, the gate's denials) stay either way.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
 	// offers are taken without asking at the terminal. nil means off. W1's
 	// boolean form is migrated on load.
@@ -92,6 +107,10 @@ type Config struct {
 	// whose modes are headless only unless the owner adds interactive, and
 	// typing from the hub stays off unless the owner allows it.
 	Interactive *bool `json:"interactive,omitempty"`
+	// RepoBrowse answers the hub's read-only repo browsing for the
+	// Explorer (repobrowse.go): nil means the default, on; false refuses it
+	// and leaves runnerwire.CapRepoBrowse out of the hello.
+	RepoBrowse *bool `json:"repoBrowse,omitempty"`
 
 	// Pull requests, from W3 on.
 
@@ -330,10 +349,17 @@ func (c *Config) PermissionModeFor(kind string) string {
 	return c.ClaudePermissionMode()
 }
 
+// RelaysPermissions reports whether a headless run of an agent kind, under
+// this runner's settings, sends its permission prompts to Nodevas
+// (permissionRelay and adapter.PermissionRelayApplies).
+func (c *Config) RelaysPermissions(kind string) bool {
+	return c.PermissionRelay && adapter.PermissionRelayApplies(kind, c.PermissionModeFor(kind), c.OpenCodeProtocol == "acp")
+}
+
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"autoAccept", "interactive",
+	"permissionRelay", "autoAccept", "interactive", "repoBrowse", "httpLoopbackHub",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
@@ -483,6 +509,16 @@ func (c *Config) Set(key string, values []string) error {
 			return err
 		}
 		c.AntigravityMode = mode
+	case "permissionRelay":
+		if reset {
+			c.PermissionRelay = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("permissionRelay must be true or false")
+		}
+		c.PermissionRelay = on
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
@@ -524,6 +560,26 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("interactive must be true or false")
 		}
 		c.Interactive = &on
+	case "httpLoopbackHub":
+		if reset {
+			c.HTTPLoopbackHub = false
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("httpLoopbackHub must be on or off")
+		}
+		c.HTTPLoopbackHub = on
+	case "repoBrowse":
+		if reset {
+			c.RepoBrowse = nil
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("repoBrowse must be on or off")
+		}
+		c.RepoBrowse = &on
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil
@@ -740,6 +796,24 @@ func ValidateHub(raw string) (string, error) {
 	return u.String(), nil
 }
 
+// PlainLocalHubRefusal is why a runner does not connect to its hub, or nil:
+// a plain-http hub (which ValidateHub allows on loopback only) is whatever
+// process holds that port, so while the real hub is down another user of
+// this machine could take the port, the runner token and the hub's say over
+// this runner. Only the runner serve started for itself (serveManaged; serve
+// holds the port for as long as it runs) and an owner who said so
+// (HTTPLoopbackHub) send the token there.
+func (c *Config) PlainLocalHubRefusal(serveManaged bool) error {
+	u, err := url.Parse(strings.TrimSpace(c.Hub))
+	if err != nil || u.Scheme != "http" || serveManaged || c.HTTPLoopbackHub {
+		return nil
+	}
+	return fmt.Errorf("hub %s is plain http: a runner `nodevas serve` did not start would send its token to "+
+		"whatever process holds that port, another user's while the hub is down. Use the runner `nodevas serve` "+
+		"starts for itself, or an https hub; if nobody else can run programs on this machine, allow it with "+
+		"`nodevas runner set httpLoopbackHub on`", c.Hub)
+}
+
 func isLoopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
@@ -752,11 +826,22 @@ func isLoopbackHost(host string) bool {
 // Access secret pasted by mistake is caught here rather than as a 401 later.
 func ValidateToken(token string) error {
 	if !strings.HasPrefix(token, runnerwire.TokenPrefix) || len(token) <= len(runnerwire.TokenPrefix)+16 {
-		return fmt.Errorf("that is not a runner token: runner tokens start with %q (create one on the Runners page)",
+		return fmt.Errorf("that is not a runner token: runner tokens start with %q (add a runner on the hub under Settings → Agents)",
 			runnerwire.TokenPrefix)
 	}
 	if strings.ContainsAny(token, " \t\r\n") {
 		return errors.New("runner token must not contain whitespace")
 	}
 	return nil
+}
+
+// onOff reads a switch: on/off, true/false, yes/no, 1/0.
+func onOff(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "true", "yes", "1":
+		return true, true
+	case "off", "false", "no", "0":
+		return false, true
+	}
+	return false, false
 }

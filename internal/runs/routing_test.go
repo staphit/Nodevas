@@ -82,6 +82,8 @@ func TestSuggestOrder(t *testing.T) {
 		rule("tag-other", "api", runnerwire.RouteTag, "ui"),
 		rule("tag", "", runnerwire.RouteTag, "UI"),
 		rule("task", "", runnerwire.RouteKind, "task"),
+		rule("review", "", runnerwire.RouteKind, "review"),
+		rule("custom", "", runnerwire.RouteKind, "custom-type-3"),
 	}
 	cases := []struct {
 		name string
@@ -95,6 +97,8 @@ func TestSuggestOrder(t *testing.T) {
 		{"no kind is a task", RouteNode{Project: "web"}, "task"},
 		{"project beats default", RouteNode{Project: "web", Kind: "scene"}, "proj"},
 		{"default last", RouteNode{Project: "docs", Kind: "scene"}, "default"},
+		{"an alias rule matches its built-in", RouteNode{Project: "docs", Kind: "gate"}, "review"},
+		{"a custom type id matches", RouteNode{Project: "docs", Kind: "custom-type-3"}, "custom"},
 	}
 	for _, tc := range cases {
 		got := Suggest(rules, tc.node)

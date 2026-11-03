@@ -1,5 +1,5 @@
 /**
- * Node history [B-06].
+ * Node history.
  *
  * Two different records side by side: journal status events (what happened) and
  * file snapshots taken before each save (what the document looked like).
@@ -19,8 +19,11 @@ function NodeHistory({
   path,
   format,
   onRestored,
+  showStatusEvents = true,
 }: {
   id: string;
+  /** Off where the status changes are already listed beside it. */
+  showStatusEvents?: boolean;
   /** Project-relative file the versions belong to: the node's main document
    * or whichever subpage is open. */
   path: string;
@@ -44,11 +47,13 @@ function NodeHistory({
 
   const events = useMemo(
     () =>
-      (runState?.history ?? [])
-        .filter((event) => event.node === id && event.event === "status")
-        .slice()
-        .reverse(),
-    [runState, id],
+      showStatusEvents
+        ? (runState?.history ?? [])
+            .filter((event) => event.node === id && event.event === "status")
+            .slice()
+            .reverse()
+        : [],
+    [runState, id, showStatusEvents],
   );
 
   // Switching page switches the file: the previous file's versions and any
@@ -119,8 +124,8 @@ function NodeHistory({
               <span className="nh-transition">
                 {ev.from ? localizedStatusLabel(ev.from, graph?.ui?.customStatuses ?? []) : "—"} → <b>{ev.to ? localizedStatusLabel(ev.to, graph?.ui?.customStatuses ?? []) : t("history.unknownStatus")}</b>
               </span>
-              {ev.by && <span className="nh-by">by {ev.by}</span>}
-              {ev.note && <span className="nh-note">「{ev.note}」</span>}
+              {ev.by && <span className="nh-by">{t("history.by", { name: ev.by })}</span>}
+              {ev.note && <span className="nh-note">{t("common.quoted", { text: ev.note })}</span>}
             </li>
           ))}
         </ul>
@@ -135,7 +140,7 @@ function NodeHistory({
               <li key={v.name}>
                 <span className="mono nh-time">{formatLocalizedDateTime(v.at, language)}</span>
                 <span className="nh-size">{v.size}B</span>
-                {v.author && <span className="nh-by">by {v.author}</span>}
+                {v.author && <span className="nh-by">{t("history.by", { name: v.author })}</span>}
                 <button
                   type="button"
                   className={viewing?.name === v.name ? "on" : ""}

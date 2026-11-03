@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -52,9 +53,24 @@ func (c *Config) UnmarshalJSON(raw []byte) error {
 	aux := struct {
 		*plain
 		AutoAccept json.RawMessage `json:"autoAccept,omitempty"`
+		// Repos carry the runner-local test settings beside the hello's
+		// fields (verify.go).
+		Repos []repoEntry `json:"repos,omitempty"`
 	}{plain: (*plain)(c)}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
+	}
+	c.Repos, c.repoTests = nil, nil
+	for _, entry := range aux.Repos {
+		repo := entry.Repo
+		repo.Verify = false
+		c.Repos = append(c.Repos, repo)
+		if len(entry.TestCommand) > 0 {
+			if c.repoTests == nil {
+				c.repoTests = map[string]repoTest{}
+			}
+			c.repoTests[repo.ID] = repoTest{Command: entry.TestCommand, TimeoutMinutes: entry.TestTimeoutMinutes}
+		}
 	}
 	c.AutoAccept, c.legacyAutoAccept = nil, false
 	value := strings.TrimSpace(string(aux.AutoAccept))
@@ -182,7 +198,7 @@ var bashTool = regexp.MustCompile(`(^|[\s,])Bash($|[\s,(])`)
 // such runs to a person unless the owner said otherwise (AllowShell).
 func (c *Config) ShellAccess(job runnerwire.Job) string {
 	mode := c.PermissionModeFor(job.Agent)
-	readOnly := job.Mode != runnerwire.ModeInteractive && (job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan)
+	readOnly := job.Mode != runnerwire.ModeInteractive && adapter.ReadOnly(job)
 	if readOnly {
 		mode, _ = reviewPermission(c, job.Agent)
 	}
@@ -205,7 +221,7 @@ func (c *Config) ShellAccess(job runnerwire.Job) string {
 		}
 	case "claude":
 		if readOnly {
-			// Reviews and plans run with Bash disallowed (adapter.ClaudeReadOnlyDeny),
+			// Reviews, plans and judges run with Bash disallowed (adapter.ClaudeReadOnlyDeny),
 			// which wins over any allow.
 			return ""
 		}
@@ -292,6 +308,7 @@ func (c *Config) RemoveAutoAcceptRepo(arg string) (string, error) {
 // forgetRepo drops a repository removed from the runner from the
 // auto-accept list too, so re-adding it later does not silently re-list it.
 func (c *Config) forgetRepo(id string) {
+	delete(c.repoTests, id)
 	if c.AutoAccept == nil {
 		return
 	}
@@ -410,6 +427,9 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 		return false, ReasonAutoAcceptOff
 	}
 	job := offer.Job
+	if job.Kind == runnerwire.JobVerify {
+		return verifyAutoAccept(p, offer)
+	}
 	var missing []string
 	if p.RequireStepUp && !job.SteppedUp {
 		missing = append(missing, ReasonNeedsStepUp)
@@ -431,6 +451,9 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 		missing = append(missing, fmt.Sprintf("agent %s may run any shell command here (%s); "+
 			"auto-accept leaves that to a person (nodevas runner autoaccept allow-shell on)", job.Agent, offer.Shell))
 	}
+	if runsTests(job) && !p.AllowVerify {
+		missing = append(missing, verifyConsentMissing)
+	}
 	if len(missing) > 0 {
 		return false, strings.Join(missing, "; ")
 	}
@@ -440,4 +463,42 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 	}
 	return true, fmt.Sprintf("%s; repo %s, agent %s, %s are on the auto-accept list",
 		why, offer.Repo.Name, job.Agent, ModeName(job.Mode))
+}
+
+// verifyConsentMissing is why a job that runs the repository's test command
+// is not auto-accepted without the owner's verify switch.
+const verifyConsentMissing = "verify jobs run this repository's test command on code an agent wrote; " +
+	"auto-accept them with: nodevas runner autoaccept verify on"
+
+// runsTests reports whether job, besides any agent, runs the repository's
+// test command on this machine: a goal judge does, at its base, before its
+// agent starts (executeJudge).
+func runsTests(job runnerwire.Job) bool {
+	return job.Kind == runnerwire.JobJudge && job.Verify != nil
+}
+
+// verifyAutoAccept decides a verify job: no agent runs, but the repo's test
+// command runs code an agent wrote, so it is taken unasked only when the
+// owner switched verify on (nodevas runner autoaccept verify on) for a repo
+// on the list.
+func verifyAutoAccept(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string) {
+	job := offer.Job
+	name := offer.Repo.Name
+	if name == "" {
+		name = job.RepoID
+	}
+	var missing []string
+	if !p.AllowVerify {
+		missing = append(missing, verifyConsentMissing)
+	}
+	if p.RequireStepUp && !job.SteppedUp {
+		missing = append(missing, ReasonNeedsStepUp)
+	}
+	if !slices.Contains(p.Repos, job.RepoID) {
+		missing = append(missing, fmt.Sprintf("repo %s is not on this runner's auto-accept list", name))
+	}
+	if len(missing) > 0 {
+		return false, strings.Join(missing, "; ")
+	}
+	return true, fmt.Sprintf("verify job in repo %s; verify jobs are on the auto-accept list", name)
 }

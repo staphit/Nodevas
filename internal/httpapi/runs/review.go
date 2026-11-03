@@ -10,6 +10,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -30,7 +31,7 @@ const (
 func (a *API) review(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot review for a person"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot review for a person", "agent 不能代替人審查"), nil)
 		return
 	}
 	_, projectName, ok := a.requestProject(c)
@@ -43,11 +44,11 @@ func (a *API) review(c *gin.Context) {
 	}
 	body.Verdict = strings.TrimSpace(body.Verdict)
 	if body.Verdict != runnerwire.VerdictApprove && body.Verdict != runnerwire.VerdictChanges {
-		invalid(c, "verdict must be %q or %q", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
+		invalid(c, "verdict must be %q or %q", "判定須為「%s」或「%s」", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
 		return
 	}
 	if len(body.Comment) > maxReviewComment || !utf8.ValidString(body.Comment) {
-		invalid(c, "comment must be valid text of at most %d bytes", maxReviewComment)
+		invalid(c, "comment must be valid text of at most %d bytes", "留言須為最多 %d 位元組的有效文字", maxReviewComment)
 		return
 	}
 	p, err := a.d.Store().Pipeline(c.Request.Context(), c.Param("id"))

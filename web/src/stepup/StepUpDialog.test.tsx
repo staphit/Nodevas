@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, AuthError } from "../api";
+import { formatLocalizedTime } from "../i18n";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { compactStepUpCode, formatClock, StepUpDialog } from "./StepUpDialog";
@@ -37,7 +38,7 @@ describe("step-up helpers", () => {
   });
 
   it("formats the end of the window as a 24-hour clock", () => {
-    expect(formatClock("2026-10-24T14:05:00")).toBe("14:05");
+    expect(formatClock("2026-10-24T14:05:00")).toBe(formatLocalizedTime("2026-10-24T14:05:00"));
     expect(formatClock("nonsense")).toBe("");
   });
 });

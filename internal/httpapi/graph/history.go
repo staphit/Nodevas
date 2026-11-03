@@ -11,13 +11,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // getHistory lists snapshots for ?path=graph.yaml or ?path=nodes/<id>.md.
 func (a *API) getHistory(c *gin.Context) {
 	rel := c.Request.URL.Query().Get("path")
 	if len(rel) > 256 {
-		httpx.Err(c, 400, errors.New("history path is too long"))
+		httpx.Err(c, 400, locale.Errorf("history path is too long", "歷史紀錄路徑太長"))
 		return
 	}
 	versions, err := httpx.StoreFor(c.Request, a.pm).ListHistory(rel)
@@ -32,7 +34,7 @@ func (a *API) getHistoryVersion(c *gin.Context) {
 	rel := c.Request.URL.Query().Get("path")
 	version := c.Request.URL.Query().Get("version")
 	if len(rel) > 256 || len(version) > 256 {
-		httpx.Err(c, 400, errors.New("history path is too long"))
+		httpx.Err(c, 400, locale.Errorf("history path is too long", "歷史紀錄路徑太長"))
 		return
 	}
 	data, err := httpx.StoreFor(c.Request, a.pm).ReadHistory(rel, version)
@@ -43,7 +45,7 @@ func (a *API) getHistoryVersion(c *gin.Context) {
 	// A .docx snapshot is a zip: there is nothing readable to send, and the
 	// bytes would not survive JSON encoding intact.
 	if !utf8.Valid(data) {
-		httpx.Err(c, 400, errors.New("此格式的版本無法預覽，請直接還原"))
+		httpx.Err(c, 400, locale.Errorf("a version in this format cannot be previewed; restore it instead", "此格式的版本無法預覽，請直接還原"))
 		return
 	}
 	// A version is finished the moment it is written and is never rewritten.
@@ -74,6 +76,9 @@ func (a *API) postHistoryRestore(c *gin.Context) {
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
 	if err := st.RestoreHistory(auth.ActorFrom(c.Request), body.Path, body.Version); err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		httpx.Err(c, 400, err)
 		return
 	}
@@ -120,7 +125,7 @@ func (a *API) postTrashRestore(c *gin.Context) {
 		return
 	}
 	if len(body.File) > 255 {
-		httpx.Err(c, 400, errors.New("trash filename is too long"))
+		httpx.Err(c, 400, locale.Errorf("trash filename is too long", "垃圾桶檔名太長"))
 		return
 	}
 	id, err := httpx.StoreFor(c.Request, a.pm).RestoreTrash(auth.ActorFrom(c.Request), body.File)

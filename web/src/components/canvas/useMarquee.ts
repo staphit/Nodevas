@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent } from "react";
-import { segmentRectInterval, type Point } from "./geometry";
+import { segmentRectInterval, type Point, type Rect } from "./geometry";
 
 type ClientRect = { left: number; right: number; top: number; bottom: number };
 
@@ -77,6 +77,7 @@ export function useMarquee({
   onMultiSelect,
   onSelectEdges,
   onClearSelection,
+  nodesInRect,
 }: {
   enabled: boolean;
   /**
@@ -90,6 +91,12 @@ export function useMarquee({
   /** Called when the marquee caught wires but no cards. */
   onSelectEdges?: (wireKeys: string[]) => void;
   onClearSelection: () => void;
+  /**
+   * Cards inside a board-space rectangle by layout rather than by element: a
+   * culled board has no element for a card outside the view, and a marquee
+   * dragged past the board's edge still reaches it.
+   */
+  nodesInRect?: (rect: Rect) => string[];
 }) {
   const marqueeRef = useRef<MarqueeDrag | null>(null);
   const [state, setState] = useState<MarqueeDrag | null>(null);
@@ -137,7 +144,7 @@ export function useMarquee({
     const top = Math.min(current.startClient.y, event.clientY);
     const bottom = Math.max(current.startClient.y, event.clientY);
     const moved = right - left > 3 || bottom - top > 3;
-    const nodeIds = moved
+    const mountedIds = moved
       ? Array.from(event.currentTarget.querySelectorAll<HTMLElement>(".col-card[data-node-id]")).flatMap(
           (card) => {
             const rect = card.getBoundingClientRect();
@@ -150,6 +157,17 @@ export function useMarquee({
           },
         )
       : [];
+    let nodeIds = mountedIds;
+    if (moved && nodesInRect) {
+      const end = pointFromClient(event.clientX, event.clientY) ?? current.current;
+      const laidOut = nodesInRect({
+        left: Math.min(current.start.x, end.x),
+        right: Math.max(current.start.x, end.x),
+        top: Math.min(current.start.y, end.y),
+        bottom: Math.max(current.start.y, end.y),
+      });
+      nodeIds = Array.from(new Set([...mountedIds, ...laidOut]));
+    }
     marqueeRef.current = null;
     setState(null);
     // Cards win the selection; a marquee over empty board that only crosses

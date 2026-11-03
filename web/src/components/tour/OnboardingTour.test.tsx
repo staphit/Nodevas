@@ -50,11 +50,12 @@ function addGraphLane(): HTMLElement {
 
 beforeEach(() => {
   updateUIPreference.mockReset();
-  useApp.setState({
+  useApp.setState((state) => ({
+    preferences: { ...state.preferences, language: "zh-TW" },
     activeTab: null,
     updateUIPreference:
       updateUIPreference as unknown as AppState["updateUIPreference"],
-  });
+  }));
 });
 
 afterEach(() => {
@@ -213,6 +214,58 @@ describe("OnboardingTour contextual chapters", () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("stays out of the way while the click's own form has the keyboard", () => {
+    vi.useFakeTimers();
+    const lane = addGraphLane();
+    setTourPrefs("accepted");
+    render(<OnboardingTour />);
+
+    // 新增節點 opens the creation form and its title field takes focus before
+    // the trigger delay runs out; the user is typing, so the tour waits.
+    fireEvent.pointerDown(lane);
+    const form = document.createElement("div");
+    form.setAttribute("role", "menu");
+    const title = document.createElement("input");
+    form.appendChild(title);
+    lane.appendChild(form);
+    title.focus();
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(title);
+    expect(updateUIPreference).not.toHaveBeenCalledWith("tourChaptersDone", ["graph"]);
+
+    // Once the form is gone, the next press in the region plays the chapter.
+    form.remove();
+    fireEvent.pointerDown(lane);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("hands focus back to where it was when a chapter closes", () => {
+    vi.useFakeTimers();
+    const lane = addGraphLane();
+    const before = document.createElement("button");
+    lane.appendChild(before);
+    before.focus();
+    setTourPrefs("accepted");
+    render(<OnboardingTour />);
+
+    fireEvent.pointerDown(lane);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(document.activeElement).not.toBe(before);
+
+    fireEvent.click(screen.getByText("全部略過"));
+    expect(document.activeElement).toBe(before);
   });
 
   it("does not retrigger a chapter that is already done", () => {

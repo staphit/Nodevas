@@ -24,10 +24,23 @@
   color: var(--accent-text);
 }
 .topbar h1 {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
+  white-space: nowrap;
+}
+/* The bar is one row at every width: a long failure ends in an ellipsis
+   (the badge's tooltip has the whole text) instead of wrapping and doubling
+   the bar's height. */
+.topbar .operation-status {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.topbar .operation-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .explorer-toggle {
@@ -39,56 +52,259 @@
 .explorer-toggle span {
   font: 700 12px/1 var(--mono);
 }
-.file-ops {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 12px;
-  padding-left: 12px;
-  border-left: 1px solid var(--border);
+/* Above a phone the bar is one row: it has few enough controls now that a
+   wrap would only ever be a mistake. header.topbar outranks the plain .topbar
+   wrap rule in 03-explorer.css, which imports after this file. */
+header.topbar {
+  flex-wrap: nowrap;
 }
-/* Breadcrumb: say where we are before offering to move somewhere else. */
-.project-breadcrumb .crumb-workspace {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.project-breadcrumb .crumb-separator {
-  color: var(--text-3, var(--text-2));
-  font-size: 11px;
-}
-.project-breadcrumb .crumb-label {
-  font-size: 11px;
-  color: var(--text-2);
-}
-.project-select {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  font-family: var(--mono);
-  max-width: 180px;
-}
-.project-type {
-  font-size: 11px;
-  font-family: var(--mono);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 8px;
-  background: var(--surface-2);
+.topbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .topbar-actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+/* Two halves fit at every width; 25-station.css hid the names when the
+   switch had a third. */
+.topbar .mode-switch button span:not(.mode-switch-badge) {
+  display: inline;
+}
+
+/* The project and account menus: a button and the panel hanging off it. */
+.topbar-menu {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* A long status badge squeezes the bar, and the menu with it: as a flex item
+   the trigger shrinks too and truncates the name, instead of keeping its width
+   and spilling over Board. */
+.topbar-project {
+  display: flex;
+}
+.topbar-project-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+.topbar-project-trigger:hover {
+  background: var(--surface-2);
+}
+.topbar-project-trigger svg {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+.topbar-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 700;
+  cursor: pointer;
+}
+.topbar-avatar:hover {
+  background: var(--hover);
+}
+.topbar-project-trigger[aria-expanded="true"],
+.topbar-avatar[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.topbar-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: var(--z-popover, 60);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 24px));
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.topbar-menu-panel.align-start {
+  left: 0;
+}
+.topbar-menu-panel.align-end {
+  right: 0;
+}
+/* A set of items under its heading: lays out as the panel does. */
+.topbar-menu-group {
+  display: flex;
+  flex-direction: column;
+}
+.topbar-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.topbar-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.topbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.topbar-menu-item:hover:not([aria-disabled="true"]) {
+  background: var(--hover);
+}
+.topbar-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--hover);
+}
+/* Disabled but focusable (aria-disabled): it still says why. */
+.topbar-menu-item[aria-disabled="true"] {
+  color: var(--text-2);
+  cursor: default;
+}
+.topbar-menu-item.checked {
+  font-weight: 600;
+}
+.topbar-menu-item svg {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+.topbar-menu-check {
+  flex: 0 0 14px;
+  width: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.topbar-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-menu-detail {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+
+/* Opens the command palette. Without this it was a user-agent button: grey,
+   with an outset border, on the dark bar too. */
+.topbar .command-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar .command-trigger:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+/* Runners and today's spend; the dot is the runners dialog's (17-runners.css). */
+.topbar-runner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar-runner-pill:hover {
+  background: var(--surface-2);
+}
+/* Up for as long as the server is out of reach (OfflineIndicator). */
+.topbar-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 45%, var(--border));
+  border-radius: 12px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+.topbar-offline-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.topbar-offline-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A laptop-width bar: the shortcut hint yields before anything wraps. */
+@media (max-width: 1000px) {
+  .topbar .command-trigger kbd {
+    display: none;
+  }
 }
 .language-control {
   display: inline-flex;
@@ -102,7 +318,7 @@
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--mono);
 }
 .sr-only {
@@ -125,14 +341,14 @@
   color: var(--st-failed-fg);
   background: var(--st-failed-bg);
   border-bottom: 1px solid var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .global-error button {
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   line-height: 1;
 }
 
@@ -149,7 +365,7 @@
   color: var(--st-failed-fg);
   background: var(--st-failed-bg);
   box-shadow: 0 4px 14px var(--shadow);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .document-persistence-alert strong {
@@ -187,15 +403,15 @@
 }
 .topbar-create-copy strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .topbar-create-copy small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .topbar-create-panel label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .topbar-create-panel input {
   width: 100%;
@@ -205,7 +421,7 @@
   border-radius: 6px;
   color: var(--text);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .topbar-create-actions {
   display: flex;
@@ -220,7 +436,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .topbar-create-actions button.primary,
@@ -275,13 +491,13 @@
 }
 .confirm-dialog h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   letter-spacing: -0.01em;
 }
 .confirm-dialog p {
   margin: 5px 0 0;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.55;
   /* Multi-line notices (e.g. one line per transfer warning) keep their breaks. */
   white-space: pre-line;
@@ -304,7 +520,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .project-picker-list {
   max-height: 46vh;
@@ -327,7 +543,7 @@
   color: var(--text);
   background: transparent;
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: left;
 }
 .project-picker-list button:hover {
@@ -344,7 +560,7 @@
 .project-picker-empty {
   padding: 14px 10px;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: center;
 }
 .confirm-dialog-close {
@@ -379,7 +595,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .confirm-dialog footer button.primary {
   border-color: var(--accent);
@@ -408,7 +624,7 @@
   gap: 2px;
 }
 .settings-head small {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   font-family: var(--mono);
 }
@@ -433,7 +649,7 @@
   border-radius: 6px 6px 0 0;
   background: none;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .settings-tabs button.active {
   border-color: var(--border);
@@ -448,7 +664,7 @@
   max-height: min(60vh, 560px);
   padding: 14px 18px 18px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .settings-hint {
   margin: 0;
@@ -457,7 +673,7 @@
 }
 .settings-hint code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .settings-list {
   display: flex;
@@ -487,14 +703,14 @@
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .settings-flag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
   cursor: pointer;
 }
@@ -505,11 +721,11 @@
 .settings-usage {
   margin-left: auto;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .settings-user-id {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .settings-create,
@@ -527,12 +743,35 @@
   border-radius: 5px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .settings-row > span:first-child {
   min-width: 56px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
+}
+/* A row's plain controls (Settings › General: 切換為淺色, 重新播放導覽, 語系 …).
+   Buttons with a class of their own (.danger) keep it. */
+.settings-row > button:not([class]),
+.settings-row > select {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.settings-row > button:not([class]) {
+  cursor: pointer;
+}
+.settings-row > button:not([class]):hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.settings-row > button:not([class]):disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .settings-section {
   display: flex;
@@ -541,7 +780,7 @@
 }
 .legend-hint {
   margin: 6px 0 0;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--text-2);
 }
 /* The legend names Project Settings, so it also opens it. */
@@ -553,7 +792,7 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .legend-settings-link:hover {
   border-color: var(--border-strong);
@@ -571,7 +810,7 @@
   max-height: min(58vh, 520px);
   padding: 0 18px 16px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .notify-toggle {
   display: flex;
@@ -588,7 +827,7 @@
 .notify-field > label,
 .notify-users > label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .notify-field input,
 .notify-field select,
@@ -599,7 +838,7 @@
   border-radius: 6px;
   color: var(--text);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .notify-lead {
   display: flex;
@@ -636,7 +875,7 @@
 .notify-message {
   padding: 7px 10px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .notify-message.ok {
   color: var(--st-done-fg);
@@ -649,13 +888,13 @@
 
 /* Cloud backup dialog */
 .backup-hint {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   color: var(--text-2);
   margin: 0;
 }
 .backup-hint code {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 
 .remote-sync-banner {
@@ -677,11 +916,11 @@
 }
 .remote-sync-banner strong {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .remote-sync-banner span {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .remote-sync-actions {
@@ -695,7 +934,7 @@
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .remote-sync-actions button:hover:not(:disabled) {
@@ -763,14 +1002,14 @@
   min-width: 0;
 }
 .backup-list-name {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale, 1));
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .backup-list-sub {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   color: var(--text-2);
 }
 
@@ -898,7 +1137,7 @@
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .fs-browser-head button.primary {
   border-color: var(--accent);
@@ -916,7 +1155,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-family: var(--mono);
 }
 .fs-browser-path.selected {
@@ -934,7 +1173,7 @@
   border-radius: 4px;
   color: var(--text-2);
   background: var(--surface);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -959,7 +1198,7 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .fs-browser-toolbar button:hover:not(:disabled) {
   border-color: var(--accent);
@@ -989,7 +1228,7 @@
   border-radius: 4px;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .fs-browser-create input:focus {
   border-color: var(--accent);
@@ -1003,7 +1242,7 @@
   background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .fs-browser-create button.primary {
   border-color: var(--accent);
@@ -1032,7 +1271,7 @@
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: left;
 }
 .fs-browser-list button:hover {
@@ -1041,20 +1280,23 @@
 .fs-browser-empty {
   padding: 6px 8px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
+
 
 /* ---------- top bar on a phone ---------- */
 
-/* Everything above assumes a bar wide enough to name what it shows. At 393px
-   it wraps to three rows and takes a third of the screen, so here the bar
-   keeps only what is used constantly — the explorer toggle, the brand, the
-   project switch, search — and the rest either loses its label or moves behind
-   one overflow button. Scoped to width, not pointer: a narrow desktop window
-   has the same problem. */
+/* Everything above assumes a bar wide enough to name what it shows. On a
+   393px screen the first row keeps the project menu, search, the runner dot
+   and the account menu, and Board | Station takes a row of its own under it
+   (25-station.css), two halves rather than squeezing the project name to
+   nothing. Scoped to width, not pointer: a narrow desktop window has the same
+   problem. */
 @media (max-width: 720px) {
-  .topbar {
-    flex-wrap: nowrap;
+  /* header.topbar outranks the plain .topbar wrap and nowrap rules in
+     03-explorer.css and 14-touch.css, which import after this file. */
+  header.topbar {
+    flex-wrap: wrap;
     gap: 6px;
     padding-inline: 12px;
   }
@@ -1072,43 +1314,31 @@
     white-space: nowrap;
     border: 0;
   }
-  .explorer-toggle {
-    flex: 0 0 auto;
-  }
-  /* Purely decorative, and it draws the same tree glyph as the explorer toggle
-     sitting immediately beside it — at this width the pair reads as two of the
-     same control rather than as a logo. The brand is already named by the h1
-     for anything that reads the page, so dropping the mark loses nothing and
-     buys the project switch another 32px of a row that has none. */
+  /* Decorative, and the brand is already named by the h1 for anything that
+     reads the page: the project menu gets its 32px. */
   .brand-mark {
     display: none;
   }
   /* 44px is the smallest target Apple's own controls use. */
   .explorer-toggle {
+    flex: 0 0 auto;
     min-width: 44px;
     min-height: 44px;
   }
-  /* The breadcrumb says where we are, which the screen title already does on a
-     phone; what is left is the control that moves somewhere else, and it takes
-     the row's slack so long project names stay readable. */
-  .topbar .project-breadcrumb {
+  /* The project name takes the row's slack, so long names stay readable. A
+     zero basis and no minimum let a long name shrink and truncate instead of
+     pushing the actions onto a third row: the bar stays two rows. */
+  .topbar-project {
+    flex: 1 1 0;
     min-width: 0;
-    flex: 1 1 auto;
-    margin-left: 0;
-    padding-left: 0;
-    border-left: 0;
   }
-  .topbar .crumb-workspace,
-  .topbar .crumb-separator,
-  .topbar .crumb-label,
-  .topbar .project-type {
-    display: none;
-  }
-  .topbar .project-select {
+  .topbar-project-trigger {
     width: 100%;
-    min-width: 0;
     max-width: none;
     min-height: 44px;
+  }
+  .topbar-spacer {
+    display: none;
   }
   /* Transient, and never worth a second row: it truncates instead of pushing
      the actions off the end. */
@@ -1128,60 +1358,103 @@
     min-height: 44px;
     align-items: center;
     padding: 5px 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     white-space: nowrap;
   }
   /* The shortcut it names cannot be typed on a phone. */
   .topbar .command-trigger kbd {
     display: none;
   }
-  /* The five actions live in the overflow menu here; leaving them in the row
-     is what wrapped it in the first place. */
-  .topbar-actions .icon-btn:not(.topbar-overflow-trigger) {
-    display: none;
-  }
-  .topbar-overflow {
-    position: relative;
-    flex: 0 0 auto;
-  }
-  .topbar-overflow-trigger {
+  /* The dot alone; its label still says how many and what today cost, and
+     Station is one row down. */
+  .topbar-runner-pill {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
+    padding: 0 12px;
   }
-  /* Anchored to the trigger, not the viewport, so it stays pointing at the
-     button it belongs to when the bar insets itself under the notch. */
-  .topbar-overflow-menu {
+  .topbar-runner-pill-text {
+    display: none;
+  }
+  /* The red dot alone on a phone; the words stay for screen readers. */
+  .topbar-offline-text {
     position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: var(--z-popover, 60);
-    display: flex;
-    min-width: 200px;
-    flex-direction: column;
-    padding: 4px;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    background: var(--surface);
-    box-shadow: 0 16px 40px var(--shadow);
-  }
-  .topbar-overflow-item {
-    display: flex;
-    min-height: 44px;
-    align-items: center;
-    gap: 10px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 6px;
-    color: var(--text);
-    background: transparent;
-    cursor: pointer;
-    font-size: 13px;
-    text-align: left;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
     white-space: nowrap;
   }
-  .topbar-overflow-item:hover,
-  .topbar-overflow-item:focus-visible {
-    background: var(--hover);
+  .topbar-avatar {
+    width: 44px;
+    height: 44px;
   }
+  .topbar-menu-item {
+    min-height: 44px;
+  }
+}
+
+/* A view that crashed or whose chunk failed to load (ViewErrorBoundary). */
+.view-error {
+  flex: 1;
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 24px;
+  color: var(--text);
+}
+.view-error h2 {
+  margin: 0 0 8px;
+  font-size: calc(18px * var(--font-scale, 1));
+}
+.view-error p {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.view-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.view-error-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.view-error details {
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.view-error pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A floating panel or dialog that crashed (ViewErrorBoundary compact): a
+   small notice in the corner, not a page-sized panel. */
+.view-error-compact {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(13px * var(--font-scale, 1));
+  box-shadow: 0 4px 16px var(--shadow);
+}
+.view-error-compact span {
+  flex: 1;
+}
+.view-error-compact .view-error-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: calc(16px * var(--font-scale, 1));
+  line-height: 1;
 }

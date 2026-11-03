@@ -1,5 +1,5 @@
 /**
- * Auto-save scheduling [A-05].
+ * Auto-save scheduling.
  *
  * The editor saves on its own. This module owns *when*, and nothing else: it
  * takes a `save` function and decides which of the many things a person does
@@ -21,7 +21,7 @@
  * - `AUTOSAVE_MAX_WAIT_MS` (10000) is the ceiling. Someone typing steadily
  *   never goes idle, and without a ceiling they would never be saved either.
  *   Ten seconds bounds continuous writing to six requests a minute, which is
- *   the point of this file for [C-03]: every save is a file write, the watcher
+ *   the point of this file for: every save is a file write, the watcher
  *   sees it, the server broadcasts it, and every other client reads it back.
  *   Debouncing without a ceiling loses work; a ceiling without debouncing costs
  *   a write per ten seconds of a document nobody is touching. Both, and a save
@@ -70,7 +70,7 @@ export interface AutosaveOptions {
   isDirty: () => boolean;
   /**
    * Answers "may we write at all right now?". False while another person holds
-   * the soft lock [P2] or while an unresolved conflict is on screen — in both
+   * the soft lock or while an unresolved conflict is on screen — in both
    * cases writing in the background is the wrong answer and the user has to
    * act. Pending edits stay pending; nothing is dropped.
    */

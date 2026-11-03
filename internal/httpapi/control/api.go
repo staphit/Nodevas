@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -104,7 +105,7 @@ func canSteer(actor identity.Actor, createdBy string) bool {
 func (a *API) pauseAll(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot pause the project"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot pause the project", "agent 不能暫停專案"), nil)
 		return
 	}
 	var body PauseAllRequest
@@ -113,7 +114,7 @@ func (a *API) pauseAll(c *gin.Context) {
 	}
 	name := runsapi.ProjectName(a.pm, httpx.StoreFor(c.Request, a.pm))
 	if name == "" {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return
 	}
 	ctx := c.Request.Context()

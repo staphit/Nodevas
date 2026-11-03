@@ -47,6 +47,7 @@ func TestRunnerHubVersionPrintsTheCommit(t *testing.T) {
 	hub, header := fakeVersionHub(t, http.StatusOK, string(answer))
 	cfgPath := savedRunnerConfig(t, &runner.Config{
 		Hub: hub.URL, Token: cliTestToken, AccessClientID: "cid.access", AccessClientSecret: "csecret",
+		HTTPLoopbackHub: true,
 	})
 
 	code, stdout, stderr := runRunner(t, "", "hub-version", "--config", cfgPath)
@@ -84,7 +85,7 @@ func TestRunnerHubVersionRefusesAnythingButACommit(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			hub, _ := fakeVersionHub(t, tc.status, tc.body)
-			cfgPath := savedRunnerConfig(t, &runner.Config{Hub: hub.URL, Token: cliTestToken})
+			cfgPath := savedRunnerConfig(t, &runner.Config{Hub: hub.URL, Token: cliTestToken, HTTPLoopbackHub: true})
 			code, stdout, _ := runRunner(t, "", "hub-version", "--config", cfgPath)
 			if code == 0 || stdout != "" {
 				t.Fatalf("exit %d, stdout %q: want a failure and nothing on stdout", code, stdout)
@@ -102,7 +103,7 @@ func TestRunnerHubVersionDoesNotFollowRedirects(t *testing.T) {
 		http.Redirect(w, r, signIn.URL, http.StatusFound)
 	}))
 	t.Cleanup(hub.Close)
-	cfgPath := savedRunnerConfig(t, &runner.Config{Hub: hub.URL, Token: cliTestToken})
+	cfgPath := savedRunnerConfig(t, &runner.Config{Hub: hub.URL, Token: cliTestToken, HTTPLoopbackHub: true})
 
 	code, _, stderr := runRunner(t, "", "hub-version", "--config", cfgPath)
 	if code == 0 || !strings.Contains(stderr, "Cloudflare Access") {
@@ -115,5 +116,24 @@ func TestRunnerHubVersionNeedsALogin(t *testing.T) {
 	code, stdout, stderr := runRunner(t, "", "hub-version", "--config", cfgPath)
 	if code == 0 || stdout != "" || !strings.Contains(stderr, "not logged in") {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// A plain-http hub nobody vouched for may be another local user's program
+// holding the port while serve is down: hub-version sends it no token, as
+// `runner start` does not.
+func TestRunnerHubVersionSendsNoTokenToAPlainLocalHub(t *testing.T) {
+	answer, _ := json.Marshal(runnerwire.VersionResponse{Commit: testHubCommit})
+	hub, header := fakeVersionHub(t, http.StatusOK, string(answer))
+	cfgPath := savedRunnerConfig(t, &runner.Config{
+		Hub: hub.URL, Token: cliTestToken, AccessClientID: "cid.access", AccessClientSecret: "csecret",
+	})
+
+	code, stdout, stderr := runRunner(t, "", "hub-version", "--config", cfgPath)
+	if *header != nil {
+		t.Fatalf("the runner's credentials went to an unvouched plain-http hub: %v", *header)
+	}
+	if code == 0 || stdout != "" || !strings.Contains(stderr, "httpLoopbackHub") {
+		t.Fatalf("exit %d, stdout %q, stderr %q: want a refusal naming the opt-in", code, stdout, stderr)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,6 +89,11 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		ChromaURL:  opts.ChromaURL,
 		RAGPython:  opts.RAGPython,
 		HTTPClient: &http.Client{Transport: transport, Timeout: requestTimeout},
+		// The hub's folder is not the person's: in the Docker image it is
+		// the whole workspace, restricted projects and secrets included.
+		// Files reach the copilot only through the API, which checks who
+		// may read them.
+		NoLocalFiles: true,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("toolbridge: build MCP server: %w", err))
@@ -111,6 +117,9 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		if err != nil {
 			return fail(fmt.Errorf("toolbridge: list tools: %w", err))
 		}
+		if unusable[tool.Name] {
+			continue
+		}
 		mapped, err := mapTool(tool)
 		if err != nil {
 			return fail(err)
@@ -121,11 +130,52 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 	return b, nil
 }
 
+// unusable are tools the hub always refuses the copilot. Offering them
+// would cost the model a call, and the person a permission prompt, for an
+// error.
+var unusable = map[string]bool{
+	// A person or a planner/QA run writes acceptance criteria; the copilot
+	// is an agent without a run role.
+	"set_acceptance": true,
+	// Only a review or QA run records a verdict.
+	"submit_verdict": true,
+	// The copilot has no folder of its own to save into (NoLocalFiles).
+	"save_attachment": true,
+}
+
+// unusableInputs are tool inputs the hub always refuses the copilot. They are
+// left out of the schema the model sees, for the same reason as unusable.
+var unusableInputs = map[string][]string{
+	// No folder to attach files from (NoLocalFiles).
+	"send_message": {"files"},
+}
+
+// withoutInputs is schema without the named properties. The listed schema
+// is not changed: a copy of its top level and of its properties is.
+func withoutInputs(schema any, names []string) any {
+	fields, ok := schema.(map[string]any)
+	if !ok || len(names) == 0 {
+		return schema
+	}
+	properties, ok := fields["properties"].(map[string]any)
+	if !ok {
+		return schema
+	}
+	kept := maps.Clone(properties)
+	for _, name := range names {
+		delete(kept, name)
+	}
+	copied := maps.Clone(fields)
+	copied["properties"] = kept
+	return copied
+}
+
 // writeTools change content in a way history can undo. Everything else that
 // is not read-only is risky, so a tool added to internal/mcp later is asked
 // about until someone decides it deserves less.
 var writeTools = map[string]bool{
 	"create_node":      true,
+	"create_subgraph":  true,
 	"link_nodes":       true,
 	"update_node_meta": true,
 	"set_node_status":  true,
@@ -150,7 +200,7 @@ func KindOf(name string, readOnly bool) Kind {
 func mapTool(tool *sdk.Tool) (Tool, error) {
 	schema := json.RawMessage(`{"type":"object"}`)
 	if tool.InputSchema != nil {
-		encoded, err := json.Marshal(tool.InputSchema)
+		encoded, err := json.Marshal(withoutInputs(tool.InputSchema, unusableInputs[tool.Name]))
 		if err != nil {
 			return Tool{}, fmt.Errorf("toolbridge: schema of %s: %w", tool.Name, err)
 		}

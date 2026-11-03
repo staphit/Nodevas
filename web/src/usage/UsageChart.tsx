@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { UsageGroup } from "../api";
-import { useI18n } from "../i18n";
+import { formatList, useI18n } from "../i18n";
 import { formatDayKey, formatTokens, formatTokensExact, formatUSD } from "./usageFormat";
 
 export type UsageMetric = "tokens" | "cost";
@@ -92,7 +92,7 @@ export function UsageChart({ days, metric }: { days: UsageGroup[]; metric: Usage
   const describe = (d: UsageGroup) =>
     metric === "cost"
       ? `${formatDayKey(d.key)}: ${formatUSD(d.costUsd)}`
-      : `${formatDayKey(d.key)}: ${SERIES.map((s) => `${t(s.label)} ${formatTokensExact(s.value(d))}`).join(", ")}`;
+      : `${formatDayKey(d.key)}: ${formatList(SERIES.map((s) => `${t(s.label)} ${formatTokensExact(s.value(d))}`))}`;
 
   return (
     <figure className="usage-chart" aria-labelledby={titleId}>

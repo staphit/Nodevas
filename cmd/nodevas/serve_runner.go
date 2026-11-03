@@ -13,9 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"nodevas/internal/runner"
+	"nodevas/internal/runnerwire"
+	"nodevas/internal/secretenv"
 )
 
 // A standalone `serve` (loopback --listen, no proxy, no TLS, no Cloudflare
@@ -41,8 +44,9 @@ func (r *repoFlags) Set(value string) error {
 	return nil
 }
 
-// localRunnerName is the local runner's name on the Runners page.
-const localRunnerName = "this machine"
+// localRunnerName is the local runner's name on the hub: a fixed id the web
+// translates, never shown as stored.
+const localRunnerName = runnerwire.LocalRunnerName
 
 // localRunnerMode is whether serve starts a runner beside its hub, and how
 // much a failure to start it matters.
@@ -78,7 +82,7 @@ func planLocalRunner(withRunner, noRunner bool, repos []string, remote, useTLS, 
 		}
 		if remote {
 			return noLocalRunner, "", errors.New(flag + " is for a server on this machine only (a loopback --listen, no proxy); " +
-				"on a networked hub, link each runner from the Runners page")
+				"on a networked hub, link each runner under Settings → Agents → Link a new device")
 		}
 		if useTLS {
 			return noLocalRunner, "", errors.New(flag + " talks to its runner over loopback http; drop --tls-cert/--tls-key, " +
@@ -88,14 +92,14 @@ func planLocalRunner(withRunner, noRunner bool, repos []string, remote, useTLS, 
 	}
 	switch {
 	case remote:
-		// A networked hub: its runners are linked from the Runners page.
+		// A networked hub: its runners are linked under Settings → Agents.
 		return noLocalRunner, "", nil
 	case useTLS:
 		return noLocalRunner, "local runner not started: it talks to the hub over loopback http, and this hub serves TLS; " +
 			"start `nodevas runner` yourself", nil
 	case access:
 		return noLocalRunner, "local runner not started: Cloudflare Access is on, so this hub is reachable off this machine; " +
-			"link runners from the Runners page", nil
+			"link runners under Settings → Agents → Link a new device", nil
 	}
 	return defaultLocalRunner, "", nil
 }
@@ -165,6 +169,14 @@ func prepareLocalRunner(ctx context.Context, path, hub string, repos []string, m
 	return runner.SaveConfig(path, cfg)
 }
 
+// localRunnerEnv is the local runner's environment: serve's, without the
+// hub's own secrets (the runner, its agents and their verify commands work
+// on content an attacker may control and need none of them), and marked as
+// started by serve.
+func localRunnerEnv() []string {
+	return append(secretenv.Without(os.Environ()), localRunnerUnderServeEnv+"=1")
+}
+
 // startLocalRunner starts `nodevas runner start --config path` on this
 // terminal: its questions go where serve's log goes, and its answers come
 // from serve's stdin, which serve itself never reads. The returned stop asks
@@ -176,6 +188,9 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	}
 	cmd := exec.Command(exe, "runner", "start", "--config", path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stderr, stderr
+	// Serve owns Ctrl+C on the terminal they share (it asks for a second
+	// one); the runner ends when serve stops it.
+	cmd.Env = localRunnerEnv()
 	endWithServe(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the local runner: %w", err)
@@ -199,8 +214,9 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	}()
 	return func() {
 		close(stopping)
-		// Windows has no interrupt to send another process.
-		if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		// SIGTERM, since the runner leaves Ctrl+C to serve. Windows has no
+		// signal to send another process, so there it is killed.
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 			_ = cmd.Process.Kill()
 		}
 		select {

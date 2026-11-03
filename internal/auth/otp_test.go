@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 // annEmail is the address otpStoreForTest registers for "ann".
@@ -19,13 +18,11 @@ const annEmail = "ann@example.test"
 
 func userStoreForTest(t *testing.T) *UserStore {
 	t.Helper()
-	dbtest.UsePostgres(t)
-	users, err := NewUserStore(t.TempDir())
+	testpg.UseEnv(t)
+	users, err := openUserStore(t, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewUserStore: %v", err)
 	}
-	// The store holds an open SQLite handle now, and Windows will not let
-	// t.TempDir remove a file another process still has open.
 	t.Cleanup(func() { _ = users.Close() })
 	return users
 }
@@ -565,18 +562,15 @@ func TestASignInReadsTheSameForEveryAddress(t *testing.T) {
 // address nobody registered nor a client that hung up, and nothing about it
 // may let the HTTP layer take it for either.
 func TestAStalledDatabaseIsNotACancelledRequest(t *testing.T) {
-	stall := dbtest.UseStalledPostgres(t)
+	stall := testpg.UseStalledPostgres(t)
 	if stall == nil {
-		t.Skipf("set %s to run against PostgreSQL", dbtest.Env)
+		t.Skipf("set %s to run against PostgreSQL", testpg.Env)
 	}
-	users, err := NewUserStore(t.TempDir())
+	users, err := openUserStore(t, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewUserStore: %v", err)
 	}
 	t.Cleanup(func() { _ = users.Close() })
-	if users.database.Backend() != db.Postgres {
-		t.Fatalf("backend = %s, want postgres", users.database.Backend())
-	}
 	if err := users.AddWithEmail(context.Background(), "ann", "correct-horse-battery", "", annEmail); err != nil {
 		t.Fatalf("add ann: %v", err)
 	}

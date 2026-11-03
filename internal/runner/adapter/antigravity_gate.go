@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -35,6 +36,19 @@ const AntigravityGateArgs = "runner agy-gate"
 // not enough there: headless, agy 1.4.7 says "--mode plan has no effect
 // while slash command expansion is disabled" and edits anyway.
 const AntigravityGateReadOnly = "--read-only"
+
+// AntigravityGateRelayFlag is the gate's flag for a run with permissionRelay:
+// a shell command it would refuse for want of someone to approve it is asked
+// about in Nodevas instead (AntigravityGateRelay).
+const AntigravityGateRelayFlag = "--relay"
+
+// The hook's timeout in seconds. With the relay it outlasts the hub's wait
+// for a person (PermissionWait), so the gate's own answer, a denial with a
+// reason when nobody answers, is what agy gets.
+const (
+	antigravityGateTimeout      = 10
+	antigravityRelayGateTimeout = 360
+)
 
 // antigravityGateMatcher is the PreToolUse matcher: every tool the gate may
 // deny. Other tools never reach the hook.
@@ -77,15 +91,20 @@ func antigravityGated(mode string) bool {
 }
 
 // antigravityGateHooks is the hooks.json of a run's customization root, or
-// nil when the nodevas binary's path cannot go in a hook command.
-func antigravityGateHooks(exe string, readOnly bool) map[string]any {
+// nil when the nodevas binary's path cannot go in a hook command. relay is
+// ignored for a read-only run, which never asks.
+func antigravityGateHooks(exe string, readOnly, relay bool) map[string]any {
 	path := antigravityHookPath(exe)
 	if path == "" {
 		return nil
 	}
 	command := path + " " + AntigravityGateArgs
+	timeout := antigravityGateTimeout
 	if readOnly {
 		command += " " + AntigravityGateReadOnly
+	} else if relay {
+		command += " " + AntigravityGateRelayFlag
+		timeout = antigravityRelayGateTimeout
 	}
 	return map[string]any{
 		"nodevas-run": map[string]any{
@@ -94,7 +113,7 @@ func antigravityGateHooks(exe string, readOnly bool) map[string]any {
 				"hooks": []any{map[string]any{
 					"type":    "command",
 					"command": command,
-					"timeout": 10,
+					"timeout": timeout,
 				}},
 			}},
 		},
@@ -104,10 +123,50 @@ func antigravityGateHooks(exe string, readOnly bool) map[string]any {
 // antigravityNoOpinion is the gate's answer when it has none.
 const antigravityNoOpinion = `{"decision":"ask"}`
 
+// antigravityAllow is the gate's answer for a call a person allowed.
+const antigravityAllow = `{"decision":"allow"}`
+
+// AntigravityGateMain is `nodevas runner agy-gate [--read-only] [--relay]`
+// on one payload. With --relay it asks through the run's door in the
+// runner's proxy, read from RunMCPEnv (the run's `nodevas mcp` arguments,
+// which agy hands its hooks in their environment), naming the run's node from
+// RunNodeEnv; without them it is the plain gate.
+func AntigravityGateMain(args []string, payload []byte) string {
+	readOnly, relay := false, false
+	for _, arg := range args {
+		switch arg {
+		case AntigravityGateReadOnly:
+			readOnly = true
+		case AntigravityGateRelayFlag:
+			relay = true
+		}
+	}
+	var asker PermissionAsker
+	if relay && !readOnly {
+		var mcpArgs []string
+		if json.Unmarshal([]byte(os.Getenv(RunMCPEnv)), &mcpArgs) == nil {
+			if hub, ok := HubAskerFromMCPArgs(mcpArgs); ok {
+				hub.Agent, hub.NodeID = "antigravity", strings.TrimSpace(os.Getenv(RunNodeEnv))
+				asker = hub
+			}
+		}
+	}
+	return AntigravityGateRelay(context.Background(), payload, readOnly, asker)
+}
+
 // AntigravityGate answers one PreToolUse payload ({"toolCall": {"name": …,
 // "args": {…}}, "workspacePaths": […], …}) with agy's hook output: a denial
 // with a reason, or "ask" for no opinion. readOnly also denies file writes.
 func AntigravityGate(payload []byte, readOnly bool) string {
+	return AntigravityGateRelay(context.Background(), payload, readOnly, nil)
+}
+
+// AntigravityGateRelay is AntigravityGate for a run with permissionRelay: a
+// shell command, which the plain gate refuses because nobody can approve it,
+// is asked about through asker and allowed or denied with the person's
+// reason. Every other denial comes first and is never asked about, and a
+// read-only run never asks. A nil asker is the plain gate.
+func AntigravityGateRelay(ctx context.Context, payload []byte, readOnly bool, asker PermissionAsker) string {
 	var in struct {
 		ToolCall struct {
 			Name string         `json:"name"`
@@ -123,6 +182,18 @@ func AntigravityGate(payload []byte, readOnly bool) string {
 	reason := ""
 	switch {
 	case name == "run_command" || name == "send_command_input":
+		if asker != nil && !readOnly {
+			input, _ := json.Marshal(in.ToolCall.Args)
+			decision := asker.AskPermission(ctx, PermissionRequest{Tool: name, Input: string(input)})
+			if decision.Allow {
+				return antigravityAllow
+			}
+			reason = decision.Reason
+			if reason == "" {
+				reason = "The command was not allowed in Nodevas."
+			}
+			break
+		}
 		reason = "Shell commands are not available in this Nodevas run: nobody can approve them here. " +
 			"Do the work with the file tools; the runner commits your changes when you finish."
 	case name == "call_mcp_tool" || name == "read_resource" || name == "list_resources":

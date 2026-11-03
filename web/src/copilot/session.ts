@@ -6,6 +6,7 @@
 
 import {
   api,
+  CopilotBusyError,
   streamTurn,
   UnauthorizedError,
   type CopilotBrowserModel,
@@ -396,6 +397,8 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
   } catch (error) {
     if (abort.signal.aborted) {
       useCopilot.getState().endTurn(translate("copilot.stopped"));
+    } else if (error instanceof CopilotBusyError) {
+      useCopilot.getState().endTurn(translate("copilot.error.serverBusy"));
     } else {
       useCopilot.getState().endTurn(errorText(error));
     }

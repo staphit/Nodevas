@@ -1,5 +1,5 @@
 /**
- * Cross-slice internals [A-05].
+ * Cross-slice internals.
  *
  * Serialization and staleness guards that must be shared by every slice:
  *
@@ -39,6 +39,26 @@ export function enqueuePageSave(
 }
 
 export const generations = { load: 0, state: 0 };
+
+/**
+ * Graph writes sent, and those still waiting for their answer. A read of the
+ * graph that was on the wire beside a write cannot tell whether it saw that
+ * write, so loadAll does not show it: a graph from before a save, kept with
+ * the revision that save answered, let the next whole-file save pass its
+ * baseRev check with the first save's edit missing.
+ */
+export const graphWrites = { sent: 0, open: 0 };
+
+/** Sends one graph write, counted in `graphWrites` until it is answered. */
+export async function sendGraphWrite<T>(write: () => Promise<T>): Promise<T> {
+  graphWrites.sent += 1;
+  graphWrites.open += 1;
+  try {
+    return await write();
+  } finally {
+    graphWrites.open -= 1;
+  }
+}
 
 /** Invalidates every in-flight load/state response. Call before switching. */
 export function invalidateGenerations(): void {

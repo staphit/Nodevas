@@ -13,10 +13,12 @@ import type { CSSProperties } from "react";
 import { ColorField } from "../InteractionPrimitives";
 import { StatusShape, statusTheme } from "../../statusTheme";
 import { localizedStatusLabel, useI18n } from "../../i18n";
+import { NodeTypeChip } from "../../nodeTypeTheme";
 import type {
   NodeAlign,
   NodeShape,
   NodeStyle,
+  NodeType,
   NodeVAlign,
   Status,
   StatusDefinition,
@@ -30,6 +32,8 @@ const SHAPES: { value: NodeShape }[] = [
   { value: "ellipse" },
   { value: "diamond" },
   { value: "hexagon" },
+  { value: "dashed" },
+  { value: "thick" },
 ];
 
 const PRESETS: { value: string; width: number; height: number }[] = [
@@ -125,6 +129,14 @@ export interface AppearanceControlsProps {
   disabled?: boolean;
   /** Hint under the size sliders. The canvas handles only exist for real nodes. */
   sizeHint?: string;
+  /**
+   * The node type's own shape. When given, the first choice is "Type
+   * default", which clears the per-node override, and any other pick — the
+   * plain rectangle included — is stored as an override.
+   */
+  typeShape?: NodeShape;
+  /** The node's type, drawn as the preview card's label. */
+  previewType?: NodeType;
 }
 
 export function AppearanceControls({
@@ -137,9 +149,12 @@ export function AppearanceControls({
   previewAssignee,
   disabled = false,
   sizeHint,
+  typeShape,
+  previewType,
 }: AppearanceControlsProps) {
   const { t } = useI18n();
-  const shape = style.shape ?? "rect";
+  const shape = style.shape ?? typeShape ?? "rect";
+  const overridden = Boolean(typeShape && style.shape);
   const width = style.width ?? DEFAULT_NODE_W;
   const height = style.height ?? DEFAULT_NODE_H;
   const displayedAssignee = previewAssignee ?? t("appearance.preview");
@@ -149,7 +164,9 @@ export function AppearanceControls({
       {/* What the canvas will draw, at the size being chosen. */}
       <div className="appearance-preview">
         <div
-          className={`col-card status-${status} shape-${shape}${
+          className={`col-card ${
+            previewType?.completion === "none" ? "no-status" : `status-${status}`
+          } shape-${shape}${
             style.align ? ` align-${style.align}` : ""
           }${style.valign ? ` valign-${style.valign}` : ""}`}
           style={
@@ -176,11 +193,14 @@ export function AppearanceControls({
             </span>
           </span>
           <span className="col-card-title">{previewTitle}</span>
-          <span
-            className="col-card-assignee unassigned"
-            data-assignee-prefix={t("canvas.assigneePrefix")}
-          >
-            {displayedAssignee}
+          <span className="col-card-meta">
+            {previewType && <NodeTypeChip type={previewType} />}
+            <span
+              className="col-card-assignee unassigned"
+              data-assignee-prefix={t("canvas.assigneePrefix")}
+            >
+              {displayedAssignee}
+            </span>
           </span>
         </div>
       </div>
@@ -188,15 +208,33 @@ export function AppearanceControls({
       <section className="appearance-group" aria-labelledby={`shape-${idPrefix}`}>
         <h4 id={`shape-${idPrefix}`}>{t("appearance.shape")}</h4>
         <div className="appearance-choices">
-          {SHAPES.map((option) => (
+          {typeShape && (
+            <button
+              type="button"
+              className={`appearance-shape${!style.shape ? " on" : ""}`}
+              aria-pressed={!style.shape}
+              disabled={disabled}
+              onClick={() => onChange({ shape: undefined })}
+            >
+              <span className={`appearance-shape-mark shape-${typeShape}`} aria-hidden />
+              {t("appearance.shape.typeDefault", {
+                shape: t(`appearance.shape.${typeShape}`),
+              })}
+            </button>
+          )}
+          {SHAPES.map((option) => {
+            const on = typeShape ? style.shape === option.value : shape === option.value;
+            return (
             <button
               key={option.value}
               type="button"
-              className={`appearance-shape${shape === option.value ? " on" : ""}`}
-              aria-pressed={shape === option.value}
+              className={`appearance-shape${on ? " on" : ""}`}
+              aria-pressed={on}
               disabled={disabled}
               onClick={() =>
-                onChange({ shape: option.value === "rect" ? undefined : option.value })
+                onChange({
+                  shape: !typeShape && option.value === "rect" ? undefined : option.value,
+                })
               }
             >
               <span
@@ -205,8 +243,10 @@ export function AppearanceControls({
               />
               {t(`appearance.shape.${option.value}`)}
             </button>
-          ))}
+            );
+          })}
         </div>
+        {overridden && <p className="appearance-hint">{t("appearance.shapeOverrideHint")}</p>}
       </section>
 
       <section className="appearance-group" aria-labelledby={`size-${idPrefix}`}>
