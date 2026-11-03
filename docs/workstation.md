@@ -134,7 +134,7 @@ Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent
 
 Pick a runner, agent and model; accept it at the runner; watch OpenCode work over ACP; read the diff; merge the PR.
 
-https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
+https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 ### Autopilot
 
@@ -142,23 +142,23 @@ The goal's **Autopilot** button in the node panel opens it in Station. The goal 
 
 The requirement can change mid-way. Tell the voice copilot how it changes: it pauses the goal's autopilot, records the change on the goal under **Revisions**, and a replan run re-evaluates the tasks — done ones stay, obsolete ones are skipped (kept with their history), ones in progress are only flagged, new ones are added. While it runs the pill reads **Revising…**. When it ends, the copilot tells you what was kept, changed, skipped and added, and asks whether to resume; nothing resumes until you say yes. See [COPILOT.md](../COPILOT.md#revising-a-goal-mid-way).
 
-https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
+https://github.com/user-attachments/assets/dbbfbb85-5ddd-484d-a669-4582c849ab5b
 
 ### Two-factor authentication and device links
 
 In **Settings → Account**, turn on an authenticator app and save the recovery codes. Then link a new PC from **Settings → Agents**: step-up asks the app, and the hub hands back a one-time link.
 
-https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
+https://github.com/user-attachments/assets/df225a24-840e-4ade-b297-7a6d9dd6660e
 
 ### Token usage
 
 Tokens and API-equivalent cost by day, agent, model and session, in **Settings → Agents → Advanced → Usage details**; the daily budget is a row of its own.
 
-https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
+https://github.com/user-attachments/assets/19fba922-8c4f-4ad9-8c8f-7cfac0ebe8c3
 
 ### Agent chat
 
 Who is working on what, a relayed permission prompt you allow, messages between agents, and a held message waiting for your approval.
 
-https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
+https://github.com/user-attachments/assets/d9943e60-9a91-4f0b-97fe-dd9c31754ba9
 

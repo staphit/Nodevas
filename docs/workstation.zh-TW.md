@@ -134,7 +134,7 @@ hub 每 6 小時刪除超過 180 天的原始事件（已結束 run 的紀錄行
 
 選 runner、agent 與模型，在 runner 上接受，看 OpenCode 透過 ACP 工作，讀 diff，合併 PR。
 
-https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
+https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 ### 自動推進
 
@@ -142,23 +142,23 @@ https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 需求中途可以改。直接跟語音 Copilot 說要怎麼改：它會暫停這個目標的自動推進、把變更記在目標的 **Revisions** 底下，再由一次重新規劃重新評估任務：已完成的保留、過時的略過（保留歷史）、進行中的只標記、需要的新任務會加入。規劃期間按鈕顯示 **修訂中…**。結束後 Copilot 會告訴你保留、修改、略過與新增了哪些，並問要不要恢復推進；你說好之前不會恢復。詳見 [COPILOT.md](../COPILOT.md#revising-a-goal-mid-way)。
 
-https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
+https://github.com/user-attachments/assets/dbbfbb85-5ddd-484d-a669-4582c849ab5b
 
 ### 兩步驟驗證與裝置連結
 
 在 **設定 → 帳號** 開啟驗證器 App、保存復原碼，再從 **設定 → Agent 與 Runner** 連結一台新電腦：step-up 改問 App，hub 產生一次性連結。
 
-https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
+https://github.com/user-attachments/assets/df225a24-840e-4ade-b297-7a6d9dd6660e
 
 ### Token 用量
 
 在 **設定 → Agent 與 Runner → 進階 → 用量明細** 依日期、agent、模型與 session 看 token 用量與 API 等價成本；每日預算另有一列。
 
-https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
+https://github.com/user-attachments/assets/19fba922-8c4f-4ad9-8c8f-7cfac0ebe8c3
 
 ### Agent 對話
 
 誰在做什麼、一則轉送過來等你允許的權限詢問、agent 之間的訊息，以及一則等你放行的暫留訊息。
 
-https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
+https://github.com/user-attachments/assets/d9943e60-9a91-4f0b-97fe-dd9c31754ba9
 

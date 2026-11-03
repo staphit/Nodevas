@@ -46,7 +46,7 @@ mkdir -p workspace && ./nodevas serve --project ./workspace
 
 ## 在自己電腦上跑 agent
 
-https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
+https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 server 只負責顯示看板；你電腦上的小程式 **runner** 用你自己的登入，在你自己的 repo 裡執行 agent，而且只執行你同意的 run。設定、安全、自動推進與更多示範影片：[Agent 工作站](./docs/workstation.zh-TW.md)。
 

@@ -46,7 +46,7 @@ Open <http://127.0.0.1:5666>. The first start downloads a pinned PostgreSQL buil
 
 ## Run agents on your machine
 
-https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
+https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 The server shows the board; a small **runner** on your PC runs the agents with your own logins, in your own repositories, and only the runs you accept. Setup, security, autopilot, and more demos: [Agent workstation](./docs/workstation.md).
 
