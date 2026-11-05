@@ -75,6 +75,8 @@ export const PIXEL_TOKENS = [
   "sun",
   "wood",
   "backpack",
+  "meat",
+  "meat-cooked",
 ] as const;
 
 export type PixelToken = (typeof PIXEL_TOKENS)[number];

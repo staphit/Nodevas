@@ -304,6 +304,8 @@ describe("outdoorScene", () => {
       stream: ["stream.backdrop", "stream.pole", "stream.wade"],
       fish: ["fish.backdrop", "fish.rod", "fish.bobber.a", "fish.bucket"],
       camp: ["camp.backdrop", "camp.tent", "camp.fire.a", "camp.sun"],
+      bbq: ["bbq.backdrop", "bbq.grill", "bbq.smoke.a", "bbq.plate", "bbq.tongs.a"],
+      cycle: ["cycle.backdrop", "cycle.bike", "cycle.wheel.back.a", "cycle.wheel.front.a", "cycle.flag"],
     };
     const keys = new Set<string>();
     for (const kind of OUTING_KINDS) {
@@ -341,6 +343,93 @@ describe("outdoorScene", () => {
     expect(names(outdoorScene(outing("hike", 3), "codex"))).not.toContain("hike.summit");
   });
 
+  it("cooks the barbecue with the wait: raw, seared, done, and the plate fills", () => {
+    const food = (step: number) =>
+      names(outdoorScene(outing("bbq", step), "codex")).filter((n) => n.startsWith("bbq.food."));
+    const doneness = (step: number) => [...new Set(food(step).map((n) => n.split(".").pop()))];
+    // Two skewers on the grill at every step, all as done as each other.
+    for (const step of steps) expect(food(step), `${step}`).toHaveLength(2);
+    expect(doneness(0)).toEqual(["raw"]);
+    expect(doneness(3)).toEqual(["seared"]);
+    expect(doneness(OUTING_STEPS - 1)).toEqual(["done"]);
+    // Raw, seared and done differ in shape (grill marks), not only in colour.
+    const sprites = [0, 3, 7].map((step) => outdoorScene(outing("bbq", step), "codex").find((p) => p.name.startsWith("bbq.food."))!.sprite);
+    const shape = (sprite: (typeof sprites)[number]) =>
+      sprite.layers.filter((layer) => layer.token === "outline").map((layer) => layer.d).join("");
+    expect(new Set(sprites.map(shape)).size).toBe(3);
+    // The plate: empty at first, more skewers on it later on.
+    const plated = (step: number) =>
+      names(outdoorScene(outing("bbq", step), "codex")).filter((n) => n.startsWith("bbq.plate.skewer")).length;
+    expect(plated(0)).toBe(0);
+    expect(plated(5)).toBeGreaterThan(plated(3));
+    expect(plated(OUTING_STEPS - 1)).toBeGreaterThan(plated(5));
+    // Only done skewers go on the plate: none before the grill's are done.
+    for (const step of steps) if (doneness(step)[0] !== "done") expect(plated(step), `${step}`).toBe(0);
+  });
+
+  /** A sprite's opaque pixels, row by row, from its compiled paths. */
+  const pixels = (sprite: Placed["sprite"]) => {
+    const grid = Array.from({ length: sprite.h }, () => Array<string>(sprite.w).fill(""));
+    for (const layer of sprite.layers)
+      for (const [, x, y, n] of layer.d.matchAll(/M(\d+) (\d+)h(\d+)/g))
+        for (let i = 0; i < Number(n); i++) grid[Number(y)][Number(x) + i] = layer.token;
+    return grid;
+  };
+  const span = (row: string[]) => [row.findIndex(Boolean), row.length - [...row].reverse().findIndex(Boolean)];
+
+  it("rides short of the finish pole, never into it", () => {
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "codex");
+      const pole = parts.find((p) => p.name === "cycle.flag.pole")!;
+      for (const name of ["cycle.bike", "cycle.wheel.front.a", "cycle.wheel.front.b"]) {
+        const part = parts.find((p) => p.name === name)!;
+        expect(part.x + part.sprite.w, `${step} ${name}`).toBeLessThanOrEqual(pole.x);
+      }
+    }
+  });
+
+  it("draws solid wheels whose spokes stand out from the road", () => {
+    const parts = outdoorScene(outing("cycle", 0), "codex");
+    for (const name of ["cycle.wheel.back.a", "cycle.wheel.back.b"]) {
+      const grid = pixels(parts.find((p) => p.name === name)!.sprite);
+      for (const [y, row] of grid.entries()) {
+        const [from, to] = span(row);
+        // Nothing of the kerb or road shows through inside the rim.
+        expect(row.slice(from, to).every(Boolean), `${name} row ${y}`).toBe(true);
+      }
+      const spokes = new Set(grid.flat().filter((token) => token && token !== "outline" && token !== "rock-dark"));
+      expect([...spokes], name).not.toContain("rock");
+      expect(spokes.size, name).toBeGreaterThan(0);
+    }
+  });
+
+  it("puts the pedalling legs right under the rider's hips", () => {
+    const parts = outdoorScene(outing("cycle", 3), "codex");
+    const body = parts.find((p) => p.name === "body.standing")!;
+    const hips = span(pixels(body.sprite).at(-1)!).map((x) => body.x + x);
+    for (const name of ["cycle.legs.a", "cycle.legs.b"]) {
+      const legs = parts.find((p) => p.name === name)!;
+      expect(span(pixels(legs.sprite)[0]).map((x) => legs.x + x), name).toEqual(hips);
+    }
+  });
+
+  it("rides along the road a step at a time, and reaches the finish at the last step", () => {
+    const bikes = steps.map((step) => placedAt(outdoorScene(outing("cycle", step), "codex"), "cycle.bike"));
+    expect(new Set(bikes).size).toBe(OUTING_STEPS);
+    const xs = steps.map((step) => outdoorScene(outing("cycle", step), "codex").find((p) => p.name === "cycle.bike")!.x);
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+    // The rider stays on the bike: head over the frame at every step.
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "codex");
+      const bike = parts.find((p) => p.name === "cycle.bike")!;
+      const head = parts.find((p) => p.name === "head.front")!;
+      expect(head.x, `${step}`).toBeGreaterThanOrEqual(bike.x);
+      expect(head.x + head.sprite.w, `${step}`).toBeLessThanOrEqual(bike.x + bike.sprite.w);
+    }
+    expect(names(outdoorScene(outing("cycle", OUTING_STEPS - 1), "codex"))).toContain("cycle.finish");
+    expect(names(outdoorScene(outing("cycle", OUTING_STEPS - 2), "codex"))).not.toContain("cycle.finish");
+  });
+
   it("clamps a step out of range to the outing's ends", () => {
     expect(outdoorScene(outing("hike", -3), "codex")).toEqual(outdoorScene(outing("hike", 0), "codex"));
     expect(outdoorScene(outing("hike", 99), "codex")).toEqual(outdoorScene(outing("hike", OUTING_STEPS - 1), "codex"));
@@ -356,5 +445,11 @@ describe("outdoorScene", () => {
     // Still, the hiker has legs and the fire burns.
     expect(still(outdoorScene(outing("hike", 2), "gemini"))).toContain("legs.walk.a");
     expect(still(outdoorScene(outing("camp", 2), "gemini"))).toContain("camp.fire.a");
+    // Still, the barbecue smokes and the bike has both wheels and pedals.
+    expect(still(outdoorScene(outing("bbq", 2), "gemini"))).toEqual(expect.arrayContaining(["bbq.smoke.a", "bbq.tongs.a"]));
+    expect(still(outdoorScene(outing("cycle", 2), "gemini"))).toEqual(
+      expect.arrayContaining(["cycle.wheel.back.a", "cycle.wheel.front.a", "cycle.legs.a"]),
+    );
+    expect(still(outdoorScene(outing("cycle", 2), "gemini"))).not.toContain("cycle.legs.b");
   });
 });

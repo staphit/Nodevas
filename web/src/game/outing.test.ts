@@ -12,12 +12,14 @@ describe("fnv1a32", () => {
 
 describe("outingKindOf", () => {
   it("picks the same outing for the same run, every time", () => {
-    expect(OUTING_KINDS).toEqual(["hike", "stream", "fish", "camp"]);
-    expect(outingKindOf("run1")).toBe("stream");
+    expect(OUTING_KINDS).toEqual(["hike", "stream", "fish", "camp", "bbq", "cycle"]);
+    expect(outingKindOf("run1")).toBe("camp");
     expect(outingKindOf("run2")).toBe("hike");
-    expect(outingKindOf("run3")).toBe("camp");
-    expect(outingKindOf("run4")).toBe("fish");
-    expect(outingKindOf("65f0a1b2c3d4e5f600000002")).toBe("fish");
+    expect(outingKindOf("run3")).toBe("cycle");
+    expect(outingKindOf("run4")).toBe("hike");
+    expect(outingKindOf("run6")).toBe("fish");
+    expect(outingKindOf("run7")).toBe("stream");
+    expect(outingKindOf("65f0a1b2c3d4e5f600000002")).toBe("bbq");
     expect(outingKindOf("run1")).toBe(outingKindOf("run1"));
   });
 });

@@ -73,6 +73,8 @@ export const LEGEND: Legend = {
   U: "sun",
   l: "wood",
   V: "backpack",
+  "&": "meat",
+  "#": "meat-cooked",
 };
 
 export const sprite = (grid: string) => compileSprite(grid, LEGEND);

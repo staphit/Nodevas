@@ -100,6 +100,8 @@
   --px-sun: #f7d44a;
   --px-wood: #8a5a34;
   --px-backpack: #b8823a;
+  --px-meat: #e98a8a;
+  --px-meat-cooked: #8e4424;
 
   --agent-claude: #d97757;
   --agent-codex: #10a37f;
@@ -184,6 +186,8 @@
   --px-sun: #ece6c4;
   --px-wood: #6a4528;
   --px-backpack: #94672f;
+  --px-meat: #c86b72;
+  --px-meat-cooked: #6f3118;
 }
 
 /* ---------- office styles: furniture, wall and floor only ---------- */

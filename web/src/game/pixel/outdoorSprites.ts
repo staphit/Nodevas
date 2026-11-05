@@ -1,10 +1,12 @@
 // The outdoors, where an agent goes while its run waits for a usage limit
 // to reset (game/outing.ts): a hike up to a summit flag, wading up a stream
-// to its falls, fishing from a rock by a lake, a camp with a tent and a fire.
+// to its falls, fishing from a rock by a lake, a camp with a tent and a fire,
+// a barbecue at a campsite, a bike ride along a road to a finish flag.
 // Each outing is one tile, OUTDOOR_W × OUTDOOR_H art pixels: a backdrop, the
 // agent (seen from the front, its kind's headwear from sprites.ts) and the
 // props that say which outing it is without colour: a flag, a pole in the
-// water, a rod and a bobber, a tent and flames. Original art, in the legend
+// water, a rod and a bobber, a tent and flames, a grill with smoke and a
+// plate, a bike's wheels and a chequered flag. Original art, in the legend
 // of sprites.ts; the backdrops are drawn on the sky, so a tile is whole on
 // its own.
 
@@ -506,3 +508,333 @@ export const SUN_PATH: readonly { x: number; y: number }[] = [
   { x: 38, y: 4 },
   { x: 44, y: 6 },
 ];
+
+// ---------- bbq: a grill at the campsite, the skewers cooking ----------
+
+export const BBQ_BACKDROP = sprite(`
+  --------------------------------------------------------
+  --------------------------------------------------------
+  --------------------------------------------------------
+  -----wwww--------------------www------------------------
+  ----wwwwwww----------------wwwwwwww---------------------
+  ---wwwwwwwwww-------------wwwwwwwwwwww------------------
+  -------------ooooo--------------------------------------
+  -----------oo,,,,,oo------------------------------------
+  --ooooo---oo,,,,,,,oo-----------------------------------
+  oo,,,,,oo-o,,,,,,,,,o-----------------------------------
+  o,,,,,,,oo,,,,,,,,,;;o--ooooo---------------------------
+  ,,,,,,,,,o,,,,,,,,;;;o-o,,,,,o-----------------------ooo
+  ,,,,,,,,;o,,,,,,,;;;;oo,,,,,,,o---------------------o,,,
+  ,,,,,,,;;o,,,,,,;;;;;o,,,,,,,,;o-------------------o,,,,
+  ,,,,,,;;;o,,,,,;;;;;;o,,,,,,,;;o------------------o,,,,,
+  ,,,,,;;;;;o,,,;;;;;;oo,,,,,,;;;o-ooo--------------o,,,,,
+  ,,,,;;;;;;oo,;;;;;;ooo,,,,,;;;;oo,,,o-------------o,,,,,
+  ,,,;;;;;;o-oo;;;;;oo-o,,,,;;;;;o,,,,,o------------o,,,,,
+  o,;;;;;;oo---ooooo----o,,;;;;;oo,,,,;o------------o,,,,;
+  oo;;;;;oo-----olo------o;;;;;o-o,,,;;o-------------o,,;;
+  -ooooooo-----oolo--o----ooooo--oo,;;oo-----o-----o--o;;;
+  o;ooloo;o---o;olo-o;o---oolo--o;ooooo;o---o;o---o;o--ooo
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,
+  ,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,
+  ;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,
+  ,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;
+  ,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,
+  ,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,
+  ,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,
+  ,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,
+  ,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,
+  ,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,
+  ,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,
+  ,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,,,,,,,,,,,;,,
+  ,,,,;,,::,::,::,::,::,::,::,::,::,::,::,::,::,::,,,,,,,,
+  ,,,,,::::O::::::::::O::::::::::O::::::::::O:::::::,,,,,,
+  ,,,O::::::::::O::::::::::O::::::::::O::::::::::O::::,,,,
+  ;:::::::O::::::::::O::::::::::O::::::::::O::::::::::O:,,
+  ::O::::::::::O::::::::::O::::::::::O::::::::::O:::::::::
+  :::::::O::::::::::O::::::::::O::::::::::O::::::::::O::::
+  :O::::::::::O::::::::::O::::::::::O::::::::::O::::::::::
+  ::::::O::::::::::O::::::::::O::::::::::O::::::::::O:::::
+`);
+
+/** The grill on its legs: the grate, the coals glowing under it, the box. */
+export const GRILL = sprite(`
+  oooooooooooooooooooooooo
+  oOoOoOoOoOoOoOoOoOoOoOOo
+  o!^!^^!^!^^!^!^^!^!^^!^o
+  o@@@@@@@@@@@@@@@@@@@@@@o
+  .o@@@@@@@@@@@@@@@@@@@@o.
+  ..oooooooooooooooooooo..
+  ...o@o............o@o...
+  ...o@o............o@o...
+  ...o@o............o@o...
+  ...o@o............o@o...
+  ..oo@oo..........oo@oo..
+  ..ooooo..........ooooo..
+`);
+
+/** A skewer on the grate, meat and a pepper on a stick, as done as the wait
+ * is long: raw (plain), seared (a grill mark across), done (browned, two
+ * marks each way). */
+export const SKEWER_RAW = sprite(`
+  .ooooooooo.
+  .o&&&o,,,o.
+  lo&&&o,,,ol
+  .o&&&o,,,o.
+  .ooooooooo.
+`);
+export const SKEWER_SEARED = sprite(`
+  .ooooooooo.
+  .o&&&o,,,o.
+  lo#o#o;o;ol
+  .o&&&o,,,o.
+  .ooooooooo.
+`);
+export const SKEWER_DONE = sprite(`
+  .ooooooooo.
+  .oo##o;o;o.
+  lo#o#oo;ool
+  .o##oo;;oo.
+  .ooooooooo.
+`);
+
+/** The agent's arm out to the grill with the tongs: down on a skewer, then
+ * up, turning it. */
+export const TONGS_A = sprite(`
+  ooooo....
+  aaaakOOOO
+  ooooo...O
+  ........O
+`);
+export const TONGS_B = sprite(`
+  ......OO.
+  .....oO..
+  ooooko...
+  aaaao....
+  oooo.....
+`);
+
+/** An apron over the shirt: the cook. */
+export const APRON = sprite(`
+  .oooo.
+  .o**o.
+  o****o
+  o****o
+  o****o
+  oooooo
+`);
+
+/** Smoke off the grill, puffs rising in three frames. */
+export const SMOKE_A = sprite(`
+  ...O........
+  ..OwO.......
+  ...O........
+  ............
+  ............
+  .......OO...
+  ......OwwO..
+  ......OwwO..
+  .......OO...
+  ............
+  ............
+  ....OOO.....
+  ...OOwwO....
+  ...OwwwO....
+  ....OOO.....
+  ............
+`);
+export const SMOKE_B = sprite(`
+  .......O....
+  ......OwO...
+  .......O....
+  ............
+  ...OO.......
+  ..OwwO......
+  ..OwwO......
+  ...OO.......
+  ............
+  ............
+  .......OOO..
+  ......OOwwO.
+  ......OwwwO.
+  .......OOO..
+  ............
+  ............
+`);
+export const SMOKE_C = sprite(`
+  ............
+  ............
+  ............
+  .........O..
+  ........OwO.
+  .........O..
+  ............
+  ......OO....
+  .....OwwO...
+  .....OwwO...
+  ......OO....
+  ............
+  ...OO.......
+  ..OwwO......
+  ..OwwO......
+  ...OO.......
+`);
+
+/** The folding table, a plate on it, the cooler under it. */
+export const CAMP_TABLE = sprite(`
+  oooooooooooooo
+  ollllllllllllo
+  oooooooooooooo
+  .o..........o.
+  .o..........o.
+  .o..........o.
+  .o..........o.
+  .o..........o.
+  .o..........o.
+  oo..........oo
+`);
+export const PLATE = sprite(`
+  .oooooooooo.
+  o**********o
+  .oooooooooo.
+`);
+/** A done skewer on the plate, one more per stretch of the wait. */
+export const PLATED = sprite(`
+  .oooooooo.
+  l##o;;o##l
+  .oooooooo.
+`);
+export const COOLER = sprite(`
+  ooooooooo
+  o*******o
+  ooooooooo
+  o~~~~~~~o
+  o~~ooo~~o
+  ooooooooo
+`);
+
+// ---------- cycle: along the road to the finish flag ----------
+
+export const CYCLE_BACKDROP = sprite(`
+  --------------------------------------------------------
+  --------------------------------------------------------
+  ------------------------------wwwww---------------------
+  ----------------------------wwwwwwwwww------------------
+  -------wwww----------------wwwwwwwwwwwwww---------------
+  -----wwwwwwwww------------------------------------------
+  --------------------------------------------------------
+  --------------------------------------------------------
+  -----------------------------------------------www------
+  ----------------------------------------------wwwwww----
+  -----o--------------------------------------------------
+  ----o,o-------------------------------------------------
+  ----o,o-----------o-------------------------------------
+  -----looooooo----o,o---------------------------o--------
+  ----oo;;;;;;;oo--o,o--------------------------o,o-------
+  --oo;;;;;;;;;;;oo-l---------------------------o,o-------
+  oo;;;;;;;;;;;;;;;oo----------------------------l--------
+  ;;;;;;;;;;;;;;;;;;;oo------------o----------ooooooo-----
+  ;;;;;;;;;;;;;;;;;;;;;o----------o,o-----oooo;;;;;;;ooo--
+  ;;;;;;;;;;;;;;;;;;;;;;oo--------o,o---oo;;;;;;;;;;;;;;oo
+  ;;;;;;;;;;;;;;;;;;;;;;;;oo-------l-ooo;;;;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;ooooooooo;;;;;;;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;oooo;;;;;;;;;;;;;;;;;;;;;;;;;
+  ooooo;;;;;;;;;;;;;;;;;;oooo,,,,oooo;;;;;;;;;;;;;;;;;;;;;
+  ,,;,,ooo;;;;;;;;;;;;ooo,,,,,,,,,,,,oo;;;;;;;;;;;;;;;;;;;
+  ,,,,,,,,ooooo;;;oooo,,,,,,,,,,,,;,,,,oo;;;;;;;;;;;;;;;;;
+  ,,,,,,,,,,,;,ooo,,,,,,,,,,,,;,,,,,,,,,,oo;;;;;;;;;;;;;oo
+  ,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,,,,,,,,,,,,oo;;;;;;;;;oo,,
+  ,,,;,,,,,,,,,,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,ooooooooo,,;,
+  ,,,,,,,,,,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,
+  ,,,,,,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,,,,,,,,,,,,;,,,,,,,,,
+  oooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+  OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  ****@@@@****@@@@****@@@@****@@@@****@@@@****@@@@****@@@@
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+  oooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+  ;,,,,,,,,;,,,,,,,,;,,,,,,,,;,,,,,,,,;,,,,,,,,;,,,,,,,,;,
+`);
+
+/** The bike's frame, from the side: saddle, bars, tubes; the hubs on its
+ * bottom row, where the wheels' centres go. */
+export const BIKE = sprite(`
+  ..............oooo....
+  ......oooo.....^......
+  ........o......^......
+  ........^^^^^^^^^.....
+  .......^^.....^.^.....
+  ......^..^...^..^.....
+  ......^..^..^...^.....
+  .....^....^^.....^....
+  ....o^^^^^^......o....
+`);
+/** Where the wheels' hubs are on BIKE's bottom row. */
+export const BIKE_HUBS = { back: 4, front: 17 };
+
+/** A wheel, its spokes turning in two frames: + then ×. Solid inside, so
+ * the kerb and road behind it never show through, its spokes in snow so they
+ * stand out from the rock-dark inside in either theme. */
+export const WHEEL_A = sprite(`
+  ..ooooo..
+  .o@@*@@o.
+  o@@@*@@@o
+  o@@@*@@@o
+  o*******o
+  o@@@*@@@o
+  o@@@*@@@o
+  .o@@*@@o.
+  ..ooooo..
+`);
+export const WHEEL_B = sprite(`
+  ..ooooo..
+  .o@@@@@o.
+  o@*@@@*@o
+  o@@*@*@@o
+  o@@@*@@@o
+  o@@*@*@@o
+  o@*@@@*@o
+  .o@@@@@o.
+  ..ooooo..
+`);
+
+/** The rider's legs, from the front, pedalling: one foot down on its pedal,
+ * the other up, then the other way round. */
+export const LEGS_PEDAL_A = sprite(`
+  oppppppo
+  oppppppo
+  oppooppo
+  oppooppo
+  oppooooo
+  oppo.ooo
+  oppo....
+  oppo....
+  oooo....
+`);
+export const LEGS_PEDAL_B = sprite(`
+  oppppppo
+  oppppppo
+  oppooppo
+  oppooppo
+  oooooppo
+  ooo.oppo
+  ....oppo
+  ....oppo
+  ....oooo
+`);
+
+/** The finish: a chequered flag by the road. */
+export const CHEQUER = sprite(`
+  ooooo
+  o*o*o
+  *o*o*
+  o*o*o
+  ooooo
+`);

@@ -1,6 +1,7 @@
 // Out of the office: agents whose run waits for a usage limit to reset go
-// on an outing until it does (game/outing.ts), a hike, a stream, fishing or
-// a camp, each in a tile of its own, as far along as the wait is. This
+// on an outing until it does (game/outing.ts), a hike, a stream, fishing, a
+// camp, a camp barbecue or a bike ride, each in a tile of its own, as far
+// along as the wait is. This
 // project's agents keep their full menu (AgentDesk, as in the lounge);
 // another project's are visitors, a tag saying which project, the menu
 // going there. With nobody out, there is nothing to draw.

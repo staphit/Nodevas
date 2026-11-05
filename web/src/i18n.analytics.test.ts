@@ -65,7 +65,7 @@ const KEYS = [
   "game.area.outdoors",
   ...each("game.activity", ["read", "edit", "shell", "search", "web", "think"]),
   "game.actor.activity",
-  ...each("game.outing", ["hike", "stream", "fish", "camp", "label", "labelSoon"]),
+  ...each("game.outing", ["hike", "stream", "fish", "camp", "bbq", "cycle", "label", "labelSoon"]),
   ...each("game.outdoors", ["visitor", "empty", "more"]),
 ];
 

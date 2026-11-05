@@ -74,7 +74,7 @@ describe("compileSprite", () => {
   });
 
   it("draws the outdoors' backdrops a whole tile each, and every activity screen inside the screen", () => {
-    for (const name of ["HIKE_BACKDROP", "STREAM_BACKDROP", "FISH_BACKDROP", "CAMP_BACKDROP"] as const) {
+    for (const name of ["HIKE_BACKDROP", "STREAM_BACKDROP", "FISH_BACKDROP", "CAMP_BACKDROP", "BBQ_BACKDROP", "CYCLE_BACKDROP"] as const) {
       expect([Outdoor[name].w, Outdoor[name].h], name).toEqual([Outdoor.OUTDOOR_W, Outdoor.OUTDOOR_H]);
     }
     for (const [name, value] of Object.entries(Activity)) {

@@ -110,6 +110,10 @@ describe("what an agent is doing, in words", () => {
     expect(outingLabel(tZh, outing({ kind: "fish", minutesLeft: 1 }))).toBe("出去釣魚了，大約 1 分鐘後回來。");
     expect(outingLabel(tEn, outing({ kind: "camp", minutesLeft: 0 }))).toBe("Out camping, back any moment.");
     expect(outingLabel(tZh, outing({ kind: "camp", minutesLeft: 0 }))).toBe("出去露營了，隨時會回來。");
+    expect(outingLabel(tEn, outing({ kind: "bbq" }))).toBe("Out having a camp barbecue, back in about 25 min.");
+    expect(outingLabel(tZh, outing({ kind: "bbq" }))).toBe("出去露營烤肉了，大約 25 分鐘後回來。");
+    expect(outingLabel(tEn, outing({ kind: "cycle", minutesLeft: 0 }))).toBe("Out cycling, back any moment.");
+    expect(outingLabel(tZh, outing({ kind: "cycle", minutesLeft: 3 }))).toBe("出去騎單車了，大約 3 分鐘後回來。");
   });
 
   it("adds the activity to a working or reviewing agent's sentence", () => {

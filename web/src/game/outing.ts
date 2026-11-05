@@ -1,10 +1,10 @@
 // Where an agent goes while its run waits for a usage limit to reset: out of
-// the office for a hike, up a stream, fishing or camping, picked from the
-// run id so the same run always goes on the same outing, and as far along it
-// as the wait is (createdAt → retryAt), in OUTING_STEPS whole steps so the
-// drawing changes only a few times per wait.
+// the office for a hike, up a stream, fishing, camping, a camp barbecue or a
+// bike ride, picked from the run id so the same run always goes on the same
+// outing, and as far along it as the wait is (createdAt → retryAt), in
+// OUTING_STEPS whole steps so the drawing changes only a few times per wait.
 
-export const OUTING_KINDS = ["hike", "stream", "fish", "camp"] as const;
+export const OUTING_KINDS = ["hike", "stream", "fish", "camp", "bbq", "cycle"] as const;
 
 export type OutingKind = (typeof OUTING_KINDS)[number];
 

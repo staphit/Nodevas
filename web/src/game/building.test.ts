@@ -313,7 +313,7 @@ describe("the outdoors", () => {
     expect(building.outdoors.map((spot) => spot.actorId ?? spot.id)).toEqual([runActorId("run3"), "visitor:app:run:run1"]);
     expect(building.outdoorsMore).toBe(0);
     expect(building.lounge).toEqual([]);
-    expect(building.actors[0]).toMatchObject({ area: "outdoors", outing: { kind: "camp", step: 4, minutesLeft: 10 } });
+    expect(building.actors[0]).toMatchObject({ area: "outdoors", outing: { kind: "cycle", step: 4, minutesLeft: 10 } });
     const target = { kind: "in-project", project: "app", then: { kind: "run", runId: "run1", nodeId: there.nodeId } };
     expect(building.outdoors[1].visitor).toEqual({
       project: "app",
@@ -321,7 +321,7 @@ describe("the outdoors", () => {
       agent: "claude",
       model: "opus",
       title: "Search",
-      outing: { kind: "stream", step: 6, returnsAt: there.retryAt, minutesLeft: 15 },
+      outing: { kind: "camp", step: 6, returnsAt: there.retryAt, minutesLeft: 15 },
       target,
       actions: [target, { kind: "project", project: "app" }],
     });

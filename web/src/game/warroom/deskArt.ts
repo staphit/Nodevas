@@ -450,6 +450,8 @@ export const OUTDOOR_LOOP_MS: Record<OutingKind, number> = {
   stream: 1200,
   fish: 1600,
   camp: 900,
+  bbq: 1500,
+  cycle: 400,
 };
 
 /** The agent standing, from the front, the body's left edge at x and its
@@ -557,10 +559,76 @@ function camp(kind: string, step: number): Placed[] {
   ];
 }
 
+/** How done the barbecue's skewers are by a step: raw at first, seared,
+ * then done. */
+const SEARED_FROM = 3;
+const DONE_FROM = 5;
+/** Done skewers on the plate by a step: none until the grill's are done,
+ * then one, two, three. */
+const PLATED_AT = [DONE_FROM, 6, 7];
+
+/** At the grill, an apron on, turning two skewers with the tongs, smoke
+ * rising; the skewers cook through with the wait (raw, seared, done, each
+ * marked by its grill lines) and the plate on the table fills. */
+function bbq(kind: string, step: number): Placed[] {
+  const feet = 41;
+  const x = 17;
+  const doneness = step >= DONE_FROM ? "done" : step >= SEARED_FROM ? "seared" : "raw";
+  const skewer = { raw: O.SKEWER_RAW, seared: O.SKEWER_SEARED, done: O.SKEWER_DONE }[doneness];
+  const smoke = [O.SMOKE_A, O.SMOKE_B, O.SMOKE_C];
+  const parts: Placed[] = [
+    at("bbq.backdrop", O.BBQ_BACKDROP, 0, 0),
+    at("bbq.table", O.CAMP_TABLE, 1, 32),
+    at("bbq.cooler", O.COOLER, 3, 36),
+    at("bbq.plate", O.PLATE, 2, 29),
+  ];
+  PLATED_AT.forEach((from, i) => {
+    if (step >= from) parts.push(at(`bbq.plate.skewer.${i + 1}`, O.PLATED, 3, 27 - 2 * i));
+  });
+  parts.push(
+    at("legs", S.LEGS, x, feet - 4),
+    ...standing(kind, x, feet, S.BODY_STANDING),
+    at("bbq.apron", O.APRON, x + 3, feet - 11),
+    at("bbq.grill", O.GRILL, 30, 30),
+    at(`bbq.food.1.${doneness}`, skewer, 31, 25),
+    at(`bbq.food.2.${doneness}`, skewer, 42, 25),
+    framed(at("bbq.tongs.a", O.TONGS_A, x + 10, 28), 0, 2),
+    framed(at("bbq.tongs.b", O.TONGS_B, x + 10, 25), 1, 2),
+    ...smoke.map((sprite, i) => framed(at(`bbq.smoke.${"abc"[i]}`, sprite, 40, 8), i, 3)),
+  );
+  return parts;
+}
+
+/** Along the road on a bike, a step at a time, wheels and pedals turning,
+ * towards the chequered flag; a spark once it is reached. */
+function cycle(kind: string, step: number): Placed[] {
+  // The last step's bike (and front wheel) ends right at the pole, short of it.
+  const x = 4 * step;
+  const bikeY = 26;
+  const wheelY = bikeY + O.BIKE.h - 1 - Math.floor(O.WHEEL_A.h / 2);
+  const wheelX = (hub: number) => x + hub - Math.floor(O.WHEEL_A.w / 2);
+  const pole = { x: 50, y: 20 };
+  const parts: Placed[] = [
+    at("cycle.backdrop", O.CYCLE_BACKDROP, 0, 0),
+    at("cycle.flag.pole", O.FLAG_POLE, pole.x, pole.y),
+    at("cycle.flag", O.CHEQUER, pole.x + 1, pole.y + 1),
+    framed(at("cycle.wheel.back.a", O.WHEEL_A, wheelX(O.BIKE_HUBS.back), wheelY), 0, 2),
+    framed(at("cycle.wheel.back.b", O.WHEEL_B, wheelX(O.BIKE_HUBS.back), wheelY), 1, 2),
+    framed(at("cycle.wheel.front.a", O.WHEEL_A, wheelX(O.BIKE_HUBS.front), wheelY), 0, 2),
+    framed(at("cycle.wheel.front.b", O.WHEEL_B, wheelX(O.BIKE_HUBS.front), wheelY), 1, 2),
+    at("cycle.bike", O.BIKE, x, bikeY),
+    framed(at("cycle.legs.a", O.LEGS_PEDAL_A, x + 7, bikeY), 0, 2),
+    framed(at("cycle.legs.b", O.LEGS_PEDAL_B, x + 7, bikeY), 1, 2),
+    ...standing(kind, x + 5, bikeY + 4, S.BODY_STANDING),
+  ];
+  if (step === OUTING_STEPS - 1) parts.push(at("cycle.finish", O.SPARK, pole.x - 2, pole.y - 8));
+  return parts;
+}
+
 /** An agent on its outing, a tile of OUTDOOR_W × OUTDOOR_H (agent kind as
  * agentColorKey gives it). How far along it is, is its step (0 …
  * OUTING_STEPS - 1, clamped), each step placed rather than moved; the
- * frames only move legs, water, a bobber, flames. */
+ * frames only move legs, water, a bobber, flames, smoke, tongs, wheels. */
 export function outdoorScene(outing: Pick<Outing, "kind" | "step">, kind: string): Placed[] {
   const step = Math.min(OUTING_STEPS - 1, Math.max(0, Math.floor(outing.step) || 0));
   switch (outing.kind) {
@@ -570,6 +638,10 @@ export function outdoorScene(outing: Pick<Outing, "kind" | "step">, kind: string
       return stream(kind, step);
     case "fish":
       return fish(kind, step);
+    case "bbq":
+      return bbq(kind, step);
+    case "cycle":
+      return cycle(kind, step);
     default:
       return camp(kind, step);
   }
