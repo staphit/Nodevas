@@ -148,7 +148,7 @@ describe("the current office", () => {
         runs: [
           run("a", "login", { status: "running" }),
           run("b", "schema", { status: "failed", finishedAt: ago(1_000) }),
-          run("c", "docs", { status: "queued", retryAt: ago(-60_000) }),
+          run("c", "docs", { status: "queued", retryAt: ago(-60_000), agent: "codex", model: "gpt-5" }),
           run("d", "x1", { status: "succeeded", finishedAt: ago(1_000) }),
         ],
       }),
@@ -215,6 +215,46 @@ describe("the current office", () => {
     expect(visitor.querySelector('[data-part="hike.summit"]')).not.toBeNull();
     expect(within(visitor).getByText("App")).toBeInTheDocument();
     expect(within(outdoors).getByText("2 more out of the office.")).toBeInTheDocument();
+  });
+
+  it("draws each agent as its model's character, wherever it is", () => {
+    const run = (id: string, agent: string, model: string, over: Parameters<typeof makeRun>[0] = {}) =>
+      makeRun({ id, nodeId: id, agent, model, status: "running", ...over });
+    const world = building({
+      runners: [runner("rn1", "mac-mini", 6)],
+      runs: [
+        run("c1", "claude", "opus"),
+        run("w1", "opencode", "deepseek-v4.1-flash-free"),
+        run("s1", "antigravity", "gemini-4-argon"),
+        run("h1", "codex", "gpt-5"),
+        run("o1", "antigravity", "claude-opus-5-5", { status: "queued", retryAt: ago(-60_000) }),
+      ],
+      remote: remoteOf(
+        project("app", {
+          runs: [
+            { id: "x1", nodeId: "n", title: "Search", agent: "opencode", model: "deepseek-v4", kind: "", status: "running", runnerId: "rn1", runnerName: "mac-mini", createdAt: ago(1_000) },
+          ],
+        }),
+      ),
+    });
+    const { container } = mount(world);
+    const office = screen.getByRole("region", { name: "Office Main" });
+    const character = (name: RegExp) => [...within(office).getByRole("button", { name }).classList].find((c) => c.startsWith("char--"));
+    expect(character(/Claude opus/)).toBe("char--claude");
+    expect(character(/OpenCode deepseek/)).toBe("char--whale");
+    expect(character(/Antigravity gemini/)).toBe("char--star");
+    expect(character(/Codex gpt-5/)).toBe("char--human");
+    // Out on an outing too, and at a small desk in another office.
+    const out = within(screen.getByRole("region", { name: "Outdoors" })).getByRole("button");
+    expect(out).toHaveClass("char--claude");
+    expect(container.querySelector(".px-mini")).toHaveClass("char--whale");
+  });
+
+  it("redraws a desk when its agent's model changes who it is", () => {
+    const world = building({ runs: [makeRun({ id: "r1", status: "running" })] });
+    const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, model: "deepseek-v4" } })).toBe(false);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, agent: "gemini" } })).toBe(false);
   });
 
   it("draws no outdoors while nobody is out", () => {

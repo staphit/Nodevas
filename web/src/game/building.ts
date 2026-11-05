@@ -93,14 +93,25 @@ export function compactOffice(p: BuildingProject, now: number): CompactOffice {
   );
 
   const desks: MiniDesk[] = [
-    ...running.map((run) => ({ agent: run.agent, pose: runPoseOf(run, askingRuns.has(run.id)), title: run.title })),
+    ...running.map((run) => ({
+      agent: run.agent,
+      model: run.model,
+      pose: runPoseOf(run, askingRuns.has(run.id)),
+      title: run.title,
+    })),
     ...busySessions.map((session) => ({
       agent: session.agent,
+      model: session.model,
       pose: (p.asks.some((ask) => ask.sessionId === session.id) ? "asking-user" : "working") as Pose,
       title: session.doing || session.name,
     })),
-    ...planning.map((run) => ({ agent: run.agent, pose: runPoseOf(run, askingRuns.has(run.id)), title: run.title })),
-    ...waitingAtDoor.map((run) => ({ agent: run.agent, pose: "awaiting-accept" as Pose, title: run.title })),
+    ...planning.map((run) => ({
+      agent: run.agent,
+      model: run.model,
+      pose: runPoseOf(run, askingRuns.has(run.id)),
+      title: run.title,
+    })),
+    ...waitingAtDoor.map((run) => ({ agent: run.agent, model: run.model, pose: "awaiting-accept" as Pose, title: run.title })),
   ];
 
   const runWaiting = waitingOnYou<BuildingRun>({

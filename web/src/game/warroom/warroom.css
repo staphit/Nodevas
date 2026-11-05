@@ -102,6 +102,19 @@
   --px-backpack: #b8823a;
   --px-meat: #e98a8a;
   --px-meat-cooked: #8e4424;
+  /* The characters' own colours (pixel/skins.ts) after this line. */
+  --px-gem-blue: #4a7ff0;
+  --px-gem-red: #ec5a7c;
+  --px-gem-yellow: #f5c431;
+  --px-gem-green: #34b06a;
+  --px-gem-limb: #2b2433;
+  --px-clawd: #de7a52;
+  --px-clawd-dark: #b4552f;
+  --px-clawd-light: #f2a07c;
+  --px-whale-hair: #34539a;
+  --px-whale-hair-light: #7fb6e6;
+  --px-whale-dress: #27325e;
+  --px-whale-fin: #4a8ad6;
 
   --agent-claude: #d97757;
   --agent-codex: #10a37f;
@@ -188,6 +201,19 @@
   --px-backpack: #94672f;
   --px-meat: #c86b72;
   --px-meat-cooked: #6f3118;
+  /* The characters' own colours (pixel/skins.ts) after this line. */
+  --px-gem-blue: #4f7ae0;
+  --px-gem-red: #dc5878;
+  --px-gem-yellow: #e3b63a;
+  --px-gem-green: #36a062;
+  --px-gem-limb: #aeb7c8;
+  --px-clawd: #d0704b;
+  --px-clawd-dark: #9a4626;
+  --px-clawd-light: #e39272;
+  --px-whale-hair: #3d61b3;
+  --px-whale-hair-light: #6fa6da;
+  --px-whale-dress: #2b3a72;
+  --px-whale-fin: #4c8ad0;
 }
 
 /* ---------- office styles: furniture, wall and floor only ---------- */

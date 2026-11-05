@@ -8,11 +8,14 @@ import * as Activity from "./activitySprites";
 import { compileSprite, type Sprite } from "./compile";
 import * as Outdoor from "./outdoorSprites";
 import { PIXEL_TOKENS } from "./palette";
+import * as SkinClaude from "./skinClaude";
+import * as SkinStar from "./skinStar";
+import * as SkinWhale from "./skinWhale";
 import * as S from "./sprites";
 import * as Styles from "./styleSprites";
 
-/** Every sprite module of the war room. */
-const MODULES = [S, Styles, Activity, Outdoor];
+/** Every sprite module of the war room (the characters' skins too). */
+const MODULES = [S, Styles, Activity, Outdoor, SkinClaude, SkinWhale, SkinStar];
 const allSprites = () => MODULES.flatMap((module) => Object.entries(module));
 
 function isSprite(value: unknown): value is Sprite {

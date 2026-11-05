@@ -9,6 +9,7 @@
 import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
+import { characterOf } from "../character";
 import type { ControlRow } from "../../station/control";
 import { StationMenu } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
@@ -50,7 +51,8 @@ const VisitorSpot = memo(function VisitorSpot({ visitor, labelOf }: { visitor: V
   const { t } = useI18n();
   const { dispatch } = useGameActions();
   const kind = agentColorKey(visitor.agent);
-  const parts = useMemo(() => sofaScene(visitor.pose, kind), [visitor.pose, kind]);
+  const character = characterOf(visitor.agent, visitor.model);
+  const parts = useMemo(() => sofaScene(visitor.pose, kind, { character }), [visitor.pose, kind, character]);
   const loop = POSE_LOOP_MS[visitor.pose];
   const label = visitorLabel(t, visitor);
   return (
@@ -59,7 +61,7 @@ const VisitorSpot = memo(function VisitorSpot({ visitor, labelOf }: { visitor: V
       label={label}
       heading={{ title: agentWho(visitor.agent, visitor.model), detail: label }}
       className="px-cell is-sofa is-visitor"
-      triggerClassName={`px-desk pose-${visitor.pose} agent--${kind}`}
+      triggerClassName={`px-desk pose-${visitor.pose} agent--${kind} char--${character}`}
       trigger={
         <>
           <span className="px-art">

@@ -75,6 +75,20 @@ export const LEGEND: Legend = {
   V: "backpack",
   "&": "meat",
   "#": "meat-cooked",
+  // The characters' own colours (pixel/skins.ts), each skin's chars its own:
+  // claude 5 6 7, whale 8 9 0 +, star I X Z %.
+  "8": "whale-hair",
+  "9": "whale-hair-light",
+  "0": "whale-dress",
+  "+": "whale-fin",
+  "5": "clawd",
+  "6": "clawd-dark",
+  "7": "clawd-light",
+  I: "gem-blue",
+  X: "gem-red",
+  Z: "gem-yellow",
+  "%": "gem-green",
+  "»": "gem-limb",
 };
 
 export const sprite = (grid: string) => compileSprite(grid, LEGEND);

@@ -9,6 +9,7 @@
 import { memo, useMemo, type CSSProperties } from "react";
 
 import { useI18n } from "../../i18n";
+import { characterOf } from "../character";
 import type { ControlRow } from "../../station/control";
 import { StationMenu } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
@@ -36,7 +37,8 @@ const OutdoorVisitor = memo(function OutdoorVisitor({ visitor, labelOf }: { visi
   const { dispatch } = useGameActions();
   const kind = agentColorKey(visitor.agent);
   const { kind: outing, step } = visitor.outing;
-  const parts = useMemo(() => outdoorScene({ kind: outing, step }, kind), [outing, step, kind]);
+  const character = characterOf(visitor.agent, visitor.model);
+  const parts = useMemo(() => outdoorScene({ kind: outing, step }, kind, { character }), [outing, step, kind, character]);
   const label = outdoorVisitorLabel(t, visitor);
   return (
     <StationMenu
@@ -44,7 +46,7 @@ const OutdoorVisitor = memo(function OutdoorVisitor({ visitor, labelOf }: { visi
       label={label}
       heading={{ title: agentWho(visitor.agent, visitor.model), detail: label }}
       className="px-cell is-outdoor is-visitor"
-      triggerClassName={`px-desk pose-limit outing--${outing} agent--${kind}`}
+      triggerClassName={`px-desk pose-limit outing--${outing} agent--${kind} char--${character}`}
       trigger={
         <>
           <span className="px-art">

@@ -26,6 +26,7 @@ import {
   type Translate,
 } from "../labels";
 import type { Activity } from "../activity";
+import { characterOf, type CharacterId } from "../character";
 import type { Outing } from "../outing";
 import { OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
 import { CELL } from "../pixel/sprites";
@@ -91,8 +92,8 @@ export interface AgentDeskProps {
 /** What a desk shows and offers: when none of it changed, a heartbeat that
  * rebuilt the world does not redraw it. The label carries the ask, the held
  * mail, the bubble, the swap, the energy and the minutes an outing has
- * left; the row, the run's state. The activity and the outing's step are
- * drawn. */
+ * left; the row, the run's state. The activity, the outing's step and the
+ * character (from the agent and its model) are drawn. */
 export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
   return (
     a.label === b.label &&
@@ -101,6 +102,8 @@ export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
     a.style === b.style &&
     a.edge === b.edge &&
     a.actor.id === b.actor.id &&
+    a.actor.agent === b.actor.agent &&
+    a.actor.model === b.actor.model &&
     a.actor.pose === b.actor.pose &&
     a.actor.nodeTitle === b.actor.nodeTitle &&
     a.actor.heldMail.length === b.actor.heldMail.length &&
@@ -161,24 +164,25 @@ interface SceneOf {
   pose: Actor["pose"];
   mail: boolean;
   kind: string;
+  character: CharacterId;
   style: OfficeStyle;
   edge: AgentDeskProps["edge"];
   activity?: Activity;
   outing: Pick<Outing, "kind" | "step">;
 }
 
-function sceneParts({ scene, pose, mail, kind, style, edge, activity, outing }: SceneOf) {
+function sceneParts({ scene, pose, mail, kind, character, style, edge, activity, outing }: SceneOf) {
   switch (scene) {
     case "door":
-      return doorScene(kind, { mail });
+      return doorScene(kind, { mail, character });
     case "meeting":
-      return meetingScene(pose, kind, { mail, style, edge, activity });
+      return meetingScene(pose, kind, { mail, style, edge, activity, character });
     case "sofa":
-      return sofaScene(pose, kind);
+      return sofaScene(pose, kind, { character });
     case "outdoor":
-      return outdoorScene(outing, kind);
+      return outdoorScene(outing, kind, { character });
     default:
-      return deskScene(pose, kind, { mail, style, activity });
+      return deskScene(pose, kind, { mail, style, activity, character });
   }
 }
 
@@ -220,6 +224,7 @@ export const AgentDesk = memo(function AgentDesk({
   const { t } = useI18n();
   const { dispatch } = useGameActions();
   const kind = agentColorKey(actor.agent);
+  const character = characterOf(actor.agent, actor.model);
   const mail = actor.heldMail.length > 0;
   const pose = actor.pose;
   const activity = actor.activity;
@@ -227,8 +232,18 @@ export const AgentDesk = memo(function AgentDesk({
   const outingStep = actor.outing?.step ?? NO_OUTING.step;
   const parts = useMemo(
     () =>
-      sceneParts({ scene, pose, mail, kind, style, edge, activity, outing: { kind: outingKind, step: outingStep } }),
-    [scene, pose, mail, kind, style, edge, activity, outingKind, outingStep],
+      sceneParts({
+        scene,
+        pose,
+        mail,
+        kind,
+        character,
+        style,
+        edge,
+        activity,
+        outing: { kind: outingKind, step: outingStep },
+      }),
+    [scene, pose, mail, kind, character, style, edge, activity, outingKind, outingStep],
   );
   const loop = sceneLoopMs(scene, pose, activity, { kind: outingKind });
   const who = agentWho(actor.agent, actor.model);
@@ -243,7 +258,7 @@ export const AgentDesk = memo(function AgentDesk({
     label,
     heading: { title: who, detail: detail ? `${label} ${detail}` : label },
     className: `px-cell is-${scene}`,
-    triggerClassName: `px-desk pose-${actor.pose} agent--${kind}${scene === "door" ? " at-door" : ""}`,
+    triggerClassName: `px-desk pose-${actor.pose} agent--${kind} char--${character}${scene === "door" ? " at-door" : ""}`,
     trigger: (
       <>
         <span className="px-art">

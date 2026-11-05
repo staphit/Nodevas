@@ -208,6 +208,8 @@ export interface ProjectOffice {
 /** A desk in another project's office, drawn small. */
 export interface MiniDesk {
   agent: string;
+  /** Who it is drawn as, with the agent (game/character.ts). */
+  model: string;
   pose: Pose;
   title: string;
 }

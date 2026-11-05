@@ -599,20 +599,34 @@ export const SKEWER_DONE = sprite(`
   .ooooooooo.
 `);
 
-/** The agent's arm out to the grill with the tongs: down on a skewer, then
- * up, turning it. */
+/** The tongs out over the grill: down on a skewer, then up, turning it.
+ * Their box's first five columns are the forearm's, the skin's own (its hand
+ * at column 4, on the handle's row: 1 down, 2 up); the tongs alone here. */
 export const TONGS_A = sprite(`
-  ooooo....
-  aaaakOOOO
-  ooooo...O
+  .........
+  .....OOOO
+  ........O
   ........O
 `);
 export const TONGS_B = sprite(`
   ......OO.
   .....oO..
-  ooooko...
-  aaaao....
-  oooo.....
+  .....o...
+  .........
+  .........
+`);
+/** The person's forearm on the tongs, in the shirt's colour, the hand on
+ * their handle: down (at the tongs' corner), and up (a row lower than
+ * theirs, TONGS_B's rows 2–4). */
+export const ARM_TONGS_A = sprite(`
+  ooooo
+  aaaak
+  ooooo
+`);
+export const ARM_TONGS_B = sprite(`
+  ooook
+  aaaao
+  oooo.
 `);
 
 /** An apron over the shirt: the cook. */
