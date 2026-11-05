@@ -11,7 +11,7 @@ import { runFinal, type Run } from "../api/runs";
 import { useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { useBudget } from "../runs/budgetStore";
-import { useRuns } from "../runs/runStore";
+import { useRuns, withLastTools } from "../runs/runStore";
 import { useRunners } from "../runners/runnerStore";
 import { useBuilding } from "../station/buildingStore";
 import { useWaitingItems } from "../station/useWaitingItems";
@@ -158,6 +158,7 @@ export function useWorld(): World {
   const latestByNode = useRuns((s) => s.latestByNode);
   const runsByNode = useRuns((s) => s.runsByNode);
   const pipelines = useRuns((s) => s.pipelines);
+  const lastTools = useRuns((s) => s.lastTools);
   const runners = useRunners((s) => s.runners);
   const sessions = useAgents((s) => s.sessions);
   const asks = useAgents((s) => s.asks);
@@ -177,9 +178,11 @@ export function useWorld(): World {
   const [bubbleClock, setBubbleClock] = useState(0);
   useWorldLoads(activeProject, tick);
 
+  // Pushed last tools apply here, not in the run lists: a tool push
+  // redraws the desks, not every menu and row that reads the lists.
   const runs = useMemo(
-    () => mergeRuns(activeRuns, latestByNode, runsByNode),
-    [activeRuns, latestByNode, runsByNode],
+    () => withLastTools(mergeRuns(activeRuns, latestByNode, runsByNode), lastTools),
+    [activeRuns, latestByNode, runsByNode, lastTools],
   );
 
   const world = useMemo(

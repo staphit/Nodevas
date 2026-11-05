@@ -65,6 +65,18 @@ describe("useWorld", () => {
     expect(building.current?.work).toContain(`run:${RUN_WORKING}`);
   });
 
+  it("draws a run's pushed last tool without the run lists changing", () => {
+    seedScene(NOW);
+    const { result } = renderHook(() => useWorld());
+    const desk = () => result.current.building.actors.find((actor) => actor.id === `run:${RUN_WORKING}`);
+    const lists = useRuns.getState().activeRuns;
+    act(() => {
+      useRuns.getState().onRunEvents(RUN_WORKING, undefined, "Edit", new Date(NOW - 1_000).toISOString());
+    });
+    expect(desk()?.activity).toBe("edit");
+    expect(useRuns.getState().activeRuns).toBe(lists);
+  });
+
   it("fetches the pipeline of a review run and the node of a fallback run once", () => {
     seedScene(NOW);
     const loaders = stubLoaders();

@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
+	"nodevas/internal/identity"
 	"nodevas/internal/members"
 	"nodevas/internal/notify"
 	"nodevas/internal/project"
@@ -372,7 +373,7 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	})
 	s.runs = runs.NewDispatcher(runs.NewStore(database), s.runners,
 		func(project, nodeID string) { s.broadcastProject(project, runnerwire.RunsChangedEvent, nodeID) },
-		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
+		s.broadcastRunEvents)
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
 	// Agent roles: a staged pipeline's evidence goes on its node's history,
@@ -522,11 +523,47 @@ func (s *Server) stagedApproved(project, nodeID, evidence string) {
 // names it, about a change. Run changes arrive from a runner's socket, not a
 // request, so there is no request store to take the room from.
 func (s *Server) broadcastProject(name, evType, id string) {
+	s.broadcastProjectEvent(name, realtime.Event{Type: evType, ID: id})
+}
+
+// broadcastRunEvents announces a run's new events, with the last tool its
+// agent called in them (runs.ToolSeen; omitted when there was none) so an
+// open office can draw it without fetching the run. The tool goes only to
+// whoever may see the run (as the runs API decides: its dispatcher, its
+// runner's owner, administrators); the rest of the room hears the plain
+// run-events it always did.
+func (s *Server) broadcastRunEvents(r runs.Record, tool runs.ToolSeen) {
+	plain := realtime.Event{Type: runnerwire.RunEventsEvent, ID: r.ID}
+	if tool.Tool == "" {
+		s.broadcastProjectEvent(r.Project, plain)
+		return
+	}
+	full := plain
+	full.Tool, full.ToolAt = tool.Tool, tool.At
+	if s.hub == nil {
+		return
+	}
+	room := ""
+	if s.pm != nil {
+		st, err := s.pm.StoreFor(r.Project)
+		if err != nil {
+			return
+		}
+		room = st.Root()
+	}
+	s.hub.BroadcastRoomEventSplit(room, full, plain, func(actor identity.Actor) bool {
+		return actor.IsAdmin() || (actor.ID != "" && (actor.ID == r.CreatedBy || actor.ID == r.OwnerID))
+	})
+}
+
+// broadcastProjectEvent is broadcastProject for an event with more than an
+// id.
+func (s *Server) broadcastProjectEvent(name string, event realtime.Event) {
 	if s.hub == nil {
 		return
 	}
 	if s.pm == nil {
-		s.hub.Broadcast(evType, id)
+		s.hub.BroadcastRoomEvent("", event)
 		return
 	}
 	st, err := s.pm.StoreFor(name)
@@ -534,10 +571,10 @@ func (s *Server) broadcastProject(name, evType, id string) {
 		// The project is gone; nobody is watching it.
 		return
 	}
-	s.hub.BroadcastRoom(st.Root(), evType, id)
+	s.hub.BroadcastRoomEvent(st.Root(), event)
 	// What runs and autopilots are doing is what the building shows; their
 	// event streams and notifications are not.
-	if evType == runnerwire.RunsChangedEvent || evType == autopilot.ChangedEvent {
+	if event.Type == runnerwire.RunsChangedEvent || event.Type == autopilot.ChangedEvent {
 		s.pingBuilding(st.Root())
 	}
 }

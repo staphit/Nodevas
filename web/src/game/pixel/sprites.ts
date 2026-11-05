@@ -54,6 +54,25 @@ export const LEGEND: Legend = {
   j: "led-on",
   J: "led-off",
   u: "paper",
+  // The outdoors (outdoorSprites.ts).
+  "-": "sky",
+  M: "mountain",
+  N: "mountain-dark",
+  "*": "snow",
+  ",": "grass",
+  ";": "grass-dark",
+  ":": "trail",
+  "~": "water",
+  "=": "water-light",
+  O: "rock",
+  "@": "rock-dark",
+  "^": "fire",
+  "!": "fire-light",
+  t: "tent",
+  E: "tent-dark",
+  U: "sun",
+  l: "wood",
+  V: "backpack",
 };
 
 export const sprite = (grid: string) => compileSprite(grid, LEGEND);

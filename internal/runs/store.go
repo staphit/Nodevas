@@ -349,7 +349,7 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
        retry_at, limit_waits, role, verify, checks, override, job_roles,
-       cost_usd, cost_estimated, node_type, acceptance_count`
+       cost_usd, cost_estimated, node_type, acceptance_count, last_tool, last_tool_at`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -364,7 +364,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
 		&r.Role, &verify, &checks, &r.Override, &jobRoles,
-		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount); err != nil {
+		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount, &r.LastTool, &r.LastToolAt); err != nil {
 		return Record{}, err
 	}
 	r.AcceptanceCount = int(acceptanceCount)
@@ -785,20 +785,58 @@ INSERT INTO run_events (run_id, seq, type, at, payload)
 SELECT ?, e.seq, e.type, e.at, e.payload
 FROM unnest(?::bigint[], ?::text[], ?::text[], ?::text[]) AS e(seq, type, at, payload)`
 
+// LastToolThinking is runnerwire.Run.LastTool for an agent thinking.
+const LastToolThinking = runnerwire.EventThinking
+
+// ToolSeen is the last tool a batch of events shows the agent calling (or
+// LastToolThinking) and when the hub stored it (its own clock, not the
+// event's At); zero when it shows neither.
+type ToolSeen struct {
+	Tool, At string
+}
+
+// lastTool is what event says the agent is doing, if anything: the tool of
+// a tool call (cleaned, as cleanEvent cleans it) or thinking.
+func lastTool(event runnerwire.RunEvent) (ToolSeen, bool) {
+	at := Truncate(event.At, 64)
+	switch event.Type {
+	case runnerwire.EventToolCall:
+		if tool := Truncate(strings.TrimSpace(event.Tool), maxShortField); tool != "" {
+			return ToolSeen{Tool: tool, At: at}, true
+		}
+	case runnerwire.EventThinking:
+		return ToolSeen{Tool: LastToolThinking, At: at}, true
+	}
+	return ToolSeen{}, false
+}
+
 // AppendEvents stores a batch of a run's events and reports how many were
 // new. A seq at or below the last one stored is a resend and is dropped, as
 // is anything past MaxRunEvents. A usage event also updates the run's usage,
 // even past the cap: usage is cumulative and the latest figure is the one
-// that matters.
+// that matters. So does the batch's last tool call or thinking event the
+// run's LastTool, for the same reason.
 //
 // The batch is filtered in order first (a seq at or below the last one kept,
 // stored or earlier in this batch, is a resend) and the survivors written in
 // one INSERT.
 func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerwire.RunEvent) (int, error) {
-	added := 0
+	appended, err := s.appendEvents(ctx, runID, events)
+	return appended.added, err
+}
+
+// appended is what appendEvents did: how many events it stored, and the
+// batch's last tool (zero when it had none), which the run now carries.
+type appended struct {
+	added int
+	tool  ToolSeen
+}
+
+func (s *Store) appendEvents(ctx context.Context, runID string, events []runnerwire.RunEvent) (appended, error) {
+	var out appended
 	table := s.priceTable(ctx)
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
-		added = 0
+		out = appended{}
 		var last sql.NullInt64
 		var count int
 		if err := tx.QueryRowContext(ctx,
@@ -806,6 +844,7 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			return err
 		}
 		var usage *runnerwire.Usage
+		var tool ToolSeen
 		var seqs []int64
 		var types, ats, payloads []string
 		for _, event := range events {
@@ -815,6 +854,9 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			last = sql.NullInt64{Int64: event.Seq, Valid: true}
 			if event.Type == runnerwire.EventUsage && event.Usage != nil {
 				usage = event.Usage
+			}
+			if seen, ok := lastTool(event); ok {
+				tool = seen
 			}
 			if count >= runnerwire.MaxRunEvents {
 				continue
@@ -834,8 +876,18 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			if _, err := tx.ExecContext(ctx, insertEvents, runID, seqs, types, ats, payloads); err != nil {
 				return err
 			}
-			added = len(seqs)
 		}
+		if tool.Tool != "" {
+			// When the hub heard of it, on the hub's clock: the runner's own
+			// may be minutes off, and a browser judges how fresh the tool is
+			// against the same clock a session's tool is stamped with.
+			tool.At = s.now().UTC().Truncate(time.Microsecond).Format(stampLayout)
+			if _, err := tx.ExecContext(ctx, `UPDATE runs SET last_tool = ?, last_tool_at = ? WHERE id = ?`,
+				tool.Tool, tool.At, runID); err != nil {
+				return err
+			}
+		}
+		out = appended{added: len(seqs), tool: tool}
 		if usage == nil {
 			return nil
 		}
@@ -852,7 +904,10 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			string(raw), cost, estimated, runID)
 		return err
 	})
-	return added, err
+	if err != nil {
+		return appended{}, err
+	}
+	return out, nil
 }
 
 // Event page sizes for Events.

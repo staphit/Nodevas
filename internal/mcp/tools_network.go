@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -250,6 +251,14 @@ func permissionReplyText(ask agents.Ask, input json.RawMessage) string {
 // agent directory. An empty state leaves the server's busy/idle as it is: the
 // periodic refresh must not undo what a claim or an agent hook last reported.
 func (c *Client) Heartbeat(ctx context.Context, state, nodeID, doing string) error {
+	return c.HeartbeatTool(ctx, state, nodeID, doing, "")
+}
+
+// HeartbeatTool is Heartbeat from an agent hook that just saw the agent call
+// tool (agents.Heartbeat.Tool). Only that heartbeat says it: the server keeps
+// the last tool until the next one or the session going idle, so a refresh
+// without one leaves it be.
+func (c *Client) HeartbeatTool(ctx context.Context, state, nodeID, doing, tool string) error {
 	if c.offNetwork != "" {
 		return nil
 	}
@@ -285,6 +294,12 @@ func (c *Client) Heartbeat(ctx context.Context, state, nodeID, doing string) err
 	if c.model != "" {
 		body["model"] = c.model
 	}
+	// The tool is only ever this one heartbeat's news, and unlike the model
+	// it is always there on a tool call, so a server that refuses it gets
+	// the heartbeat again without it (below) rather than no heartbeat.
+	if tool = strings.TrimSpace(tool); tool != "" && !c.noTool {
+		body["tool"] = tool
+	}
 	c.mu.Unlock()
 
 	var resp struct {
@@ -292,7 +307,20 @@ func (c *Client) Heartbeat(ctx context.Context, state, nodeID, doing string) err
 		UnreadCount   int            `json:"unreadCount"`
 		ClaimedNodeID string         `json:"claimedNodeId"`
 	}
-	if err := c.post(ctx, "/api/agents/heartbeat", nil, body, &resp); err != nil {
+	err := c.post(ctx, "/api/agents/heartbeat", nil, body, &resp)
+	var apiErr *APIError
+	if _, sent := body["tool"]; sent && errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest {
+		// A hub from before tools were reported decodes strictly and answers
+		// 400 for the unknown field. Losing the desk's activity is fine;
+		// losing the heartbeat would also lose the claimed node, so the
+		// change report and the inbox check after it.
+		delete(body, "tool")
+		c.mu.Lock()
+		c.noTool = true
+		c.mu.Unlock()
+		err = c.post(ctx, "/api/agents/heartbeat", nil, body, &resp)
+	}
+	if err != nil {
 		return err
 	}
 	c.mu.Lock()

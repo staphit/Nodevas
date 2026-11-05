@@ -12,6 +12,7 @@ import {
   type RunAsk,
   type RunEvent,
 } from "../api";
+import { classifyTool } from "../game/activity";
 
 /** Pages fetched per events load before yielding; the next push resumes. */
 const MAX_EVENT_PAGES = 20;
@@ -68,6 +69,11 @@ export interface RunStoreState {
   dispatchNodeId: string | null;
   /** A request for the node's detail view to switch to its Runs tab. */
   showRunsRequest: { nodeId: string; nonce: number } | null;
+  /** The last tool each run's agent called, as run-events pushes said, by
+   * run id. Held beside the run lists, not in them, so a tool push redraws
+   * only what draws activities (withLastTools), and a fetch answered with an
+   * older copy of a run does not undo it. */
+  lastTools: Record<string, HeldTool>;
 
   loadRuns: (nodeId: string) => Promise<void>;
   /** One request for the project's most recent runs, for the graph badges.
@@ -113,8 +119,10 @@ export interface RunStoreState {
   onRunsChanged: (nodeId: string | undefined) => void;
   /** run-events: the id is a run id. Fetches new events if it is watched,
    * or with kind "ask" (one of its asks started waiting or ended) its
-   * asks. */
-  onRunEvents: (runId: string | undefined, kind?: string) => void;
+   * asks. A push that names the batch's last tool (and when) patches the
+   * run wherever it is held, watched or not, without a fetch: the war
+   * room's desks show what the agent is doing from it. */
+  onRunEvents: (runId: string | undefined, kind?: string, tool?: string, toolAt?: string) => void;
   /** After a reconnect: whatever is on screen may have missed pushes. */
   resync: () => void;
   /** A different project: nothing held belongs to it. */
@@ -189,6 +197,71 @@ function upsertRun(runsByNode: Record<string, Run[]>, run: Run): Record<string, 
   return { ...runsByNode, [run.nodeId]: next };
 }
 
+/** The run with its last tool replaced by `tool` at `at` (RFC 3339), or
+ * the same run when the push is not newer than what it holds (or says
+ * nothing usable). */
+export function withLastTool(run: Run, tool: string, at: string): Run {
+  const when = Date.parse(at);
+  if (!tool || !Number.isFinite(when)) return run;
+  const held = run.lastToolAt ? Date.parse(run.lastToolAt) : NaN;
+  if (Number.isFinite(held) && held >= when) return run;
+  return { ...run, lastTool: tool, lastToolAt: at };
+}
+
+/** A run's last tool as a run-events push reported it. */
+export interface HeldTool {
+  tool: string;
+  at: string;
+}
+
+/** How long a push that draws the same activity as the held one is not
+ * worth a redraw: the activity's freshness may lag by up to this, well
+ * inside ACTIVITY_STALE_MS. */
+export const LAST_TOOL_REFRESH_MS = 30_000;
+
+/** At most this many runs' pushed tools are held; the oldest go first. */
+const MAX_HELD_TOOLS = 256;
+
+/** runs with each one's pushed last tool applied where it is newer than
+ * the run's own copy; a run without a newer one keeps its reference. */
+export function withLastTools(runs: Run[], held: Record<string, HeldTool>): Run[] {
+  let changed = false;
+  const out = runs.map((run) => {
+    const pushed = held[run.id];
+    const next = pushed ? withLastTool(run, pushed.tool, pushed.at) : run;
+    if (next !== run) changed = true;
+    return next;
+  });
+  return changed ? out : runs;
+}
+
+/** lastTools with runId's tool from a push, or null when it changes nothing
+ * worth drawing: a run the store does not hold, a push not newer than what
+ * is held, or the same activity again within LAST_TOOL_REFRESH_MS. */
+function nextLastTools(state: RunStoreState, runId: string, tool: string, at: string): Record<string, HeldTool> | null {
+  const when = Date.parse(at);
+  if (!tool || !Number.isFinite(when)) return null;
+  const run =
+    state.activeRuns.find((r) => r.id === runId) ??
+    Object.values(state.latestByNode).find((r) => r?.id === runId) ??
+    findRun(state, runId);
+  if (!run) return null;
+  const current = withLastTool(run, state.lastTools[runId]?.tool ?? "", state.lastTools[runId]?.at ?? "");
+  const heldAt = current.lastToolAt ? Date.parse(current.lastToolAt) : NaN;
+  if (Number.isFinite(heldAt)) {
+    if (heldAt >= when) return null;
+    const same = classifyTool(current.lastTool ?? "") === classifyTool(tool);
+    if (same && when - heldAt < LAST_TOOL_REFRESH_MS) return null;
+  }
+  const next = { ...state.lastTools, [runId]: { tool, at } };
+  const ids = Object.keys(next);
+  if (ids.length > MAX_HELD_TOOLS) {
+    ids.sort((a, b) => Date.parse(next[a].at) - Date.parse(next[b].at));
+    for (const id of ids.slice(0, ids.length - MAX_HELD_TOOLS)) delete next[id];
+  }
+  return next;
+}
+
 export function findRun(state: Pick<RunStoreState, "runsByNode">, runId: string): Run | undefined {
   for (const list of Object.values(state.runsByNode)) {
     const found = list.find((run) => run.id === runId);
@@ -250,6 +323,7 @@ const initial = {
   pipelineErrors: {},
   dispatchNodeId: null,
   showRunsRequest: null,
+  lastTools: {},
 } satisfies Partial<RunStoreState>;
 
 export const useRuns = create<RunStoreState>((set, get) => ({
@@ -692,7 +766,11 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     void state.loadRuns(nodeId);
   },
 
-  onRunEvents: (runId, kind) => {
+  onRunEvents: (runId, kind, tool, toolAt) => {
+    if (runId && tool && toolAt) {
+      const lastTools = nextLastTools(get(), runId, tool, toolAt);
+      if (lastTools) set({ lastTools });
+    }
     if (!runId || !get().watched[runId]) return;
     if (kind === "ask") void get().loadRunAsks(runId);
     else void get().loadEvents(runId);

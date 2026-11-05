@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Run, type RunChanges, type RunEvent } from "../api";
-import { foldLatest, mergeEvents, useRuns } from "./runStore";
+import { foldLatest, mergeEvents, useRuns, withLastTool, withLastTools } from "./runStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -288,5 +288,110 @@ describe("foldLatest", () => {
     expect(foldLatest(held, [makeRun({ id: "old", createdAt: "2026-10-23T08:00:00Z" })])).toBe(held);
     const updated = foldLatest(held, [{ ...first, prState: "open" }]);
     expect(updated.alpha.prState).toBe("open");
+  });
+});
+
+describe("the last tool from run-events", () => {
+  const at = (s: number) => `2026-10-24T08:${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}.000Z`;
+
+  it("keeps the newer of what is held and what the push says", () => {
+    const run = makeRun({ lastTool: "Read", lastToolAt: at(10) });
+    expect(withLastTool(run, "Bash", at(20))).toMatchObject({ lastTool: "Bash", lastToolAt: at(20) });
+    expect(withLastTool(run, "Bash", at(5))).toBe(run);
+    expect(withLastTool(run, "Bash", at(10))).toBe(run);
+    expect(withLastTool(run, "Bash", "garbage")).toBe(run);
+    expect(withLastTool(run, "", at(20))).toBe(run);
+    expect(withLastTool(makeRun(), "Edit", at(1))).toMatchObject({ lastTool: "Edit", lastToolAt: at(1) });
+    expect(withLastTool(makeRun({ lastToolAt: "?" }), "Edit", at(1)).lastTool).toBe("Edit");
+  });
+
+  it("holds the push beside the runs, without a fetch and without touching the run lists", () => {
+    const get = vi.spyOn(api, "getRunEvents");
+    const run = makeRun({ id: "run1", nodeId: "alpha" });
+    const other = makeRun({ id: "run2", nodeId: "beta" });
+    useRuns.setState({
+      activeRuns: [run, other],
+      latestByNode: { alpha: run, beta: other },
+      runsByNode: { alpha: [run], beta: [other] },
+    });
+    const before = useRuns.getState();
+
+    useRuns.getState().onRunEvents("run1", undefined, "apply_patch", at(30));
+
+    const state = useRuns.getState();
+    expect(get).not.toHaveBeenCalled();
+    expect(state.lastTools.run1).toEqual({ tool: "apply_patch", at: at(30) });
+    // The lists keep their references: what reads them (menus, rows) does
+    // not redraw on every tool an agent calls.
+    expect(state.activeRuns).toBe(before.activeRuns);
+    expect(state.latestByNode).toBe(before.latestByNode);
+    expect(state.runsByNode).toBe(before.runsByNode);
+    expect(withLastTools(state.activeRuns, state.lastTools)[0]).toMatchObject({
+      id: "run1",
+      lastTool: "apply_patch",
+      lastToolAt: at(30),
+    });
+    expect(withLastTools(state.activeRuns, state.lastTools)[1]).toBe(other);
+
+    // An older push changes nothing, not even a reference.
+    useRuns.getState().onRunEvents("run1", undefined, "Read", at(10));
+    expect(useRuns.getState().lastTools).toBe(state.lastTools);
+  });
+
+  it("skips a push that draws the same activity soon after", () => {
+    const run = makeRun({ id: "run1" });
+    useRuns.setState({ activeRuns: [run] });
+    useRuns.getState().onRunEvents("run1", undefined, "Read", at(0));
+    const first = useRuns.getState().lastTools;
+    // Read then view_file: both "read", 5 s apart: nothing to redraw.
+    useRuns.getState().onRunEvents("run1", undefined, "view_file", at(5));
+    expect(useRuns.getState().lastTools).toBe(first);
+    // Another activity is news at once.
+    useRuns.getState().onRunEvents("run1", undefined, "Bash", at(6));
+    expect(useRuns.getState().lastTools.run1).toEqual({ tool: "Bash", at: at(6) });
+    // The same activity long enough after keeps it fresh.
+    useRuns.getState().onRunEvents("run1", undefined, "Bash", at(60));
+    expect(useRuns.getState().lastTools.run1).toEqual({ tool: "Bash", at: at(60) });
+  });
+
+  it("survives a fetch that answers with an older last tool", async () => {
+    const stale = makeRun({ id: "run1", lastTool: "Read", lastToolAt: at(1) });
+    let resolve: (runs: { runs: Run[] }) => void = () => undefined;
+    vi.spyOn(api, "listActiveRuns").mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }) as ReturnType<typeof api.listActiveRuns>,
+    );
+    useRuns.setState({ activeRuns: [makeRun({ id: "run1" })] });
+    const loading = useRuns.getState().loadActiveRuns();
+    useRuns.getState().onRunEvents("run1", undefined, "Bash", at(2));
+    resolve({ runs: [stale] });
+    await loading;
+    const state = useRuns.getState();
+    expect(state.activeRuns[0].lastTool).toBe("Read");
+    expect(withLastTools(state.activeRuns, state.lastTools)[0]).toMatchObject({ lastTool: "Bash", lastToolAt: at(2) });
+    // A fetch with a newer one wins over the held push.
+    const fresh = makeRun({ id: "run1", lastTool: "Edit", lastToolAt: at(3) });
+    expect(withLastTools([fresh], state.lastTools)[0]).toBe(fresh);
+  });
+
+  it("leaves the store alone for a push without a tool, or a run it does not hold", () => {
+    const run = makeRun({ id: "run1" });
+    useRuns.setState({ activeRuns: [run], latestByNode: { alpha: run }, runsByNode: { alpha: [run] } });
+    const before = useRuns.getState();
+    useRuns.getState().onRunEvents("run1");
+    useRuns.getState().onRunEvents("run1", "ask");
+    useRuns.getState().onRunEvents("nope", undefined, "Read", at(1));
+    const after = useRuns.getState();
+    expect(after.lastTools).toBe(before.lastTools);
+    expect(after.activeRuns).toBe(before.activeRuns);
+  });
+
+  it("still fetches a watched run's events", async () => {
+    const get = vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [ev(1)], more: false });
+    useRuns.setState({ watched: { run1: 1 }, activeRuns: [makeRun({ id: "run1" })] });
+    useRuns.getState().onRunEvents("run1", undefined, "Bash", at(2));
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith("run1", 0));
+    expect(useRuns.getState().lastTools.run1?.tool).toBe("Bash");
   });
 });

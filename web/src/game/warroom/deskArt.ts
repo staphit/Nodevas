@@ -2,9 +2,16 @@
 // (PixelSprite) only paints what this returns, so the state → picture mapping
 // is testable on its own. Every pose has a still picture that says what it
 // is without colour or motion (a glyph on the screen, a bubble, a raised arm
-// or a head down); the animated ones add frames on top.
+// or a head down); the animated ones add frames on top. At work, what the
+// agent is doing (its activity) replaces the pose's screen and arms; out of
+// the office on a usage limit, the agent is drawn on its outing instead
+// (outdoorScene).
 
+import type { Activity } from "../activity";
+import { OUTING_STEPS, type Outing, type OutingKind } from "../outing";
+import * as A from "../pixel/activitySprites";
 import type { Sprite } from "../pixel/compile";
+import * as O from "../pixel/outdoorSprites";
 import * as S from "../pixel/sprites";
 import { chairOf, deskTopOf, tableSegOf } from "../pixel/styleSprites";
 import type { OfficeStyle, Pose } from "../world";
@@ -33,6 +40,29 @@ export function poseAnimated(pose: Pose): boolean {
   return POSE_LOOP_MS[pose] !== undefined;
 }
 
+/** How long one loop of an activity's picture takes, in ms: each moves at
+ * its own pace (typing fast, a page scrolling slowly). */
+export const ACTIVITY_LOOP_MS: Record<Activity, number> = {
+  read: 1600,
+  edit: 500,
+  shell: 1000,
+  search: 1200,
+  web: 1500,
+  think: 1500,
+};
+
+/** The activity a desk shows: only at work (working or reviewing); any
+ * other pose keeps its own picture. */
+export function shownActivity(pose: Pose | "empty", activity: Activity | undefined): Activity | undefined {
+  return pose === "working" || pose === "reviewing" ? activity : undefined;
+}
+
+/** A desk's loop: its activity's when it shows one, its pose's otherwise. */
+export function deskLoopMs(pose: Pose, activity: Activity | undefined): number | undefined {
+  const shown = shownActivity(pose, activity);
+  return shown ? ACTIVITY_LOOP_MS[shown] : POSE_LOOP_MS[pose];
+}
+
 const HEAD_AT = { x: 11, y: 10 };
 const BODY_AT = { x: 8, y: 19 };
 const CHAIR_AT = { x: 9, y: 23 };
@@ -43,16 +73,69 @@ const at = (name: string, sprite: Sprite, x: number, y: number): Placed => ({ na
 const framed = (placed: Placed, index: number, of: number): Placed => ({ ...placed, frame: { index, of } });
 const onScreen = (name: string, sprite: Sprite, x: number, y: number) => at(name, sprite, S.SCREEN.x + x, S.SCREEN.y + y);
 
-/** The screen's picture per pose. */
-function screen(pose: Pose | "empty"): Placed[] {
+/** Code, and the line being typed. */
+const typingScreen = (): Placed[] => [
+  onScreen("screen.code", S.SCREEN_ON, 0, 0),
+  onScreen("screen.code.lines", S.CODE, 0, 0),
+  framed(onScreen("screen.typing.a", S.TYPING_A, 0, 4), 0, 2),
+  framed(onScreen("screen.typing.b", S.TYPING_B, 0, 4), 1, 2),
+];
+
+/** The screen's picture per activity: each a shape of its own. */
+function activityScreen(activity: Activity): Placed[] {
+  switch (activity) {
+    case "read":
+      // A page, its lines a row up, the scroll bar's thumb further down.
+      return [
+        onScreen("screen.read", S.SCREEN_ON, 0, 0),
+        onScreen("screen.read.page", A.PAGE, 0, 0),
+        framed(onScreen("screen.read.lines.a", A.PAGE_LINES_A, 0, 0), 0, 2),
+        framed(onScreen("screen.read.thumb.a", A.SCROLL_THUMB, 14, 1), 0, 2),
+        framed(onScreen("screen.read.lines.b", A.PAGE_LINES_B, 0, 0), 1, 2),
+        framed(onScreen("screen.read.thumb.b", A.SCROLL_THUMB, 14, 5), 1, 2),
+      ];
+    case "edit":
+      return typingScreen();
+    case "shell":
+      // Output, then ">" and the cursor blinking after it.
+      return [
+        onScreen("screen.shell", S.SCREEN_ON, 0, 0),
+        onScreen("screen.shell.lines", A.TERMINAL_LINES, 0, 0),
+        onScreen("screen.shell.prompt", A.PROMPT, 1, 5),
+        framed(onScreen("screen.shell.cursor", A.CURSOR, 4, 7), 0, 2),
+      ];
+    case "search":
+      // A search box over results, the magnifier going along them.
+      return [
+        onScreen("screen.search", S.SCREEN_ON, 0, 0),
+        onScreen("screen.search.box", A.SEARCH_BOX, 0, 0),
+        onScreen("screen.search.results", A.SEARCH_RESULTS, 0, 4),
+        framed(onScreen("screen.search.lens.a", S.MAGNIFIER, 2, 4), 0, 2),
+        framed(onScreen("screen.search.lens.b", S.MAGNIFIER, 9, 4), 1, 2),
+      ];
+    case "web": {
+      // A globe turning (its land in three places), an address bar over it.
+      const land = [A.GLOBE_LAND_A, A.GLOBE_LAND_B, A.GLOBE_LAND_C];
+      return [
+        onScreen("screen.web", S.SCREEN_ON, 0, 0),
+        onScreen("screen.web.globe", A.GLOBE, 4, 1),
+        ...land.map((sprite, i) => framed(onScreen(`screen.web.land.${"abc"[i]}`, sprite, 4, 1), i, 3)),
+        onScreen("screen.web.bar", A.ADDRESS_BAR, 0, 0),
+      ];
+    }
+    case "think":
+      // Nothing on the screen: the thought is in the bubble over the head.
+      return [onScreen("screen.think", S.SCREEN_ON, 0, 0)];
+  }
+}
+
+/** The screen's picture per pose (or, at work, per activity). */
+function screen(pose: Pose | "empty", activity?: Activity): Placed[] {
+  const shown = shownActivity(pose, activity);
+  if (shown) return activityScreen(shown);
   switch (pose) {
     case "working":
-      return [
-        onScreen("screen.code", S.SCREEN_ON, 0, 0),
-        onScreen("screen.code.lines", S.CODE, 0, 0),
-        framed(onScreen("screen.typing.a", S.TYPING_A, 0, 4), 0, 2),
-        framed(onScreen("screen.typing.b", S.TYPING_B, 0, 4), 1, 2),
-      ];
+      return typingScreen();
     case "reviewing":
       return [
         onScreen("screen.review", S.SCREEN_ON, 0, 0),
@@ -88,20 +171,37 @@ const restingArms = () => [
   at("arm.left", S.ARM, LEFT_ARM_X, 16),
   at("arm.right", S.ARM, RIGHT_ARM_X, 16),
 ];
+/** Typing: the hands take turns on the keyboard. */
+const typingArms = () => [
+  framed(at("arm.left.up", S.ARM_UP, LEFT_ARM_X, 15), 0, 2),
+  framed(at("arm.right", S.ARM, RIGHT_ARM_X, 16), 0, 2),
+  framed(at("arm.left", S.ARM, LEFT_ARM_X, 16), 1, 2),
+  framed(at("arm.right.up", S.ARM_UP, RIGHT_ARM_X, 15), 1, 2),
+];
 
-/** The seated agent, back to the room, in a pose. */
-function agent(pose: Pose, kind: string): Placed[] {
+/** The arms for an activity: typing (edit, shell), a hand on the chin
+ * (read, think), a hand on the mouse (search, web). */
+function activityArms(activity: Activity): Placed[] {
+  switch (activity) {
+    case "edit":
+    case "shell":
+      return typingArms();
+    case "read":
+    case "think":
+      return [at("arm.left", S.ARM, LEFT_ARM_X, 16), at("arm.right.chin", A.ARM_CHIN, 19, 14)];
+    default:
+      return [at("arm.left", S.ARM, LEFT_ARM_X, 16), at("desk.mouse", A.MOUSE, 29, 16), at("arm.right", S.ARM, 26, 16)];
+  }
+}
+
+/** The seated agent, back to the room, in a pose (or, at work, at its
+ * activity). */
+function agent(pose: Pose, kind: string, activity?: Activity): Placed[] {
+  const shown = shownActivity(pose, activity);
+  if (shown) return [body(), ...head(kind, HEAD_AT.x, HEAD_AT.y), ...activityArms(shown)];
   switch (pose) {
     case "working":
-      // Typing: the hands take turns on the keyboard.
-      return [
-        body(),
-        ...head(kind, HEAD_AT.x, HEAD_AT.y),
-        framed(at("arm.left.up", S.ARM_UP, LEFT_ARM_X, 15), 0, 2),
-        framed(at("arm.right", S.ARM, RIGHT_ARM_X, 16), 0, 2),
-        framed(at("arm.left", S.ARM, LEFT_ARM_X, 16), 1, 2),
-        framed(at("arm.right.up", S.ARM_UP, RIGHT_ARM_X, 15), 1, 2),
-      ];
+      return [body(), ...head(kind, HEAD_AT.x, HEAD_AT.y), ...typingArms()];
     case "asking-user":
       // A hand up, the other on the desk.
       return [
@@ -129,11 +229,22 @@ function agent(pose: Pose, kind: string): Placed[] {
   }
 }
 
-/** Over the desk: a bubble for a question or sleep, a held message. */
-function extras(pose: Pose, mail: boolean): Placed[] {
+/** Over the desk: a bubble for a question, sleep or a thought, a held
+ * message. */
+function extras(pose: Pose, mail: boolean, activity?: Activity): Placed[] {
   const parts: Placed[] = [];
   if (mail) parts.push(at("mail", S.ENVELOPE, 0, 10));
-  if (pose === "asking-user") {
+  if (shownActivity(pose, activity) === "think") {
+    // "...", then ".", ".." and round again: still, all three dots (as zzz).
+    const dot2 = at("bubble.think.dot2", A.THOUGHT_DOT, 24, 2);
+    parts.push(
+      at("bubble.think", A.THOUGHT, 19, 0),
+      at("bubble.think.dot1", A.THOUGHT_DOT, 21, 2),
+      framed(dot2, 0, 3),
+      framed(at("bubble.think.dot3", A.THOUGHT_DOT, 27, 2), 0, 3),
+      framed({ ...dot2, name: "bubble.think.dot2.again" }, 2, 3),
+    );
+  } else if (pose === "asking-user") {
     parts.push(framed(at("bubble.ask", S.BUBBLE_ASK, 23, 0), 0, 2), framed(at("bubble.ask.up", S.BUBBLE_ASK, 23, 1), 1, 2));
   } else if (pose === "limit") {
     parts.push(at("bubble.sleep", S.BUBBLE_SLEEP, 18, 0));
@@ -157,6 +268,9 @@ export interface DeskOptions {
   style?: OfficeStyle;
   /** An empty desk with no runner slot behind it: no monitor, no screen. */
   spare?: boolean;
+  /** What the agent is doing, from its last tool: drawn while it works or
+   * reviews (shownActivity), the pose's own picture otherwise. */
+  activity?: Activity;
 }
 
 /** The chair, its bottom where the default chair's is whatever its height. */
@@ -173,10 +287,10 @@ export function deskScene(pose: Pose | "empty", kind: string, options: DeskOptio
   const spare = pose === "empty" && Boolean(options.spare);
   const parts: Placed[] = spare
     ? [at("desk", deskTopOf(style), 0, S.DESK_TOP_Y)]
-    : [at("monitor", S.MONITOR, 0, 0), at("desk", deskTopOf(style), 0, S.DESK_TOP_Y), ...screen(pose)];
-  if (pose !== "empty") parts.push(...agent(pose, kind));
+    : [at("monitor", S.MONITOR, 0, 0), at("desk", deskTopOf(style), 0, S.DESK_TOP_Y), ...screen(pose, options.activity)];
+  if (pose !== "empty") parts.push(...agent(pose, kind, options.activity));
   parts.push(chair(style));
-  if (pose !== "empty") parts.push(...extras(pose, Boolean(options.mail)));
+  if (pose !== "empty") parts.push(...extras(pose, Boolean(options.mail), options.activity));
   return parts;
 }
 
@@ -204,7 +318,13 @@ export function meetingScene(pose: Pose | "empty", kind: string, options: Meetin
   if (pose !== "empty") parts.push(at("monitor", S.MONITOR, 0, 0));
   parts.push(...tableParts(style, options.edge));
   if (pose === "empty") return [...parts, chair(style)];
-  parts.push(...screen(pose), ...agent(pose, kind), chair(style), ...extras(pose, Boolean(options.mail)));
+  const { activity } = options;
+  parts.push(
+    ...screen(pose, activity),
+    ...agent(pose, kind, activity),
+    chair(style),
+    ...extras(pose, Boolean(options.mail), activity),
+  );
   return parts;
 }
 
@@ -320,4 +440,137 @@ export function doorScene(kind: string, options: DeskOptions = {}): Placed[] {
   parts.push(at("bubble.wait", S.BUBBLE_WAIT, 21, 0));
   if (options.mail) parts.push(at("mail", S.ENVELOPE, 0, 10));
   return parts;
+}
+
+// ---------- the outdoors ----------
+
+/** How long one loop of an outing's picture takes, in ms. */
+export const OUTDOOR_LOOP_MS: Record<OutingKind, number> = {
+  hike: 800,
+  stream: 1200,
+  fish: 1600,
+  camp: 900,
+};
+
+/** The agent standing, from the front, the body's left edge at x and its
+ * feet on row `feet` (legs drawn by the caller): head and headwear over the
+ * body, as at the door. */
+function standing(kind: string, x: number, feet: number, body: Sprite): Placed[] {
+  const headY = feet - 22;
+  const parts = [at("body.standing", body, x, feet - 13), at("head.front", S.HEAD_FRONT, x + 1, headY)];
+  const wear = S.headwearOf(kind, "front");
+  if (wear) parts.push(at(`headwear.${kind}`, wear.sprite, x + 1 + wear.dx, headY + wear.dy));
+  return parts;
+}
+
+/** The agent sitting, from the front, as on a sofa (sofaScene), its head
+ * top-left corner at (x, y). */
+function sitting(kind: string, x: number, y: number): Placed[] {
+  const parts = [
+    at("legs.seated", S.LEGS_SEATED, x - 1, y + 17),
+    at("body.seated", S.BODY_SEATED, x - 3, y + 9),
+    at("head.front", S.HEAD_FRONT, x, y),
+  ];
+  const wear = S.headwearOf(kind, "front");
+  if (wear) parts.push(at(`headwear.${kind}`, wear.sprite, x + wear.dx, y + wear.dy));
+  parts.push(at("arm.left", S.ARM, x - 5, y + 11), at("arm.right", S.ARM, x + 12, y + 11));
+  return parts;
+}
+
+/** Up the trail a step at a time, legs striding, a backpack on; the flag
+ * at the top, and a spark once it is reached. */
+function hike(kind: string, step: number): Placed[] {
+  const { x, feet } = O.HIKE_PATH[step];
+  const top = step === OUTING_STEPS - 1;
+  const flag = O.FLAG_POLE_AT;
+  const parts: Placed[] = [
+    at("hike.backdrop", O.HIKE_BACKDROP, 0, 0),
+    at("hike.flag.pole", O.FLAG_POLE, flag.x, flag.y),
+    framed(at("hike.flag.a", O.FLAG_A, flag.x + 1, flag.y + 1), 0, 2),
+    framed(at("hike.flag.b", O.FLAG_B, flag.x + 1, flag.y + 1), 1, 2),
+    at("hike.pack", O.BACKPACK, x - 1, feet - 15),
+  ];
+  if (top) parts.push(at("legs", S.LEGS, x, feet - 4));
+  else {
+    parts.push(
+      framed(at("legs.walk.a", O.LEGS_WALK_A, x, feet - 4), 0, 2),
+      framed(at("legs.walk.b", O.LEGS_WALK_B, x, feet - 4), 1, 2),
+    );
+  }
+  parts.push(...standing(kind, x, feet, O.BODY_HIKER));
+  if (top) parts.push(at("hike.summit", O.SPARK, flag.x - 2, flag.y - 8));
+  return parts;
+}
+
+/** Wading up the stream towards its falls, waist deep, a pole in hand; the
+ * water ripples past, downstream. */
+function stream(kind: string, step: number): Placed[] {
+  const x = 1 + 5 * step;
+  const feet = 33;
+  const ripples = [O.STREAM_RIPPLE_A, O.STREAM_RIPPLE_B, O.STREAM_RIPPLE_C];
+  return [
+    at("stream.backdrop", O.STREAM_BACKDROP, 0, 0),
+    ...ripples.map((sprite, i) => framed(at(`stream.ripple.${"abc"[i]}`, sprite, 0, O.STREAM_RIPPLE_Y), i, 3)),
+    ...standing(kind, x, feet, S.BODY_STANDING),
+    at("stream.pole", O.POLE, x + 12, feet - 15),
+    at("stream.wade", O.WADE, x - 1, feet - 6),
+  ];
+}
+
+/** Fish caught by a step: none at first, then one, then two. */
+const CATCH_AT = [3, 6];
+
+/** Sitting on a rock with a rod, the bobber bobbing; late on a fish comes
+ * to bite, and the bucket fills. */
+function fish(kind: string, step: number): Placed[] {
+  const head = { x: 6, y: 16 };
+  const parts: Placed[] = [at("fish.backdrop", O.FISH_BACKDROP, 0, 0), at("fish.bucket", O.BUCKET, 19, 37)];
+  CATCH_AT.forEach((from, i) => {
+    if (step >= from) parts.push(at(`fish.catch.${i + 1}`, O.TAIL, 20 + 3 * i, 34));
+  });
+  if (step >= 4) parts.push(at("fish.bite", O.FISH, 31, 28));
+  parts.push(
+    ...sitting(kind, head.x, head.y),
+    at("fish.rod", O.ROD, head.x + 13, head.y - 8),
+    at("fish.line", O.LINE, 41, 10),
+    framed(at("fish.bobber.a", O.BOBBER, 40, 21), 0, 2),
+    framed(at("fish.ring.a", O.RING_A, 37, 26), 0, 2),
+    framed(at("fish.bobber.b", O.BOBBER, 40, 22), 1, 2),
+    framed(at("fish.ring.b", O.RING_B, 37, 26), 1, 2),
+  );
+  return parts;
+}
+
+/** On a log by a tent and a fire; the sun (the moon, in the dark theme)
+ * crosses the sky with the wait. */
+function camp(kind: string, step: number): Placed[] {
+  const sun = O.SUN_PATH[step];
+  const flames = [O.FLAME_A, O.FLAME_B, O.FLAME_C];
+  return [
+    at("camp.backdrop", O.CAMP_BACKDROP, 0, 0),
+    at("camp.sun", O.SUN, sun.x, sun.y),
+    at("camp.tent", O.TENT, 0, 18),
+    at("camp.log", O.LOG, 24, 35),
+    ...sitting(kind, 28, 19),
+    at("camp.fire.logs", O.FIRE_LOGS, 43, 36),
+    ...flames.map((sprite, i) => framed(at(`camp.fire.${"abc"[i]}`, sprite, 44, 28), i, 3)),
+  ];
+}
+
+/** An agent on its outing, a tile of OUTDOOR_W × OUTDOOR_H (agent kind as
+ * agentColorKey gives it). How far along it is, is its step (0 …
+ * OUTING_STEPS - 1, clamped), each step placed rather than moved; the
+ * frames only move legs, water, a bobber, flames. */
+export function outdoorScene(outing: Pick<Outing, "kind" | "step">, kind: string): Placed[] {
+  const step = Math.min(OUTING_STEPS - 1, Math.max(0, Math.floor(outing.step) || 0));
+  switch (outing.kind) {
+    case "hike":
+      return hike(kind, step);
+    case "stream":
+      return stream(kind, step);
+    case "fish":
+      return fish(kind, step);
+    default:
+      return camp(kind, step);
+  }
 }

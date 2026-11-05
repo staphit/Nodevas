@@ -387,6 +387,11 @@ type Event struct {
 	// permission) and the run asking, if any.
 	Kind  string `json:"kind,omitempty"`
 	RunID string `json:"runId,omitempty"`
+	// run-events: the last tool the run's agent called in the batch just
+	// stored, or "thinking", and when the hub stored it (runnerwire.Run.LastTool);
+	// absent when the batch had neither.
+	Tool   string `json:"tool,omitempty"`
+	ToolAt string `json:"toolAt,omitempty"`
 
 	Project string          `json:"project,omitempty"`
 	Peers   []Peer          `json:"peers,omitempty"`
@@ -520,6 +525,30 @@ func (h *Hub) BroadcastRoomEvent(room string, event Event) {
 		client.mu.Lock()
 		defer client.mu.Unlock()
 		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+	})
+}
+
+// BroadcastRoomEventSplit is BroadcastRoomEvent sending full to the
+// clients whose actor may hear it and rest to the room's other clients:
+// news whose detail is private to some of the room (a run's tools are its
+// dispatcher's and its runner owner's), while everyone still hears that
+// something happened.
+func (h *Hub) BroadcastRoomEventSplit(room string, full, rest Event, may func(identity.Actor) bool) {
+	if h == nil {
+		return
+	}
+	inRoom := func(client *wsClient) bool {
+		return room == "" || client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+	}
+	h.send(full, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return inRoom(client) && may(client.actor)
+	})
+	h.send(rest, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return inRoom(client) && !may(client.actor)
 	})
 }
 

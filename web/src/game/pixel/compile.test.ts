@@ -1,10 +1,19 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { OFFICE_STYLES } from "../officeStyle";
+import * as Activity from "./activitySprites";
 import { compileSprite, type Sprite } from "./compile";
+import * as Outdoor from "./outdoorSprites";
 import { PIXEL_TOKENS } from "./palette";
 import * as S from "./sprites";
 import * as Styles from "./styleSprites";
+
+/** Every sprite module of the war room. */
+const MODULES = [S, Styles, Activity, Outdoor];
+const allSprites = () => MODULES.flatMap((module) => Object.entries(module));
 
 function isSprite(value: unknown): value is Sprite {
   return typeof value === "object" && value !== null && "layers" in value && "w" in value;
@@ -32,7 +41,7 @@ describe("compileSprite", () => {
   });
 
   it("compiles every sprite of the war room at load, on whole pixels", () => {
-    for (const [name, value] of [...Object.entries(S), ...Object.entries(Styles)]) {
+    for (const [name, value] of allSprites()) {
       if (!isSprite(value)) continue;
       expect(value.w, name).toBeGreaterThan(0);
       for (const layer of value.layers) expect(layer.d, name).toMatch(/^(M\d+ \d+h\d+v1h-\d+z)+$/);
@@ -58,9 +67,49 @@ describe("compileSprite", () => {
   it("names only palette tokens in its legend", () => {
     const tokens = new Set<string>(PIXEL_TOKENS);
     for (const [char, token] of Object.entries(S.LEGEND)) expect(tokens.has(token), `${char} → ${token}`).toBe(true);
-    for (const [name, value] of [...Object.entries(S), ...Object.entries(Styles)]) {
+    for (const [name, value] of allSprites()) {
       if (!isSprite(value)) continue;
       for (const layer of value.layers) expect(tokens.has(layer.token), `${name}: ${layer.token}`).toBe(true);
+    }
+  });
+
+  it("draws the outdoors' backdrops a whole tile each, and every activity screen inside the screen", () => {
+    for (const name of ["HIKE_BACKDROP", "STREAM_BACKDROP", "FISH_BACKDROP", "CAMP_BACKDROP"] as const) {
+      expect([Outdoor[name].w, Outdoor[name].h], name).toEqual([Outdoor.OUTDOOR_W, Outdoor.OUTDOOR_H]);
+    }
+    for (const [name, value] of Object.entries(Activity)) {
+      if (!isSprite(value) || name === "ARM_CHIN" || name === "MOUSE" || name.startsWith("THOUGHT")) continue;
+      expect(value.w, name).toBeLessThanOrEqual(S.SCREEN.w);
+      expect(value.h, name).toBeLessThanOrEqual(S.SCREEN.h);
+    }
+  });
+});
+
+describe("the palette in the stylesheet", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/game/warroom/warroom.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  /** The custom properties a rule sets, by its exact selector. */
+  const declared = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at, selector).toBeGreaterThanOrEqual(0);
+    const body = css.slice(at, css.indexOf("}", at));
+    return new Set([...body.matchAll(/(--px-[a-z0-9-]+)\s*:/g)].map((match) => match[1]));
+  };
+
+  it("gives every token a colour in the light theme and in the dark one", () => {
+    const light = declared(".px-office");
+    const dark = declared('[data-theme="dark"] .px-office');
+    for (const token of PIXEL_TOKENS) {
+      if (token === "agent" || token === "agent-dark") continue; // the agent--<kind> classes
+      expect(light.has(`--px-${token}`), `light --px-${token}`).toBe(true);
+      expect(dark.has(`--px-${token}`), `dark --px-${token}`).toBe(true);
+    }
+  });
+
+  it("leaves the outdoors' colours to the theme: no office style redefines them", () => {
+    const OUTDOOR_TOKENS = PIXEL_TOKENS.slice(PIXEL_TOKENS.indexOf("sky"));
+    for (const style of OFFICE_STYLES) {
+      const own = declared(`.px-style--${style}`);
+      for (const token of OUTDOOR_TOKENS) expect(own.has(`--px-${token}`), `${style} --px-${token}`).toBe(false);
     }
   });
 });

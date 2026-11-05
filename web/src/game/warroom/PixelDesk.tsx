@@ -1,6 +1,6 @@
 // One character of the current office, wherever it is: at a desk, at the
-// meeting-room table, at the door or on a lounge sofa (and a free desk or an
-// empty seat with nobody). An agent is a real button, its menu what can be
+// meeting-room table, at the door, on a lounge sofa or out on an outing (and
+// a free desk or an empty seat with nobody). An agent is a real button, its menu what can be
 // done about it: a run's own controls (station/runMenuItems) plus the
 // question it asked, a held message to it and its PR; a session's targets
 // otherwise. The name tag under it is plain text, so it stays sharp at any
@@ -25,12 +25,26 @@ import {
   type TitleOf,
   type Translate,
 } from "../labels";
+import type { Activity } from "../activity";
+import type { Outing } from "../outing";
+import { OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
 import { CELL } from "../pixel/sprites";
 import { PixelSprite } from "../pixel/PixelSprite";
 import type { Actor, ClickTarget, OfficeStyle } from "../world";
-import { deskScene, doorScene, meetingScene, POSE_LOOP_MS, SEAT_W, sofaScene, type MeetingOptions } from "./deskArt";
+import {
+  deskLoopMs,
+  deskScene,
+  doorScene,
+  meetingScene,
+  OUTDOOR_LOOP_MS,
+  outdoorScene,
+  POSE_LOOP_MS,
+  SEAT_W,
+  sofaScene,
+  type MeetingOptions,
+} from "./deskArt";
 
-export type DeskSceneKind = "desk" | "door" | "meeting" | "sofa";
+export type DeskSceneKind = "desk" | "door" | "meeting" | "sofa" | "outdoor";
 
 /** A free desk (a runner's free slot), or a spare one (padding, no slot):
  * furniture only, nothing to press. */
@@ -60,7 +74,7 @@ export const EmptySeat = memo(function EmptySeat({ style, edge }: { style: Offic
 export interface AgentDeskProps {
   actor: Actor;
   /** Where it is drawn: at a desk, at the meeting table, at the door, on a
-   * sofa. */
+   * sofa, outdoors. */
   scene: DeskSceneKind;
   style: OfficeStyle;
   /** A meeting seat's place along the table. */
@@ -76,7 +90,9 @@ export interface AgentDeskProps {
 
 /** What a desk shows and offers: when none of it changed, a heartbeat that
  * rebuilt the world does not redraw it. The label carries the ask, the held
- * mail, the bubble, the swap and the energy; the row, the run's state. */
+ * mail, the bubble, the swap, the energy and the minutes an outing has
+ * left; the row, the run's state. The activity and the outing's step are
+ * drawn. */
 export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
   return (
     a.label === b.label &&
@@ -93,6 +109,9 @@ export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
     a.actor.energy?.cap === b.actor.energy?.cap &&
     a.actor.role === b.actor.role &&
     a.actor.testState === b.actor.testState &&
+    a.actor.activity === b.actor.activity &&
+    a.actor.outing?.kind === b.actor.outing?.kind &&
+    a.actor.outing?.step === b.actor.outing?.step &&
     sameTargets(a.actor.actions, b.actor.actions) &&
     a.row === b.row &&
     a.titleOf === b.titleOf
@@ -133,24 +152,59 @@ export function menuItem(
   });
 }
 
-function sceneParts(
-  scene: DeskSceneKind,
-  pose: Actor["pose"],
-  mail: boolean,
-  kind: string,
-  style: OfficeStyle,
-  edge: AgentDeskProps["edge"],
-) {
+/** Where an outdoor actor is when its outing is unknown: just out, by the
+ * tent. */
+const NO_OUTING: Pick<Outing, "kind" | "step"> = { kind: "camp", step: 0 };
+
+interface SceneOf {
+  scene: DeskSceneKind;
+  pose: Actor["pose"];
+  mail: boolean;
+  kind: string;
+  style: OfficeStyle;
+  edge: AgentDeskProps["edge"];
+  activity?: Activity;
+  outing: Pick<Outing, "kind" | "step">;
+}
+
+function sceneParts({ scene, pose, mail, kind, style, edge, activity, outing }: SceneOf) {
   switch (scene) {
     case "door":
       return doorScene(kind, { mail });
     case "meeting":
-      return meetingScene(pose, kind, { mail, style, edge });
+      return meetingScene(pose, kind, { mail, style, edge, activity });
     case "sofa":
       return sofaScene(pose, kind);
+    case "outdoor":
+      return outdoorScene(outing, kind);
     default:
-      return deskScene(pose, kind, { mail, style });
+      return deskScene(pose, kind, { mail, style, activity });
   }
+}
+
+/** A scene's loop, in ms; none for one that holds still. */
+export function sceneLoopMs(
+  scene: DeskSceneKind,
+  pose: Actor["pose"],
+  activity: Activity | undefined,
+  outing: Pick<Outing, "kind">,
+): number | undefined {
+  switch (scene) {
+    case "door":
+      return undefined;
+    case "sofa":
+      return POSE_LOOP_MS[pose];
+    case "outdoor":
+      return OUTDOOR_LOOP_MS[outing.kind];
+    default:
+      return deskLoopMs(pose, activity);
+  }
+}
+
+/** A scene's frame in art pixels. */
+function sceneSize(scene: DeskSceneKind): { width: number; height: number } {
+  if (scene === "outdoor") return { width: OUTDOOR_W, height: OUTDOOR_H };
+  return { width: scene === "sofa" ? SEAT_W : CELL, height: CELL };
 }
 
 export const AgentDesk = memo(function AgentDesk({
@@ -168,12 +222,21 @@ export const AgentDesk = memo(function AgentDesk({
   const kind = agentColorKey(actor.agent);
   const mail = actor.heldMail.length > 0;
   const pose = actor.pose;
-  const parts = useMemo(() => sceneParts(scene, pose, mail, kind, style, edge), [scene, pose, mail, kind, style, edge]);
-  const loop = scene === "door" ? undefined : POSE_LOOP_MS[actor.pose];
+  const activity = actor.activity;
+  const outingKind = actor.outing?.kind ?? NO_OUTING.kind;
+  const outingStep = actor.outing?.step ?? NO_OUTING.step;
+  const parts = useMemo(
+    () =>
+      sceneParts({ scene, pose, mail, kind, style, edge, activity, outing: { kind: outingKind, step: outingStep } }),
+    [scene, pose, mail, kind, style, edge, activity, outingKind, outingStep],
+  );
+  const loop = sceneLoopMs(scene, pose, activity, { kind: outingKind });
   const who = agentWho(actor.agent, actor.model);
   const energy = actor.energy;
   const ratio = energy?.cap ? Math.min(1, energy.used / energy.cap) : undefined;
-  const width = scene === "sofa" ? SEAT_W : CELL;
+  const { width, height } = sceneSize(scene);
+  /** Out of the office or on a sofa: a short tag, no meter. */
+  const away = scene === "sofa" || scene === "outdoor";
   const asItem = menuItem(t, dispatch, titleOf);
 
   const shell = {
@@ -187,7 +250,7 @@ export const AgentDesk = memo(function AgentDesk({
           <PixelSprite
             parts={parts}
             width={width}
-            height={CELL}
+            height={height}
             className={loop ? "px-anim" : undefined}
             // The loop's length, for the frames' steps() animation.
             style={loop ? ({ ["--px-loop" as string]: `${loop}ms` } as CSSProperties) : undefined}
@@ -221,10 +284,10 @@ export const AgentDesk = memo(function AgentDesk({
           )}
         </span>
         <span className="px-tag" aria-hidden="true">
-          <span className="px-tag-who">{scene === "sofa" ? agentName(actor.agent) : who}</span>
+          <span className="px-tag-who">{away ? agentName(actor.agent) : who}</span>
           <span className="px-tag-what">{actor.nodeTitle || actor.sessionName || poseLabel(t, actor.pose)}</span>
           {energy &&
-            scene !== "sofa" &&
+            !away &&
             (ratio !== undefined ? (
               <span className="px-meter" title={formatTokens(energy.used)}>
                 <span style={{ width: `${Math.max(4, ratio * 100)}%` }} />

@@ -1,9 +1,10 @@
 // The lounge every office shares: agents with nothing to do. Connected
-// sessions idling with no node, and runs asleep until their agent's usage
-// limit resets (zzz on the sofa), from this project (their full menu) and
-// from the others (a tag says which project; the menu goes there). An
-// offline agent sits here only while it still holds a question or a held
-// message; otherwise only the screen-reader list names it.
+// sessions idling with no node, from this project (their full menu) and
+// from the others (a tag says which project; the menu goes there). Runs
+// waiting for a usage limit to reset are out of the office (Outdoors.tsx);
+// the sofa still has its zzz for a visitor drawn asleep. An offline agent
+// sits here only while it still holds a question or a held message;
+// otherwise only the screen-reader list names it.
 
 import { memo, useMemo } from "react";
 
@@ -25,7 +26,7 @@ import {
 import { PixelSprite } from "../pixel/PixelSprite";
 import { CELL, PLANT, SOFA } from "../pixel/sprites";
 import type { Actor, Building, LoungeSpot } from "../world";
-import { SEAT_W, sofaScene } from "./deskArt";
+import { POSE_LOOP_MS, SEAT_W, sofaScene } from "./deskArt";
 import { lone } from "./OfficeRoom";
 import { AgentDesk, menuItem } from "./PixelDesk";
 
@@ -50,6 +51,7 @@ const VisitorSpot = memo(function VisitorSpot({ visitor, labelOf }: { visitor: V
   const { dispatch } = useGameActions();
   const kind = agentColorKey(visitor.agent);
   const parts = useMemo(() => sofaScene(visitor.pose, kind), [visitor.pose, kind]);
+  const loop = POSE_LOOP_MS[visitor.pose];
   const label = visitorLabel(t, visitor);
   return (
     <StationMenu
@@ -65,8 +67,8 @@ const VisitorSpot = memo(function VisitorSpot({ visitor, labelOf }: { visitor: V
               parts={parts}
               width={SEAT_W}
               height={CELL}
-              className={visitor.pose === "limit" ? "px-anim" : undefined}
-              style={visitor.pose === "limit" ? { ["--px-loop" as string]: "1800ms" } : undefined}
+              className={loop ? "px-anim" : undefined}
+              style={loop ? { ["--px-loop" as string]: `${loop}ms` } : undefined}
             />
           </span>
           <span className="px-tag" aria-hidden="true">

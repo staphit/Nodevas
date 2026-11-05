@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+import { ACTIVITIES, type Activity } from "../activity";
 import { OFFICE_STYLES } from "../officeStyle";
+import { OUTING_KINDS, OUTING_STEPS, type Outing, type OutingKind } from "../outing";
+import { OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
 import { CELL } from "../pixel/sprites";
 import { POSES, type Pose } from "../world";
 import {
+  ACTIVITY_LOOP_MS,
+  deskLoopMs,
   deskScene,
   doorScene,
   itemScene,
   meetingScene,
   miniDesk,
+  OUTDOOR_LOOP_MS,
+  outdoorScene,
   poseAnimated,
   rackScene,
+  shownActivity,
   sofaScene,
   type Placed,
 } from "./deskArt";
@@ -183,5 +191,170 @@ describe("rackScene", () => {
     expect(lit(off)).toBe(0);
     // Unknown state is not off.
     expect(names(rackScene(null, 1, 2))).toContain("led.power");
+  });
+});
+
+describe("activities at a desk", () => {
+  /** The part that says each activity without colour or motion. */
+  const GLYPH: Record<Activity, string> = {
+    read: "screen.read.page",
+    edit: "screen.code.lines",
+    shell: "screen.shell.prompt",
+    search: "screen.search.box",
+    web: "screen.web.globe",
+    think: "bubble.think",
+  };
+
+  it("gives each activity a still picture of its own, with a glyph, for working and reviewing", () => {
+    for (const pose of ["working", "reviewing"] as const) {
+      const seen = new Map<string, Activity>();
+      for (const activity of ACTIVITIES) {
+        const scene = deskScene(pose, "claude", { activity });
+        const key = still(scene).join(",");
+        expect(seen.get(key), `${pose} ${activity} looks like ${seen.get(key)}`).toBeUndefined();
+        seen.set(key, activity);
+        expect(still(scene), `${pose} ${activity}`).toContain(GLYPH[activity]);
+      }
+    }
+  });
+
+  it("draws the arms for the activity: typing for edit and shell, a hand on the chin to read or think", () => {
+    const arms = (activity: Activity) => names(deskScene("working", "codex", { activity })).filter((n) => n.startsWith("arm."));
+    for (const activity of ["edit", "shell"] as const) {
+      expect(arms(activity), activity).toEqual(expect.arrayContaining(["arm.left.up", "arm.right.up"]));
+    }
+    for (const activity of ["read", "think"] as const) expect(arms(activity), activity).toContain("arm.right.chin");
+    for (const activity of ["search", "web"] as const) {
+      expect(names(deskScene("working", "codex", { activity })), activity).toContain("desk.mouse");
+    }
+  });
+
+  it("animates every activity on its own loop, frame 0 the still picture", () => {
+    for (const activity of ACTIVITIES) {
+      expect(ACTIVITY_LOOP_MS[activity], activity).toBeGreaterThan(0);
+      const scene = deskScene("working", "gemini", { activity });
+      expect(scene.some((part) => part.frame), activity).toBe(true);
+      for (const part of scene) if (part.frame) expect(part.frame.index, part.name).toBeLessThan(part.frame.of);
+      expect(deskLoopMs("working", activity)).toBe(ACTIVITY_LOOP_MS[activity]);
+    }
+    expect(deskLoopMs("working", undefined)).toBe(500);
+    expect(deskLoopMs("idle", "shell")).toBeUndefined();
+  });
+
+  it("shows an activity only at work: any other pose keeps its own picture", () => {
+    expect(shownActivity("working", "shell")).toBe("shell");
+    expect(shownActivity("reviewing", "web")).toBe("web");
+    for (const pose of POSES) {
+      if (pose === "working" || pose === "reviewing") continue;
+      expect(shownActivity(pose, "shell"), pose).toBeUndefined();
+      expect(names(deskScene(pose, "claude", { activity: "shell" })), pose).toEqual(names(deskScene(pose, "claude")));
+    }
+    // No activity: the pose's own screen.
+    expect(names(deskScene("reviewing", "claude"))).toContain("screen.review.doc");
+  });
+
+  it("keeps every activity's parts on the desk's grid, at a desk and at the table", () => {
+    for (const activity of ACTIVITIES) {
+      const scenes = [deskScene("working", "codex", { activity, mail: true }), meetingScene("reviewing", "codex", { activity })];
+      for (const scene of scenes) {
+        for (const part of scene) {
+          const where = `${activity} ${part.name}`;
+          expect(Number.isInteger(part.x) && Number.isInteger(part.y), where).toBe(true);
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(CELL);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(CELL);
+        }
+      }
+    }
+  });
+});
+
+describe("outdoorScene", () => {
+  const outing = (kind: OutingKind, step: number): Outing => ({
+    kind,
+    step,
+    returnsAt: "2026-11-05T12:00:00Z",
+    minutesLeft: 30,
+  });
+  const steps = Array.from({ length: OUTING_STEPS }, (_, step) => step);
+  const placedAt = (parts: Placed[], name: string) => {
+    const part = parts.find((p) => p.name === name);
+    return part ? `${part.x},${part.y}` : "";
+  };
+
+  it("keeps every part of every outing, at every step, on its tile's grid", () => {
+    for (const kind of OUTING_KINDS) {
+      for (const step of steps) {
+        for (const part of outdoorScene(outing(kind, step), "antigravity")) {
+          const where = `${kind} ${step} ${part.name}`;
+          expect(Number.isInteger(part.x) && Number.isInteger(part.y), where).toBe(true);
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(OUTDOOR_W);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(OUTDOOR_H);
+        }
+      }
+    }
+  });
+
+  it("says each outing with a prop of its own, not a colour", () => {
+    const CUES: Record<OutingKind, string[]> = {
+      hike: ["hike.backdrop", "hike.flag.pole", "hike.pack"],
+      stream: ["stream.backdrop", "stream.pole", "stream.wade"],
+      fish: ["fish.backdrop", "fish.rod", "fish.bobber.a", "fish.bucket"],
+      camp: ["camp.backdrop", "camp.tent", "camp.fire.a", "camp.sun"],
+    };
+    const keys = new Set<string>();
+    for (const kind of OUTING_KINDS) {
+      const parts = still(outdoorScene(outing(kind, 3), "claude"));
+      expect(parts, kind).toEqual(expect.arrayContaining(CUES[kind]));
+      // No other outing has them.
+      for (const other of OUTING_KINDS) {
+        if (other === kind) continue;
+        const theirs = names(outdoorScene(outing(other, 3), "claude"));
+        for (const cue of CUES[kind]) expect(theirs, `${other} has ${cue}`).not.toContain(cue);
+      }
+      keys.add(parts.join(","));
+      // The agent is there, in its kind's headwear.
+      expect(parts, kind).toEqual(expect.arrayContaining(["head.front", "headwear.claude"]));
+    }
+    expect(keys.size).toBe(OUTING_KINDS.length);
+  });
+
+  it("goes along the outing step by step", () => {
+    for (const kind of ["hike", "stream"] as const) {
+      const heads = steps.map((step) => placedAt(outdoorScene(outing(kind, step), "codex"), "head.front"));
+      expect(new Set(heads).size, kind).toBe(OUTING_STEPS);
+    }
+    const suns = steps.map((step) => placedAt(outdoorScene(outing("camp", step), "codex"), "camp.sun"));
+    expect(new Set(suns).size).toBe(OUTING_STEPS);
+    // Fishing: a bite late on, and the bucket fills.
+    const catches = (step: number) =>
+      names(outdoorScene(outing("fish", step), "codex")).filter((n) => n.startsWith("fish.catch")).length;
+    expect(catches(0)).toBe(0);
+    expect(catches(7)).toBeGreaterThan(catches(3));
+    expect(names(outdoorScene(outing("fish", 0), "codex"))).not.toContain("fish.bite");
+    expect(names(outdoorScene(outing("fish", 6), "codex"))).toContain("fish.bite");
+    // The summit is reached at the last step only.
+    expect(names(outdoorScene(outing("hike", OUTING_STEPS - 1), "codex"))).toContain("hike.summit");
+    expect(names(outdoorScene(outing("hike", 3), "codex"))).not.toContain("hike.summit");
+  });
+
+  it("clamps a step out of range to the outing's ends", () => {
+    expect(outdoorScene(outing("hike", -3), "codex")).toEqual(outdoorScene(outing("hike", 0), "codex"));
+    expect(outdoorScene(outing("hike", 99), "codex")).toEqual(outdoorScene(outing("hike", OUTING_STEPS - 1), "codex"));
+  });
+
+  it("moves on its own loop, its still frame whole", () => {
+    for (const kind of OUTING_KINDS) {
+      expect(OUTDOOR_LOOP_MS[kind], kind).toBeGreaterThan(0);
+      const parts = outdoorScene(outing(kind, 2), "gemini");
+      expect(parts.some((part) => part.frame && part.frame.index > 0), kind).toBe(true);
+      for (const part of parts) if (part.frame) expect(part.frame.index, part.name).toBeLessThan(part.frame.of);
+    }
+    // Still, the hiker has legs and the fire burns.
+    expect(still(outdoorScene(outing("hike", 2), "gemini"))).toContain("legs.walk.a");
+    expect(still(outdoorScene(outing("camp", 2), "gemini"))).toContain("camp.fire.a");
   });
 });

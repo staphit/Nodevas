@@ -8,6 +8,8 @@ import {
   compactOffice,
   loungeVisitors,
   MAX_COMPACT,
+  MAX_OUTDOORS,
+  outdoorVisitors,
   racksFor,
   type BuildingInputs,
 } from "./building";
@@ -264,6 +266,7 @@ describe("the lounge", () => {
   it("seats the current project's idle first, then other projects' visitors", () => {
     const idleHere = makeSession({ id: "here" });
     const visitor = bsession({ id: "there", agent: "gemini" });
+    // A run waiting on a usage limit is outdoors, not on the sofa.
     const asleep = brun({ status: "queued", retryAt: ago(-60_000), title: "Search" });
     const building = buildBuilding(
       inputs({
@@ -274,9 +277,8 @@ describe("the lounge", () => {
     expect(building.lounge.map((spot) => spot.actorId ?? spot.id)).toEqual([
       sessionActorId("here"),
       "visitor:app:session:there",
-      `visitor:app:run:${asleep.id}`,
     ]);
-    expect(building.lounge[2].visitor).toMatchObject({ pose: "limit", title: "Search", label: "APP" });
+    expect(building.lounge[1].visitor).toMatchObject({ pose: "idle", label: "APP" });
   });
 
   it("skips the active project, and sessions that went quiet", () => {
@@ -292,6 +294,64 @@ describe("the lounge", () => {
     const building = buildBuilding(inputs({ remote: remote(project("app", { sessions })) }));
     expect(building.lounge).toHaveLength(10);
     expect(building.loungeMore).toBe(3);
+  });
+});
+
+describe("the outdoors", () => {
+  it("sends the current project's limit waits out first, then other projects' visitors", () => {
+    const here = makeRun({ id: "run3", status: "queued", createdAt: ago(10 * 60_000), retryAt: ago(-10 * 60_000) });
+    const there = brun({
+      id: "run1",
+      status: "queued",
+      title: "Search",
+      createdAt: ago(45 * 60_000),
+      retryAt: ago(-15 * 60_000),
+    });
+    const building = buildBuilding(
+      inputs({ runs: [here], remote: remote(project("app", { runs: [there, brun({ status: "queued" })] })) }),
+    );
+    expect(building.outdoors.map((spot) => spot.actorId ?? spot.id)).toEqual([runActorId("run3"), "visitor:app:run:run1"]);
+    expect(building.outdoorsMore).toBe(0);
+    expect(building.lounge).toEqual([]);
+    expect(building.actors[0]).toMatchObject({ area: "outdoors", outing: { kind: "camp", step: 4, minutesLeft: 10 } });
+    const target = { kind: "in-project", project: "app", then: { kind: "run", runId: "run1", nodeId: there.nodeId } };
+    expect(building.outdoors[1].visitor).toEqual({
+      project: "app",
+      label: "APP",
+      agent: "claude",
+      model: "opus",
+      title: "Search",
+      outing: { kind: "stream", step: 6, returnsAt: there.retryAt, minutesLeft: 15 },
+      target,
+      actions: [target, { kind: "project", project: "app" }],
+    });
+  });
+
+  it("leaves the active project to its office", () => {
+    const response = remote(project("main", { runs: [brun({ status: "queued", retryAt: ago(-60_000) })] }));
+    expect(outdoorVisitors(response, "main", NOW)).toEqual([]);
+  });
+
+  it("leaves a plan run in its meeting room, as its own office does", () => {
+    const response = remote(
+      project("app", { runs: [brun({ kind: "plan", status: "queued", retryAt: ago(-60_000) })] }),
+    );
+    expect(outdoorVisitors(response, "main", NOW)).toEqual([]);
+  });
+
+  it("caps the spots and counts the rest", () => {
+    const runs = Array.from({ length: MAX_OUTDOORS + 3 }, () => brun({ status: "queued", retryAt: ago(-60_000) }));
+    const building = buildBuilding(inputs({ remote: remote(project("app", { runs })) }));
+    expect(MAX_OUTDOORS).toBe(8);
+    expect(building.outdoors).toHaveLength(MAX_OUTDOORS);
+    expect(building.outdoorsMore).toBe(3);
+  });
+
+  it("still counts the sleepers in their compact office", () => {
+    const building = buildBuilding(
+      inputs({ remote: remote(project("app", { runs: [brun({ status: "queued", retryAt: ago(-60_000) })] })) }),
+    );
+    expect(building.others[0].counts.sleeping).toBe(1);
   });
 });
 

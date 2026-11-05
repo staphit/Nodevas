@@ -3,7 +3,7 @@ import type { Graph } from "../types";
 import type { BuildingInputs } from "./building";
 import { buildWorld, nodeTitles } from "./buildWorld";
 import { runActorId, sessionActorId } from "./office";
-import { makeRun, makeRunner, makeSession, NOW } from "./testFixtures";
+import { ago, makeRun, makeRunner, makeSession, NOW } from "./testFixtures";
 
 const GRAPH: Graph = {
   version: 1,
@@ -56,6 +56,23 @@ describe("buildWorld", () => {
   it("is pure: the same inputs build an equal world", () => {
     const snapshot = inputs({ runs: [makeRun()], sessions: [makeSession()] });
     expect(buildWorld(snapshot)).toEqual(buildWorld(snapshot));
+  });
+
+  it("ages an activity, and walks an outing, with the clock it is given", () => {
+    const working = makeRun({ nodeId: "schema", createdAt: ago(90_000), lastTool: "Grep", lastToolAt: ago(1_000) });
+    const limit = makeRun({ nodeId: "login", status: "queued", createdAt: ago(60_000), retryAt: ago(-60_000) });
+    const snapshot = inputs({ runs: [working, limit] });
+    const now = buildWorld(snapshot).building;
+    expect(now.actors.map((a) => [a.pose, a.area, a.activity, a.outing?.step])).toEqual([
+      ["working", "work", "search", undefined],
+      ["limit", "outdoors", undefined, 4],
+    ]);
+    expect(now.outdoors).toEqual([{ id: runActorId(limit.id), actorId: runActorId(limit.id) }]);
+    const later = buildWorld({ ...snapshot, now: NOW + 120_000 }).building;
+    expect(later.actors.map((a) => [a.activity, a.outing?.step, a.outing?.minutesLeft])).toEqual([
+      [undefined, undefined, undefined],
+      [undefined, 7, 0],
+    ]);
   });
 
   it("ages sessions with the clock it is given", () => {

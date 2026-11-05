@@ -225,6 +225,8 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		Doing     string `json:"doing"`
 		NodeID    string `json:"nodeId"`
 		Model     string `json:"model"`
+		// Tool: the tool the agent just called (agents.Heartbeat.Tool).
+		Tool string `json:"tool"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxHeartbeatBody) {
 		return
@@ -250,6 +252,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		Doing:     body.Doing,
 		NodeID:    body.NodeID,
 		Model:     body.Model,
+		Tool:      body.Tool,
 		Run:       a.fromRun(c.Request, actorID),
 		RunID:     a.runIDOf(c.Request),
 	})

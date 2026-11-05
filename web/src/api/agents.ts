@@ -32,6 +32,11 @@ export interface AgentSession {
    * through its proxy. Absent from older hubs and runners: match the run by
    * its session name then (game/joins.ts). */
   runId?: string;
+  /** The last tool the agent called (its raw name, from its post-tool-use
+   * heartbeat) and when (Unix ms, like lastSeen). Absent from older hubs
+   * and hooks. */
+  lastTool?: string;
+  lastToolAt?: number;
 }
 
 /** Absent on hubs older than the hold policy, which means "delivered". */

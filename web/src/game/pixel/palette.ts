@@ -54,6 +54,27 @@ export const PIXEL_TOKENS = [
   "led-on",
   "led-off",
   "paper",
+  // The outdoors, where an agent waits out a usage limit: the same in every
+  // office style (warroom.css sets them on .px-office only), a day sky in
+  // the light theme and a night one in the dark.
+  "sky",
+  "mountain",
+  "mountain-dark",
+  "snow",
+  "grass",
+  "grass-dark",
+  "trail",
+  "water",
+  "water-light",
+  "rock",
+  "rock-dark",
+  "fire",
+  "fire-light",
+  "tent",
+  "tent-dark",
+  "sun",
+  "wood",
+  "backpack",
 ] as const;
 
 export type PixelToken = (typeof PIXEL_TOKENS)[number];

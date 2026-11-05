@@ -67,7 +67,7 @@ describe("the office", () => {
     expect(office({ label: "" }).office.label).toBe("main");
   });
 
-  it("puts each character where its state says: desk, meeting, door or lounge", () => {
+  it("puts each character where its state says: desk, meeting, door, lounge or outdoors", () => {
     const working = makeRun({ createdAt: ago(50_000) });
     const offered = makeRun({ status: "offered", nodeId: "schema", createdAt: ago(40_000) });
     const plan = makeRun({ kind: "plan", nodeId: "plan", createdAt: ago(30_000) });
@@ -88,7 +88,8 @@ describe("the office", () => {
     expect(built.office.work).toEqual([runActorId(working.id), runActorId(merging.id)]);
     expect(built.office.meeting).toEqual([runActorId(plan.id), sessionActorId("ask")]);
     expect(built.office.entrance).toEqual([runActorId(offered.id)]);
-    expect(built.loungeIds).toEqual([runActorId(limit.id), sessionActorId("idle")]);
+    expect(built.loungeIds).toEqual([sessionActorId("idle")]);
+    expect(built.outdoorIds).toEqual([runActorId(limit.id)]);
     expect(actor(built.actors, runActorId(merging.id)).pose).toBe("awaiting-accept");
   });
 
@@ -413,6 +414,85 @@ describe("sessions with no run in view", () => {
       asks: [makeAsk({ id: "c1", sessionId: "s1", kind: "choice", options: ["a", "b"] })],
     });
     expect(world.actors[0].actions).toContainEqual({ kind: "ask", askId: "c1", sessionId: "s1", askKind: "choice" });
+  });
+});
+
+describe("what a character is doing", () => {
+  const RUN_ID = "c0ffee000000000000000000";
+  const at = (ms: number) => ago(ms);
+
+  it("shows a working run's last tool, until it goes stale", () => {
+    const reading = makeRun({ lastTool: "Read", lastToolAt: at(5_000) });
+    const stale = makeRun({ nodeId: "schema", lastTool: "Grep", lastToolAt: at(121_000) });
+    const unknown = makeRun({ nodeId: "x", lastTool: "frobnicate", lastToolAt: at(1_000) });
+    const none = makeRun({ nodeId: "y" });
+    // A shell call is still running long after a read would have gone stale.
+    const building = makeRun({ nodeId: "z", lastTool: "Bash", lastToolAt: at(5 * 60_000) });
+    const world = office({ runners: [runner("rn1", 8)], runs: [reading, stale, unknown, none, building] });
+    expect(actor(world.actors, runActorId(reading.id)).activity).toBe("read");
+    expect(actor(world.actors, runActorId(stale.id)).activity).toBeUndefined();
+    expect(actor(world.actors, runActorId(building.id)).activity).toBe("shell");
+    expect(actor(world.actors, runActorId(unknown.id)).activity).toBeUndefined();
+    expect(actor(world.actors, runActorId(none.id)).activity).toBeUndefined();
+  });
+
+  it("reviews with its tool too, but only at work", () => {
+    const review = makeRun({ kind: "review", lastTool: "Grep", lastToolAt: at(1_000) });
+    const failed = makeRun({ nodeId: "schema", status: "failed", lastTool: "Bash", lastToolAt: at(1_000) });
+    const queued = makeRun({ nodeId: "x", status: "offered", lastTool: "Bash", lastToolAt: at(1_000) });
+    const world = office({ runners: [runner("rn1", 8)], runs: [review, failed, queued] });
+    expect(actor(world.actors, runActorId(review.id))).toMatchObject({ pose: "reviewing", activity: "search" });
+    expect(actor(world.actors, runActorId(failed.id)).activity).toBeUndefined();
+    expect(actor(world.actors, runActorId(queued.id)).activity).toBeUndefined();
+  });
+
+  it("takes the newer of the run's and its session's last tool", () => {
+    const sessionName = "visual-editor-claude-opus-c0ffee";
+    const older = office({
+      runs: [makeRun({ id: RUN_ID, lastTool: "Read", lastToolAt: at(10_000) })],
+      sessions: [makeSession({ id: "s-run", name: sessionName, run: true, lastTool: "Edit", lastToolAt: NOW - 2_000 })],
+    });
+    expect(older.actors[0].activity).toBe("edit");
+    const newer = office({
+      runs: [makeRun({ id: RUN_ID, lastTool: "thinking", lastToolAt: at(1_000) })],
+      sessions: [makeSession({ id: "s-run", name: sessionName, run: true, lastTool: "Edit", lastToolAt: NOW - 30_000 })],
+    });
+    expect(newer.actors[0].activity).toBe("think");
+  });
+
+  it("shows a busy session's last tool", () => {
+    const world = office({
+      sessions: [
+        makeSession({ id: "b", nodeId: "schema", state: "busy", lastTool: "WebSearch", lastToolAt: NOW - 1_000 }),
+        makeSession({ id: "i", name: "idle-one", lastTool: "Read", lastToolAt: NOW - 1_000 }),
+      ],
+    });
+    expect(actor(world.actors, sessionActorId("b"))).toMatchObject({ pose: "working", activity: "web" });
+    expect(actor(world.actors, sessionActorId("i")).activity).toBeUndefined();
+  });
+
+  it("sends a run waiting on a usage limit outdoors, on its outing", () => {
+    const limit = makeRun({ id: "run2", status: "queued", createdAt: ago(30 * 60_000), retryAt: ago(-30 * 60_000) });
+    const world = office({ runs: [limit] });
+    const a = actor(world.actors, runActorId("run2"));
+    expect(a).toMatchObject({ pose: "limit", area: "outdoors" });
+    expect(a.outing).toEqual({ kind: "hike", step: 4, returnsAt: limit.retryAt, minutesLeft: 30 });
+    expect(a.activity).toBeUndefined();
+    expect(world.outdoorIds).toEqual([runActorId("run2")]);
+    expect(world.loungeIds).toEqual([]);
+    expect(world.office.work).toEqual([]);
+  });
+
+  it("keeps a limit run's plan meeting: planning outranks the outing", () => {
+    const plan = makeRun({ kind: "plan", status: "queued", retryAt: ago(-60_000) });
+    const world = office({ runs: [plan] });
+    expect(world.actors[0]).toMatchObject({ pose: "limit", area: "meeting" });
+    expect(world.actors[0].outing).toBeUndefined();
+    expect(world.outdoorIds).toEqual([]);
+  });
+
+  it("gives no outing to anyone not waiting on a limit", () => {
+    expect(office({ runs: [makeRun()] }).actors[0].outing).toBeUndefined();
   });
 });
 

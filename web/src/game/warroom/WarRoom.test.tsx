@@ -159,11 +159,67 @@ describe("the current office", () => {
     expect(desk("failed").querySelector('[data-part="screen.fail.glyph"]')).not.toBeNull();
     expect(desk("finished").querySelector('[data-part="screen.ok.glyph"]')).not.toBeNull();
     expect(desk("finished").querySelector(".px-sprite")).not.toHaveClass("px-anim");
-    // Asleep on a usage limit: on the lounge's sofa, zzz.
-    const lounge = screen.getByRole("region", { name: "Lounge" });
-    const asleep = within(lounge).getByRole("button", { name: /asleep until its usage limit resets/ });
-    expect(asleep.querySelector('[data-part="bubble.sleep"]')).not.toBeNull();
+    // Waiting out a usage limit: out of the office, on an outing.
+    const outdoors = screen.getByRole("region", { name: "Outdoors" });
+    const out = within(outdoors).getByRole("button", { name: /waiting for its usage limit to reset.*back in about 1 min/ });
+    expect(out.querySelector('[data-part$=".backdrop"]')).not.toBeNull();
+    expect(out.querySelector('[data-part="head.front"]')).not.toBeNull();
+    expect(out.querySelector(".px-sprite")).toHaveClass("px-anim");
+    expect(within(screen.getByRole("region", { name: "Lounge" })).queryByRole("button", { name: /usage limit/ })).toBeNull();
     expect(within(desk("working") as HTMLElement).getByText("Login form")).toBeInTheDocument();
+  });
+
+  it("draws what a working agent is doing on its screen, on that activity's loop", () => {
+    const world = building({ runs: [makeRun({ id: "w1", nodeId: "login", status: "running" })] });
+    world.actors[0].activity = "shell";
+    const { container } = mount(world);
+    const desk = container.querySelector(".px-desk.pose-working")!;
+    expect(desk.querySelector('[data-part="screen.shell.prompt"]')).not.toBeNull();
+    expect(desk.querySelector('[data-part="screen.code.lines"]')).toBeNull();
+    const sprite = desk.querySelector<SVGElement>(".px-sprite")!;
+    expect(sprite).toHaveClass("px-anim");
+    expect(sprite.style.getPropertyValue("--px-loop")).toBe("1000ms");
+  });
+
+  it("takes the outing's step and kind from the world, for this project's agent and a visitor", () => {
+    const world = building({ runs: [makeRun({ id: "w1", nodeId: "login", status: "running" })] });
+    const actor = world.actors[0];
+    const outing = { kind: "fish" as const, step: 6, returnsAt: new Date(NOW + 600_000).toISOString(), minutesLeft: 10 };
+    world.actors[0] = { ...actor, pose: "limit", area: "outdoors", outing };
+    world.current = { ...world.current!, work: [] };
+    const target = { kind: "project" as const, project: "app" };
+    world.outdoors = [
+      { id: actor.id, actorId: actor.id },
+      {
+        id: "visitor:app:run:x1",
+        visitor: {
+          project: "app",
+          label: "App",
+          agent: "codex",
+          model: "gpt-5",
+          title: "Search",
+          outing: { ...outing, kind: "hike", step: 7 },
+          target,
+          actions: [target],
+        },
+      },
+    ];
+    world.outdoorsMore = 2;
+    mount(world);
+    const outdoors = screen.getByRole("region", { name: "Outdoors" });
+    const [own, visitor] = within(outdoors).getAllByRole("button");
+    expect(own.querySelector('[data-part="fish.rod"]')).not.toBeNull();
+    expect(own.querySelector('[data-part="fish.bite"]')).not.toBeNull();
+    expect(own).toHaveClass("agent--claude");
+    expect(visitor).toHaveAccessibleName(/Codex gpt-5 from App: Out hiking, back in about 10 min\./);
+    expect(visitor.querySelector('[data-part="hike.summit"]')).not.toBeNull();
+    expect(within(visitor).getByText("App")).toBeInTheDocument();
+    expect(within(outdoors).getByText("2 more out of the office.")).toBeInTheDocument();
+  });
+
+  it("draws no outdoors while nobody is out", () => {
+    mount(building({ runs: [makeRun({ id: "w1", status: "running" })] }));
+    expect(screen.queryByRole("region", { name: "Outdoors" })).not.toBeInTheDocument();
   });
 
   it("lays what waits on the viewer on the meeting table, each a menu", () => {
@@ -319,6 +375,7 @@ describe("the building", () => {
       "Entrance",
       "Other offices",
       "Lounge",
+      "Outdoors",
       "Server room",
     ]);
     expect(within(text).getByText(/in mac-mini: working, on “Login form”\./)).toBeInTheDocument();
@@ -420,5 +477,19 @@ describe("role badges", () => {
     const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, role: "tester" } })).toBe(false);
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, testState: "red" } })).toBe(false);
+  });
+
+  it("redraws a desk when its activity or its outing's step changes", () => {
+    const world = building({ runs: [makeRun({ id: "r1", status: "running" })] });
+    const actor = { ...world.actors[0], activity: "read" as const };
+    const before = { actor, scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor } })).toBe(true);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, activity: "shell" } })).toBe(false);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, activity: undefined } })).toBe(false);
+    const outing = { kind: "camp" as const, step: 2, returnsAt: "", minutesLeft: 9 };
+    const out = { ...before, scene: "outdoor" as const, actor: { ...before.actor, outing } };
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing } } })).toBe(true);
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing, step: 3 } } })).toBe(false);
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing, kind: "hike" } } })).toBe(false);
   });
 });

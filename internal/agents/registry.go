@@ -42,6 +42,8 @@ const (
 
 	// MaxModelLen bounds the model name a heartbeat reports.
 	MaxModelLen = 64
+	// maxToolBytes cuts the tool name a heartbeat reports.
+	maxToolBytes = 128
 
 	// maxSessionsPerActor bounds one account's sessions in a project,
 	// online or kept offline (OfflineRetention): a new one past it takes
@@ -100,6 +102,12 @@ type Session struct {
 	// said so (runnerwire.RunIDHeader). Set once, like Run: a session never
 	// moves to another run.
 	RunID string `json:"runId,omitempty"`
+	// LastTool is the last tool the session's agent hook reported it called
+	// (Heartbeat.Tool), as the agent names it; LastToolAt, when, in Unix
+	// milliseconds like LastSeen. Cleared when the session goes idle or
+	// leaves. What the building draws the agent doing.
+	LastTool   string `json:"lastTool,omitempty"`
+	LastToolAt int64  `json:"lastToolAt,omitempty"`
 }
 
 // Address returns the canonical `<actor>/<name>` handle for this session.
@@ -136,6 +144,9 @@ type Heartbeat struct {
 	Doing     string `json:"doing,omitempty"`
 	NodeID    string `json:"nodeId,omitempty"`
 	Model     string `json:"model,omitempty"`
+	// Tool is the tool the agent just called, from its post-tool-use hook
+	// (Session.LastTool); "" says nothing about tools.
+	Tool string `json:"tool,omitempty"`
 	// Run: the heartbeat comes from a run (Session.Run). It is set by the
 	// transport, not by what the agent says about itself.
 	Run bool `json:"-"`
@@ -267,6 +278,11 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	if len(model) > MaxModelLen {
 		return Session{}, fmt.Errorf("%w: model exceeds %d characters", ErrInvalid, MaxModelLen)
 	}
+	tool := capBytes(strings.TrimSpace(hb.Tool), maxToolBytes)
+	var toolAt int64
+	if tool != "" {
+		toolAt = now
+	}
 
 	state := strings.ToLower(strings.TrimSpace(hb.State))
 	if state != StateBusy && state != StateIdle {
@@ -357,6 +373,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			Run:       hb.Run,
 			RunID:     runID,
 		}
+		existing.LastTool, existing.LastToolAt = tool, toolAt
 		h.sessions[key] = existing
 	} else {
 		// A session ID is bound to the actor that first registered it, so on a
@@ -421,6 +438,10 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		}
 		if hb.NodeID != "" || explicitIdle {
 			existing.NodeID = agentNodeID(hb.NodeID)
+		}
+		// Likewise the tool: an idle agent is doing nothing with one.
+		if tool != "" || explicitIdle {
+			existing.LastTool, existing.LastToolAt = tool, toolAt
 		}
 		if model != "" {
 			existing.Model = model
@@ -533,6 +554,7 @@ func (h *Hub) Leave(project, sessionID, actorID string) error {
 	s.Since = now
 	s.Doing = ""
 	s.NodeID = ""
+	s.LastTool, s.LastToolAt = "", 0
 	runID := s.RunID
 	h.mu.Unlock()
 	h.LogAction(project, sessionID, runID, ActionLeft, "", "")

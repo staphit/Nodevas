@@ -38,6 +38,9 @@ export interface BuildingRun extends WaitingRunLike {
   /** Set while the run waits, queued, for its agent's usage limit. */
   retryAt?: string;
   startedAt?: string;
+  /** The last tool its agent called and when (RFC 3339), as on Run. */
+  lastTool?: string;
+  lastToolAt?: string;
 }
 
 export interface BuildingSession {
@@ -51,6 +54,10 @@ export interface BuildingSession {
   runId: string;
   lastSeen: number;
   online: boolean;
+  /** The last tool the agent called and when (Unix ms), as on
+   * AgentSession. */
+  lastTool?: string;
+  lastToolAt?: number;
 }
 
 /** Complete counts of what the viewer can act on in the project. */

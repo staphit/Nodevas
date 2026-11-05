@@ -265,7 +265,12 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	case EventSessionStart:
 		state = agents.StateIdle
 	}
-	if err := client.Heartbeat(ctx, state, "", ""); err != nil {
+	// After a tool call, which tool: what the agent's desk shows it doing.
+	tool := ""
+	if event == EventPostToolUse {
+		tool = in.ToolName
+	}
+	if err := client.HeartbeatTool(ctx, state, "", "", tool); err != nil {
 		return ""
 	}
 	reportChanges(ctx, client, event, in)

@@ -1114,6 +1114,16 @@ ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS hub_notice BOOLEAN NOT NULL 
 ALTER TABLE run_changes ADD COLUMN IF NOT EXISTS patch_pruned BOOLEAN NOT NULL DEFAULT FALSE;
 `,
 	},
+	{
+		// The last tool a run's agent called, or "thinking", and that
+		// event's At (runnerwire.Run.LastTool), so the building can draw
+		// what it is doing. Rows from before read as no tool yet.
+		name: "0036_run_last_tool",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS last_tool    TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS last_tool_at TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

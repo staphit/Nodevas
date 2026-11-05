@@ -348,8 +348,9 @@ function MainApp() {
           break;
         case "run-events":
           // The id is a run: an open run view fetches what came after its
-          // last event, or with kind "ask" the run's asks.
-          useRuns.getState().onRunEvents(ev.id, ev.kind);
+          // last event, or with kind "ask" the run's asks. The batch's last
+          // tool, when named, patches the run in place (the war room's desks).
+          useRuns.getState().onRunEvents(ev.id, ev.kind, ev.tool, ev.toolAt);
           break;
         case "session-changes":
           // The id is a node: its external sessions are refetched if shown.

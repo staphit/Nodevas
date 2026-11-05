@@ -59,6 +59,10 @@ type BuildingRun struct {
 	CreatedAt   string            `json:"createdAt"`
 	StartedAt   string            `json:"startedAt"`
 	FinishedAt  string            `json:"finishedAt"`
+	// LastTool and LastToolAt are runnerwire.Run's: the last tool the run's
+	// agent called (or "thinking") and when, RFC3339.
+	LastTool   string `json:"lastTool,omitempty"`
+	LastToolAt string `json:"lastToolAt,omitempty"`
 }
 
 // BuildingRunMerge is the status of a run's latest merge approval.
@@ -78,6 +82,10 @@ type BuildingSession struct {
 	RunID    string `json:"runId"`
 	LastSeen int64  `json:"lastSeen"`
 	Online   bool   `json:"online"`
+	// LastTool and LastToolAt are agents.Session's: the last tool the
+	// session's agent hook reported and when, Unix milliseconds.
+	LastTool   string `json:"lastTool,omitempty"`
+	LastToolAt int64  `json:"lastToolAt,omitempty"`
 }
 
 // BuildingWaiting counts, completely, what waits on the viewer in the
