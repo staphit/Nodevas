@@ -3,12 +3,12 @@
 // to its falls, fishing from a rock by a lake, a camp with a tent and a fire,
 // a barbecue at a campsite, a bike ride along a road to a finish flag.
 // Each outing is one tile, OUTDOOR_W × OUTDOOR_H art pixels: a backdrop, the
-// agent (seen from the front, its kind's headwear from sprites.ts) and the
-// props that say which outing it is without colour: a flag, a pole in the
-// water, a rod and a bobber, a tent and flames, a grill with smoke and a
-// plate, a bike's wheels and a chequered flag. Original art, in the legend
-// of sprites.ts; the backdrops are drawn on the sky, so a tile is whole on
-// its own.
+// agent (seen from the front, or from the side on the bike, its kind's
+// headwear from sprites.ts) and the props that say which outing it is
+// without colour: a flag, a pole in the water, a rod and a bobber, a tent
+// and flames, a grill with smoke and a plate, a bike's wheels and a
+// chequered flag. Original art, in the legend of sprites.ts; the backdrops
+// are drawn on the sky, so a tile is whole on its own.
 
 import { solid, sprite } from "./sprites";
 
@@ -805,30 +805,76 @@ export const WHEEL_B = sprite(`
   ..ooooo..
 `);
 
-/** The rider's legs, from the front, pedalling: one foot down on its pedal,
- * the other up, then the other way round. */
-export const LEGS_PEDAL_A = sprite(`
-  oppppppo
-  oppppppo
-  oppooppo
-  oppooppo
-  oppooooo
-  oppo.ooo
-  oppo....
-  oppo....
-  oooo....
+// The rider, from the side, facing the way the bike goes (HEAD_SIDE and its
+// headwear on top): leaning over the top tube, a hand on the bars, the seat
+// of the pants on the saddle and the feet on the pedals.
+
+/** Where the saddle's top and the bars' top are on BIKE: what the rider
+ * sits on and holds. */
+export const BIKE_SADDLE = { x: 6, y: 1, w: 4 };
+export const BIKE_BARS = { x: 14, y: 0, w: 4 };
+
+/** The torso, leaning forward from the hips on the saddle to the shoulders
+ * over the bars; the back's shading in the kind's dark colour. */
+export const BODY_RIDER = sprite(`
+  ........oooo.
+  ......ooaaaao
+  ....ooAaaaaao
+  ..ooAaaaaaao.
+  .oAaaaaaaao..
+  oAaaaaaaao...
+  ooooooooo....
 `);
-export const LEGS_PEDAL_B = sprite(`
-  oppppppo
-  oppppppo
-  oppooppo
-  oppooppo
-  oooooppo
-  ooo.oppo
-  ....oppo
-  ....oppo
-  ....oooo
+
+/** The near arm reaching forward and down to the bars: a sleeve, then the
+ * forearm and the hand. */
+export const ARM_REACH = sprite(`
+  oAAo.....
+  .oAAo....
+  ..oAAo...
+  ..okko...
+  ...okko..
+  ...okko..
+  ....okko.
+  ....okko.
 `);
+
+/** The near leg, pedalling, its pedal turning with the wheels: the thigh
+ * level, knee up and the foot on the pedal at the front (a), then the leg
+ * pushed down, the foot at the bottom (b). The seat of the pants rests on
+ * the saddle. */
+const LEG_UP = `
+  .ooooooo....
+  opppppppoo..
+  opppppppppo.
+  .oooooooppo.
+  .......oppo.
+  .......oppo.
+  .......oppo.
+  .......oppo.
+  .......ooooo
+`;
+const LEG_DOWN = `
+  .ooooooo....
+  opppppppo...
+  oppppppppo..
+  .oooopppppo.
+  ......opppo.
+  ......opppo.
+  ......oppo..
+  ......oppo..
+  ......oppo..
+  ......oppo..
+  ......oppo..
+  ......oppo..
+  ......ooooo.
+`;
+export const LEGS_RIDE_A = sprite(LEG_UP);
+export const LEGS_RIDE_B = sprite(LEG_DOWN);
+/** The far leg, behind the bike, a step behind the near one (down while it
+ * is up): in shadow, all outline. */
+export const LEGS_RIDE_FAR_A = sprite(LEG_DOWN.replace(/p/g, "o"));
+export const LEGS_RIDE_FAR_B = sprite(LEG_UP.replace(/p/g, "o"));
 
 /** The finish: a chequered flag by the road. */
 export const CHEQUER = sprite(`

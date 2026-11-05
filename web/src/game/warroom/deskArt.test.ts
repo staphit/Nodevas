@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { ACTIVITIES, type Activity } from "../activity";
 import { OFFICE_STYLES } from "../officeStyle";
 import { OUTING_KINDS, OUTING_STEPS, type Outing, type OutingKind } from "../outing";
-import { OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
-import { CELL } from "../pixel/sprites";
+import { BIKE, BIKE_BARS, BIKE_SADDLE, OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
+import { CELL, HEAD_SIDE, HEADWEAR_KINDS, headwearOf } from "../pixel/sprites";
 import { POSES, type Pose } from "../world";
 import {
   ACTIVITY_LOOP_MS,
@@ -318,8 +318,9 @@ describe("outdoorScene", () => {
         for (const cue of CUES[kind]) expect(theirs, `${other} has ${cue}`).not.toContain(cue);
       }
       keys.add(parts.join(","));
-      // The agent is there, in its kind's headwear.
-      expect(parts, kind).toEqual(expect.arrayContaining(["head.front", "headwear.claude"]));
+      // The agent is there, in its kind's headwear: from the side on the bike.
+      const head = kind === "cycle" ? "head.side" : "head.front";
+      expect(parts, kind).toEqual(expect.arrayContaining([head, "headwear.claude"]));
     }
     expect(keys.size).toBe(OUTING_KINDS.length);
   });
@@ -403,13 +404,137 @@ describe("outdoorScene", () => {
     }
   });
 
-  it("puts the pedalling legs right under the rider's hips", () => {
+  /** Every kind's rider, and one with no headwear of its own. */
+  const RIDERS = [...HEADWEAR_KINDS, "other"];
+  const RIDER_PARTS = ["head.side", "body.rider", "arm.reach", "cycle.legs.a", "cycle.legs.b", "cycle.legs.far.a", "cycle.legs.far.b"];
+
+  it("draws the rider from the side, facing the way the bike goes", () => {
+    for (const kind of RIDERS) {
+      const parts = names(outdoorScene(outing("cycle", 3), kind));
+      expect(parts, kind).toEqual(expect.arrayContaining(RIDER_PARTS));
+      for (const front of ["head.front", "body.standing"]) expect(parts, kind).not.toContain(front);
+      if (headwearOf(kind, "front")) expect(parts, kind).toContain(`headwear.${kind}`);
+      else expect(parts.some((n) => n.startsWith("headwear.")), kind).toBe(false);
+    }
+    // The profile looks right, to the finish: the eye in the head's front half.
+    const eye = pixels(HEAD_SIDE).flatMap((row, y) => row.map((token, x) => ({ token, x, y }))).filter((p) => p.token === "eye");
+    expect(eye.length).toBeGreaterThan(0);
+    for (const { x } of eye) expect(x).toBeGreaterThan(HEAD_SIDE.w / 2);
+  });
+
+  it("gives every kind's headwear a side view of its own shape, on the head and in the tile", () => {
+    const outline = (sprite: Placed["sprite"]) => pixels(sprite).map((row) => row.map(Boolean).join()).join("|");
+    for (const kind of HEADWEAR_KINDS) {
+      const side = headwearOf(kind, "side");
+      expect(side, kind).not.toBeNull();
+      expect(side!.sprite.w, kind).toBeGreaterThan(0);
+      // Over the head, not off to one side of it.
+      expect(side!.dx + side!.sprite.w, kind).toBeGreaterThan(0);
+      expect(side!.dx, kind).toBeLessThan(HEAD_SIDE.w);
+      // Its shape tells the kinds apart, not only its colour.
+      for (const other of HEADWEAR_KINDS)
+        if (other !== kind) expect(outline(headwearOf(other, "side")!.sprite), `${kind} ${other}`).not.toBe(outline(side!.sprite));
+    }
+    expect(headwearOf("other", "side")).toBeNull();
+  });
+
+  it("keeps the rider's eye showing under every kind's headwear, skin behind it", () => {
+    for (const kind of RIDERS) {
+      for (const step of steps) {
+        const parts = outdoorScene(outing("cycle", step), kind);
+        // The scene as drawn: later parts over earlier ones.
+        const drawn = new Map<string, string>();
+        for (const part of parts)
+          pixels(part.sprite).forEach((row, y) =>
+            row.forEach((token, x) => token && drawn.set(`${part.x + x},${part.y + y}`, token)),
+          );
+        const head = parts.find((p) => p.name === "head.side")!;
+        const eyes = pixels(head.sprite).flatMap((row, y) => row.flatMap((t, x) => (t === "eye" ? [{ x: head.x + x, y: head.y + y }] : [])));
+        expect(eyes.length, `${kind} ${step}`).toBeGreaterThan(0);
+        for (const { x, y } of eyes) {
+          expect(drawn.get(`${x},${y}`), `${kind} ${step} eye`).toBe("eye");
+          expect(drawn.get(`${x - 1},${y}`), `${kind} ${step} behind the eye`).toBe("skin");
+        }
+      }
+    }
+  });
+
+  it("keeps the rider on the tile and short of the finish pole at every step", () => {
+    for (const kind of RIDERS) {
+      for (const step of steps) {
+        const parts = outdoorScene(outing("cycle", step), kind);
+        const pole = parts.find((p) => p.name === "cycle.flag.pole")!;
+        const rider = parts.filter((p) => RIDER_PARTS.includes(p.name) || p.name.startsWith("headwear."));
+        expect(rider.length, `${kind} ${step}`).toBeGreaterThanOrEqual(RIDER_PARTS.length);
+        for (const part of rider) {
+          const where = `${kind} ${step} ${part.name}`;
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(OUTDOOR_H);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(pole.x);
+        }
+      }
+    }
+  });
+
+  it("pedals in two frames, knee up then knee down, with the wheels", () => {
     const parts = outdoorScene(outing("cycle", 3), "codex");
-    const body = parts.find((p) => p.name === "body.standing")!;
-    const hips = span(pixels(body.sprite).at(-1)!).map((x) => body.x + x);
-    for (const name of ["cycle.legs.a", "cycle.legs.b"]) {
-      const legs = parts.find((p) => p.name === name)!;
-      expect(span(pixels(legs.sprite)[0]).map((x) => legs.x + x), name).toEqual(hips);
+    const find = (name: string) => parts.find((p) => p.name === name)!;
+    for (const leg of ["cycle.legs", "cycle.legs.far"]) {
+      expect(find(`${leg}.a`).frame, leg).toEqual({ index: 0, of: 2 });
+      expect(find(`${leg}.b`).frame, leg).toEqual({ index: 1, of: 2 });
+    }
+    expect(find("cycle.wheel.back.a").frame).toEqual({ index: 0, of: 2 });
+    // The foot: its lowest pixel is higher with the knee up (a) than down (b).
+    const lowest = (part: Placed) => part.y + pixels(part.sprite).map((row) => row.some(Boolean)).lastIndexOf(true);
+    expect(lowest(find("cycle.legs.a"))).toBeLessThan(lowest(find("cycle.legs.b")));
+    // The far leg is the other way round.
+    expect(lowest(find("cycle.legs.far.a"))).toBeGreaterThan(lowest(find("cycle.legs.far.b")));
+    // The far leg is behind the bike, the near one in front of it.
+    const order = names(parts);
+    expect(order.indexOf("cycle.legs.far.a")).toBeLessThan(order.indexOf("cycle.bike"));
+    expect(order.indexOf("cycle.legs.a")).toBeGreaterThan(order.indexOf("cycle.bike"));
+  });
+
+  it("marks the saddle and the bars where BIKE draws them", () => {
+    const grid = pixels(BIKE);
+    /** The first opaque run on a row of BIKE. */
+    const firstRun = (y: number) => {
+      const x = grid[y].findIndex(Boolean);
+      let w = 0;
+      while (grid[y][x + w]) w++;
+      return { x, y, w };
+    };
+    // The bars are the top of the bike; the saddle is the first thing below them.
+    expect(BIKE_BARS).toEqual(firstRun(0));
+    expect(BIKE_SADDLE).toEqual(firstRun(1));
+    // Clear above both, for the hand and the seat of the pants.
+    for (let i = 0; i < BIKE_SADDLE.w; i++) expect(grid[BIKE_SADDLE.y - 1][BIKE_SADDLE.x + i], `saddle ${i}`).toBe("");
+    expect(BIKE_BARS.y).toBe(0);
+  });
+
+  it("sits the rider on the saddle, hands on the bars", () => {
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "gemini");
+      const find = (name: string) => parts.find((p) => p.name === name)!;
+      const bike = find("cycle.bike");
+      /** A part's opaque pixels on an absolute row, as absolute columns. */
+      const onRow = (part: Placed, y: number, token?: string) =>
+        (pixels(part.sprite)[y - part.y] ?? []).flatMap((t, x) => (t && (!token || t === token) ? [part.x + x] : []));
+      const saddle = Array.from({ length: BIKE_SADDLE.w }, (_, i) => bike.x + BIKE_SADDLE.x + i);
+      const bars = Array.from({ length: BIKE_BARS.w }, (_, i) => bike.x + BIKE_BARS.x + i);
+      for (const leg of ["cycle.legs.a", "cycle.legs.b"]) {
+        // Right on top of the saddle, across all of it: the seat of the pants.
+        expect(onRow(find(leg), bike.y + BIKE_SADDLE.y - 1), `${step} ${leg}`).toEqual(expect.arrayContaining(saddle));
+        expect(onRow(find(leg), bike.y + BIKE_SADDLE.y - 2, "pants").length, `${step} ${leg}`).toBeGreaterThan(0);
+      }
+      // A hand right over the bars.
+      const hand = onRow(find("arm.reach"), bike.y + BIKE_BARS.y - 1, "skin");
+      expect(hand.length, `${step}`).toBeGreaterThan(0);
+      for (const x of hand) expect(bars, `${step}`).toContain(x);
+      // The torso joins the hips: the shirt's lowest row sits on the pants' top.
+      const body = find("body.rider");
+      expect(body.y + body.sprite.h, `${step}`).toBeGreaterThanOrEqual(find("cycle.legs.a").y);
     }
   });
 
@@ -422,7 +547,7 @@ describe("outdoorScene", () => {
     for (const step of steps) {
       const parts = outdoorScene(outing("cycle", step), "codex");
       const bike = parts.find((p) => p.name === "cycle.bike")!;
-      const head = parts.find((p) => p.name === "head.front")!;
+      const head = parts.find((p) => p.name === "head.side")!;
       expect(head.x, `${step}`).toBeGreaterThanOrEqual(bike.x);
       expect(head.x + head.sprite.w, `${step}`).toBeLessThanOrEqual(bike.x + bike.sprite.w);
     }

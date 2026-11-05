@@ -599,8 +599,24 @@ function bbq(kind: string, step: number): Placed[] {
   return parts;
 }
 
-/** Along the road on a bike, a step at a time, wheels and pedals turning,
- * towards the chequered flag; a spark once it is reached. */
+/** The rider from the side, over a bike whose top-left corner is at
+ * (x, y): torso leaning to the bars, the near arm on them, the head (and
+ * headwear) in profile, facing the way it rides. The legs are the caller's,
+ * as they pedal. */
+function riding(kind: string, x: number, y: number): Placed[] {
+  const head = { x: x + 10, y: y - 17 };
+  const parts = [
+    at("body.rider", O.BODY_RIDER, x + 3, y - 9),
+    at("arm.reach", O.ARM_REACH, x + 10, y - 8),
+    at("head.side", S.HEAD_SIDE, head.x, head.y),
+  ];
+  const wear = S.headwearOf(kind, "side");
+  if (wear) parts.push(at(`headwear.${kind}`, wear.sprite, head.x + wear.dx, head.y + wear.dy));
+  return parts;
+}
+
+/** Along the road on a bike, from the side, a step at a time, wheels and
+ * legs pedalling, towards the chequered flag; a spark once it is reached. */
 function cycle(kind: string, step: number): Placed[] {
   // The last step's bike (and front wheel) ends right at the pole, short of it.
   const x = 4 * step;
@@ -616,12 +632,15 @@ function cycle(kind: string, step: number): Placed[] {
     framed(at("cycle.wheel.back.b", O.WHEEL_B, wheelX(O.BIKE_HUBS.back), wheelY), 1, 2),
     framed(at("cycle.wheel.front.a", O.WHEEL_A, wheelX(O.BIKE_HUBS.front), wheelY), 0, 2),
     framed(at("cycle.wheel.front.b", O.WHEEL_B, wheelX(O.BIKE_HUBS.front), wheelY), 1, 2),
+    framed(at("cycle.legs.far.a", O.LEGS_RIDE_FAR_A, x + 3, bikeY - 3), 0, 2),
+    framed(at("cycle.legs.far.b", O.LEGS_RIDE_FAR_B, x + 3, bikeY - 3), 1, 2),
     at("cycle.bike", O.BIKE, x, bikeY),
-    framed(at("cycle.legs.a", O.LEGS_PEDAL_A, x + 7, bikeY), 0, 2),
-    framed(at("cycle.legs.b", O.LEGS_PEDAL_B, x + 7, bikeY), 1, 2),
-    ...standing(kind, x + 5, bikeY + 4, S.BODY_STANDING),
+    framed(at("cycle.legs.a", O.LEGS_RIDE_A, x + 3, bikeY - 3), 0, 2),
+    framed(at("cycle.legs.b", O.LEGS_RIDE_B, x + 3, bikeY - 3), 1, 2),
+    ...riding(kind, x, bikeY),
   ];
-  if (step === OUTING_STEPS - 1) parts.push(at("cycle.finish", O.SPARK, pole.x - 2, pole.y - 8));
+  // The spark over the flag, clear of the rider's face.
+  if (step === OUTING_STEPS - 1) parts.push(at("cycle.finish", O.SPARK, pole.x + 1, pole.y - 6));
   return parts;
 }
 

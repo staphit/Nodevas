@@ -311,6 +311,20 @@ export const HEAD_FRONT = sprite(`
   ...okko...
 `);
 
+/** The head from the side, facing right (the way a rider goes): hair at
+ * the back, an ear, the eye and nose at the front. */
+export const HEAD_SIDE = sprite(`
+  ..oooooo...
+  .ohhhhhho..
+  ohhhhhhhho.
+  ohhhhhkkko.
+  ohhkhkkeko.
+  ohhkhkkkkko
+  .ohhkkkkko.
+  ..ooookkko.
+  ...okko....
+`);
+
 /** Shoulders and back, seated; the shirt is the agent kind's colour. */
 export const BODY_SEATED = sprite(`
   ...oooooooooo...
@@ -478,6 +492,75 @@ const HALO: Headwear = {
   `),
 };
 
+// From the side (on HEAD_SIDE, facing right): the same things, so each
+// kind still reads by its shape.
+
+/** The beanie from the side: its pompom tipped back, the ribbed band over
+ * the brow, the eye left clear. */
+const BEANIE_SIDE: Headwear = {
+  dx: 0,
+  dy: -3,
+  sprite: sprite(`
+    ..oo.......
+    .owwo......
+    .owwooooo..
+    .oaaaaaaao.
+    oaaaaaaaaao
+    oaAaAaAaAao
+    oAAAAAAAAAo
+  `),
+};
+
+/** The headphones from the side: the band over the top, one cup on the
+ * ear. */
+const HEADPHONES_SIDE: Headwear = {
+  dx: 1,
+  dy: -1,
+  sprite: sprite(`
+    ..mmm.
+    .m....
+    .m....
+    .m....
+    oooo..
+    oaaao.
+    oaAao.
+    oaaao.
+    .ooo..
+  `),
+};
+
+/** The buns from the side: the near one, the far one peeking over it. */
+const BUNS_SIDE: Headwear = {
+  dx: 1,
+  dy: -4,
+  sprite: sprite(`
+    ....oo.
+    .ooohho
+    ohhohho
+    ohhoaa.
+    .aa....
+  `),
+};
+
+/** The hood from the side: over the top and the back of the head, open at
+ * the face. */
+const HOOD_SIDE: Headwear = {
+  dx: -1,
+  dy: -1,
+  sprite: sprite(`
+    ...oooooo...
+    ..oAAAAAAoo.
+    .oAAAAAAAAAo
+    oAAAAAAAAAAo
+    oAAAAAAo....
+    oAAAAAo.....
+    oAAAAAo.....
+    oAAAAAAo....
+    .oAAAAAo....
+    ..oooooo....
+  `),
+};
+
 const HEADWEAR: Record<string, Headwear> = {
   claude: BEANIE,
   codex: HEADPHONES,
@@ -486,9 +569,22 @@ const HEADWEAR: Record<string, Headwear> = {
   antigravity: HALO,
 };
 
-/** What an agent kind (agentColorKey) wears, seen from behind or the front;
- * null for a kind with nothing of its own. */
-export function headwearOf(kind: string, view: "back" | "front"): Headwear | null {
+/** Seen from the side; the halo floats the same from every side. */
+const HEADWEAR_SIDE: Record<string, Headwear> = {
+  claude: BEANIE_SIDE,
+  codex: HEADPHONES_SIDE,
+  gemini: BUNS_SIDE,
+  opencode: HOOD_SIDE,
+  antigravity: HALO,
+};
+
+/** The agent kinds with headwear of their own. */
+export const HEADWEAR_KINDS = Object.keys(HEADWEAR);
+
+/** What an agent kind (agentColorKey) wears, seen from behind, the front or
+ * the side; null for a kind with nothing of its own. */
+export function headwearOf(kind: string, view: "back" | "front" | "side"): Headwear | null {
+  if (view === "side") return HEADWEAR_SIDE[kind] ?? null;
   if (kind === "opencode" && view === "front") return HOOD_FRONT;
   return HEADWEAR[kind] ?? null;
 }
