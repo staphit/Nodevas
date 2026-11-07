@@ -1,0 +1,15 @@
+# Generated drawings, caches and checks stay local (a copy of the sources is
+# archived in H:/visual-editor/.local/agent-sprites/gemini-sources).
+keys/
+mv/
+sit/
+props/
+refs/
+q1/
+r1/
+r2/
+__pycache__/
+rig/*
+!rig/specs/
+*.json
+!rig/specs/*.json

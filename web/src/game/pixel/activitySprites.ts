@@ -50,6 +50,18 @@ export const PAGE_LINES_B = sprite(`
 `);
 /** The scroll bar's thumb, at PAGE's track (x 14). */
 export const SCROLL_THUMB = solid(1, 3, "bubble");
+/** The page, small, on the badge an anime figure has at a desk for its
+ * screen (warroom/deskArt.ts statusBadge, a face of BADGE_FACE): paper and
+ * its lines. */
+export const BADGE_PAGE = sprite(`
+  uuuuuuu
+  uiiiiuu
+  uuuuuuu
+  uiiiuuu
+  uuuuuuu
+  uiiiiiu
+  uuuuuuu
+`);
 
 // ---------- shell: a terminal, a prompt and its cursor ----------
 
@@ -82,6 +94,17 @@ export const SEARCH_RESULTS = sprite(`
   ................
   .CCCCC..........
   .cccccccc.......
+`);
+/** The search box over a result, small, for a desk's badge (BADGE_PAGE):
+ * not the magnifier, which is the review's. */
+export const BADGE_SEARCH = sprite(`
+  wwwwwwwww
+  w.iii.i.w
+  wwwwwwwww
+  .........
+  CCCCCC...
+  .........
+  ccccccc..
 `);
 
 // ---------- web: a globe turning ----------

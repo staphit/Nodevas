@@ -15,17 +15,35 @@ describe("characterOf", () => {
     ["opencode", "haiku-4-5", "claude"],
     ["gemini", "deepseek-r2", "whale"],
     ["claude", "gemini-3.8-flash-high", "star"],
+    // GPT: its name, OpenAI's, Codex's, or an o-series id as a word of its own.
+    ["codex", "gpt-5", "gpt"],
+    ["copilot", "gpt-5", "gpt"],
+    ["opencode", "gpt-x", "gpt"],
+    ["opencode", "openai/gpt-4.1-mini", "gpt"],
+    ["opencode", "OpenAI/whatever", "gpt"],
+    ["claude", "gpt-5-codex", "gpt"],
+    ["antigravity", "codex-mini-latest", "gpt"],
+    ["codex", "o3", "gpt"],
+    ["opencode", "o1", "gpt"],
+    ["opencode", "o4-mini", "gpt"],
+    ["opencode", "openrouter/o3-pro", "gpt"],
+    ["opencode", "O3", "gpt"],
+    // …but not "o" and a digit inside another word.
+    ["opencode", "neo3", "human"],
+    ["opencode", "pro4-turbo", "human"],
+    ["opencode", "o3x", "human"],
+    ["opencode", "kimi-k2-video4", "human"],
     // No model that says which: the agent kind.
     ["claude", "default", "claude"],
     ["Claude", "", "claude"],
     ["gemini", "default", "star"],
     ["GEMINI", "", "star"],
+    ["codex", "default", "gpt"],
+    ["Codex", "", "gpt"],
     // Everyone else is a person.
-    ["codex", "gpt-5", "human"],
-    ["codex", "default", "human"],
     ["opencode", "default", "human"],
     ["antigravity", "default", "human"],
-    ["copilot", "gpt-5", "human"],
+    ["copilot", "default", "human"],
     ["", "", "human"],
   ];
 
@@ -35,6 +53,7 @@ describe("characterOf", () => {
 
   it("lists every character once, the person first", () => {
     expect(CHARACTERS[0]).toBe("human");
+    expect(CHARACTERS).toContain("gpt");
     expect(new Set(CHARACTERS).size).toBe(CHARACTERS.length);
     for (const [agent, model, character] of CASES) expect(CHARACTERS, `${agent} ${model}`).toContain(character);
   });

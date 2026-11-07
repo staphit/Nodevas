@@ -130,6 +130,18 @@ export const EDITOR_FONT_SIZE = { min: 11, max: 22, fallback: 14 } as const;
 /** The interface's text size, as a multiple of the design size. */
 export const TEXT_SCALE = { min: 0.9, max: 1.5, fallback: 1, decimals: 2 } as const;
 
+/** How the war room draws its characters: the pixel-art sprites, or the
+ * anime figures pre-rendered into sheets (game/anime). A viewer's own pick,
+ * kept in this browser; nobody else's war room changes with it. */
+export const CHARACTER_STYLES = ["pixel", "anime"] as const;
+export type CharacterStyle = (typeof CHARACTER_STYLES)[number];
+
+/** The style of a viewer who has not picked one (or whose stored pick does
+ * not read): anime, now that the sheets draw every state. A character with
+ * no sheet yet (or a state its sheet lacks) stays pixel art all the same;
+ * pixel is a pick away. */
+export const DEFAULT_CHARACTER_STYLE: CharacterStyle = "anime";
+
 /** Traditional Chinese for a browser that prefers Chinese, else English. */
 function browserLanguage(): "en" | "zh-TW" {
   const preferred = typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]);
@@ -144,6 +156,12 @@ export const PREFERENCE_SCHEMA = {
   // The browser's language until the viewer picks one.
   language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, browserLanguage),
   textScale: numberPref("vised-text-scale", "appearance", TEXT_SCALE),
+  characterStyle: enumPref(
+    "vised-character-style",
+    "appearance",
+    CHARACTER_STYLES,
+    () => DEFAULT_CHARACTER_STYLE,
+  ),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),

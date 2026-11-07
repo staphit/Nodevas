@@ -297,6 +297,32 @@ export const QUESTION = sprite(`
   ..yy..
 `);
 
+// ---------- a desk's status badge (an anime figure's) ----------
+
+/** The face of the badge an anime figure has at a desk (its desk unit has a
+ * laptop, not the monitor): wide enough for ✓, tall enough for the screen's
+ * 7-row glyphs. */
+export const BADGE_FACE = { w: 9, h: 7 } as const;
+
+/** The screen's colours a badge's face takes, as LEGEND chars. */
+export type BadgeFace = "n" | "x" | "F" | "K";
+
+const plates = new Map<string, Sprite>();
+
+/** A badge's plate: a face of the screen's colour (n screen-on, x
+ * screen-off, F fail, K ok), w × h (BADGE_FACE at least), in an outline
+ * whose corners are cut, as a bubble's are. */
+export function badgePlate(face: BadgeFace, w: number = BADGE_FACE.w, h: number = BADGE_FACE.h): Sprite {
+  const key = `${face}${w}x${h}`;
+  let plate = plates.get(key);
+  if (!plate) {
+    const edge = `.${"o".repeat(w)}.`;
+    plate = sprite([edge, ...Array.from({ length: h }, () => `o${face.repeat(w)}o`), edge].join("\n"));
+    plates.set(key, plate);
+  }
+  return plate;
+}
+
 // ---------- the agent ----------
 
 /** The head from behind (10×9: hair, ears, neck). */

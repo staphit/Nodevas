@@ -4,7 +4,9 @@
 // done about it: a run's own controls (station/runMenuItems) plus the
 // question it asked, a held message to it and its PR; a session's targets
 // otherwise. The name tag under it is plain text, so it stays sharp at any
-// zoom.
+// zoom. How it is drawn, pixel art or its anime sheet, is the viewer's
+// character style, which each desk reads itself (useAnimeSheet): a change
+// redraws it whatever its memo says.
 
 import { memo, useMemo, type CSSProperties } from "react";
 
@@ -26,6 +28,8 @@ import {
   type Translate,
 } from "../labels";
 import type { Activity } from "../activity";
+import type { AnimeSheet } from "../anime/manifest";
+import { useAnimeSheet } from "../anime/sheets";
 import { characterOf, type CharacterId } from "../character";
 import type { Outing } from "../outing";
 import { OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
@@ -169,20 +173,25 @@ interface SceneOf {
   edge: AgentDeskProps["edge"];
   activity?: Activity;
   outing: Pick<Outing, "kind" | "step">;
+  anime?: AnimeSheet;
+  /** A role tag or a test lamp over the art's top-right corner. */
+  tagged: boolean;
+  /** The held messages' count over the envelope's corner (more than one). */
+  mailCount: boolean;
 }
 
-function sceneParts({ scene, pose, mail, kind, character, style, edge, activity, outing }: SceneOf) {
+function sceneParts({ scene, pose, mail, kind, character, style, edge, activity, outing, anime, tagged, mailCount }: SceneOf) {
   switch (scene) {
     case "door":
-      return doorScene(kind, { mail, character });
+      return doorScene(kind, { mail, character, anime });
     case "meeting":
-      return meetingScene(pose, kind, { mail, style, edge, activity, character });
+      return meetingScene(pose, kind, { mail, style, edge, activity, character, anime, tagged, mailCount });
     case "sofa":
-      return sofaScene(pose, kind, { character });
+      return sofaScene(pose, kind, { character, anime });
     case "outdoor":
-      return outdoorScene(outing, kind, { character });
+      return outdoorScene(outing, kind, { character, anime });
     default:
-      return deskScene(pose, kind, { mail, style, activity, character });
+      return deskScene(pose, kind, { mail, style, activity, character, anime, tagged, mailCount });
   }
 }
 
@@ -225,11 +234,14 @@ export const AgentDesk = memo(function AgentDesk({
   const { dispatch } = useGameActions();
   const kind = agentColorKey(actor.agent);
   const character = characterOf(actor.agent, actor.model);
+  const anime = useAnimeSheet(character);
   const mail = actor.heldMail.length > 0;
   const pose = actor.pose;
   const activity = actor.activity;
   const outingKind = actor.outing?.kind ?? NO_OUTING.kind;
   const outingStep = actor.outing?.step ?? NO_OUTING.step;
+  const tagged = Boolean(actor.role || actor.testState);
+  const mailCount = actor.heldMail.length > 1;
   const parts = useMemo(
     () =>
       sceneParts({
@@ -242,8 +254,11 @@ export const AgentDesk = memo(function AgentDesk({
         edge,
         activity,
         outing: { kind: outingKind, step: outingStep },
+        anime,
+        tagged,
+        mailCount,
       }),
-    [scene, pose, mail, kind, character, style, edge, activity, outingKind, outingStep],
+    [scene, pose, mail, kind, character, style, edge, activity, outingKind, outingStep, anime, tagged, mailCount],
   );
   const loop = sceneLoopMs(scene, pose, activity, { kind: outingKind });
   const who = agentWho(actor.agent, actor.model);

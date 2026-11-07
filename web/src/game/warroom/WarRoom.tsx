@@ -12,7 +12,10 @@
 // The drawing is inline SVG at whole art pixels (pixel/PixelSprite), coloured
 // by CSS tokens, so a theme switch costs nothing; animation is CSS steps()
 // over a few frames, off under reduced motion and in a background tab. A
-// heartbeat only redraws a desk whose agent changed (PixelDesk is memoised).
+// character whose pre-rendered anime sheet has the state (game/anime) is
+// drawn from it, stepped the same way, unless the viewer picks pixel
+// characters (game/characterStyle.ts). A heartbeat only redraws a desk whose
+// agent changed (PixelDesk is memoised).
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 

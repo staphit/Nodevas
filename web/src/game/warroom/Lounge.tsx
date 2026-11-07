@@ -9,6 +9,7 @@
 import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
+import { useAnimeSheet } from "../anime/sheets";
 import { characterOf } from "../character";
 import type { ControlRow } from "../../station/control";
 import { StationMenu } from "../../station/StationMenu";
@@ -52,7 +53,8 @@ const VisitorSpot = memo(function VisitorSpot({ visitor, labelOf }: { visitor: V
   const { dispatch } = useGameActions();
   const kind = agentColorKey(visitor.agent);
   const character = characterOf(visitor.agent, visitor.model);
-  const parts = useMemo(() => sofaScene(visitor.pose, kind, { character }), [visitor.pose, kind, character]);
+  const anime = useAnimeSheet(character);
+  const parts = useMemo(() => sofaScene(visitor.pose, kind, { character, anime }), [visitor.pose, kind, character, anime]);
   const loop = POSE_LOOP_MS[visitor.pose];
   const label = visitorLabel(t, visitor);
   return (

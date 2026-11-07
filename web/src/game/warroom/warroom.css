@@ -1431,15 +1431,38 @@
   100% { opacity: 0; }
 }
 
-/* A page in the background holds still; a dark rack does not move. */
+/* An anime figure (pixel/PixelSprite: an action's row of its sheet behind
+   the window of its frame): its frames step along the row, on the action's
+   own loop. Rendered art, so smooth, never pixelated; frame 0 whenever it
+   is not moving. */
+.px-anime-strip {
+  image-rendering: auto;
+}
+.px-office[data-motion="full"] .px-anime-strip.is-looping {
+  animation: px-anime var(--px-anime-loop, 800ms) steps(var(--px-anime-steps, 8), end) infinite;
+}
+@keyframes px-anime {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--px-anime-span, 0px)); }
+}
+/* In the night palette, a shade darker. */
+[data-theme="dark"] .px-office .px-anime {
+  filter: brightness(0.9);
+}
+
+/* A page in the background holds still (an anime figure on its frame 0); a
+   dark rack does not move. */
 .px-office[data-paused="true"] .px-f {
   animation-play-state: paused !important;
 }
-.is-lights-off .px-f {
+.px-office[data-paused="true"] .px-anime-strip {
+  animation: none !important;
+}
+.is-lights-off :is(.px-f, .px-anime-strip) {
   animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .px-office .px-f {
+  .px-office :is(.px-f, .px-anime-strip) {
     animation: none !important;
   }
   .px-desk:hover .px-art,

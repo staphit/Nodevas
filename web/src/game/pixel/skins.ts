@@ -219,6 +219,9 @@ const SKINS: Record<CharacterId, Skin> = {
   claude: claudeSkin,
   whale: whaleSkin,
   star: starSkin,
+  // GPT's own picture is its anime sheet (game/anime); in pixel art it is the
+  // person, in its kind's headwear, as it was before it had a character.
+  gpt: humanSkin,
 };
 
 /** A character's skin; the person for anything unknown. */

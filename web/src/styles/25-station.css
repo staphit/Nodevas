@@ -1126,6 +1126,50 @@
   color: var(--text-2);
 }
 
+/* Segmented buttons in a panel's head: the war room's character style, the
+   viewer's own, at the head's far end. */
+.station-seg {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.station-character-style {
+  margin-left: auto;
+}
+.station-seg-label {
+  padding: 0 6px 0 4px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+.station-seg button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.station-seg button:hover {
+  color: var(--text);
+}
+.station-seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.station-seg button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Control: the active count, the pause-all report and its dialog. */
 .station-control-count {
   min-width: 20px;

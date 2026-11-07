@@ -20,8 +20,9 @@ import {
   sofaScene,
 } from "../warroom/deskArt";
 import { POSES, type Pose } from "../world";
-import { OUTDOOR_H, OUTDOOR_W, TONGS_A, TONGS_B } from "./outdoorSprites";
+import { OUTDOOR_H, OUTDOOR_W, ROD, TONGS_A, TONGS_B } from "./outdoorSprites";
 import type { Placed, Point } from "./placed";
+import { humanSkin } from "./skinHuman";
 import { DESK_GESTURES, FRAMES_OF, skinOf, type DeskGesture, type Figure } from "./skins";
 import { CELL, HEADWEAR_KINDS } from "./sprites";
 
@@ -132,6 +133,7 @@ const NEEDED: Record<OutingKind, string[]> = {
  * block and the star are their own colours through and through. */
 const NOT_ITS_ARM: Record<CharacterId, string[]> = {
   human: [],
+  gpt: [],
   whale: ["agent", "agent-dark"],
   claude: ["agent", "agent-dark", "skin"],
   star: ["agent", "agent-dark", "skin"],
@@ -148,8 +150,14 @@ describe("the barbecue tongs", () => {
 
 describe("skinOf", () => {
   it("has a skin for every character, the person for none", () => {
-    for (const character of CHARACTERS) expect(skinOf(character).id).toBe(character);
+    for (const character of CHARACTERS) expect(skinOf(character).id).toBe(character === "gpt" ? "human" : character);
     expect(skinOf(undefined).id).toBe("human");
+  });
+
+  // GPT's own picture is its anime sheet; in pixel art it is the person,
+  // in its kind's headwear, exactly as before it had a character.
+  it("draws GPT as the person", () => {
+    expect(skinOf("gpt")).toBe(humanSkin);
   });
 });
 
@@ -308,6 +316,15 @@ describe.each(CHARACTERS)("the %s skin", (character) => {
         expectInside(miniDesk(pose, options), 16, 16, `mini ${pose}`);
       }
       expect(still(sofaScene("limit", "claude", options))).toEqual(expect.arrayContaining(["bubble.z1", "bubble.z2", "bubble.z3"]));
+    });
+
+    it("hangs the fishing line from the rod's tip at every step", () => {
+      for (const step of steps) {
+        const scene = outdoorScene({ kind: "fish", step }, "codex", options);
+        const rod = scene.find((part) => part.name === "fish.rod")!;
+        const line = scene.find((part) => part.name === "fish.line")!;
+        expect({ x: line.x, y: line.y }, `${step}`).toEqual({ x: rod.x + ROD.w - 1, y: rod.y + 2 });
+      }
     });
 
     it("draws every outing, at every step, inside its tile, its props there", () => {

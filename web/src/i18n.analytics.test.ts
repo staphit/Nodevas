@@ -67,6 +67,8 @@ const KEYS = [
   "game.actor.activity",
   ...each("game.outing", ["hike", "stream", "fish", "camp", "bbq", "cycle", "label", "labelSoon"]),
   ...each("game.outdoors", ["visitor", "empty", "more"]),
+  // War room: how this viewer draws the characters.
+  ...each("game.characterStyle", ["label", "hint", "pixel", "anime"]),
 ];
 
 // W-23: every new string exists in English and Traditional Chinese.

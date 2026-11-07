@@ -1,0 +1,14 @@
+{
+ "character": "deepseek", "base": "side_bike", "image": "sit/deepseek_bike_side.png",
+ "ground_y": 1115, "anchor_x": 478, "head_top": 70, "stand_height": 1092,
+ "joints": {"hip": [440, 770], "neck": [480, 420], "knee_n": [505, 855], "ankle_n": [465, 990],
+            "crank": [450, 980], "tail_root": [300, 720]},
+ "pedal_r": 68, "crank_rest": 68, "knee_bend": 1, "legs_over_body": true,
+ "parts": {
+  "leg_n": {"pos": [[470, 900], [480, 960], [460, 1020]], "neg": [[520, 790], [600, 900], [380, 960], [470, 1048]]},
+  "crank": {"pos": [[470, 1045]], "neg": [[480, 1010], [400, 960], [600, 960]]},
+  "tail": {"pos": [[100, 870], [200, 760], [60, 900]], "neg": [[300, 900], [350, 820], [250, 970]]},
+  "hair": {"pos": [[200, 500], [150, 600], [300, 300]], "neg": [[520, 320], [480, 520]]}
+ },
+ "hair_sway": {"y0": 420, "y1": 690}
+}

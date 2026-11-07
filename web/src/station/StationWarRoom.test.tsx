@@ -218,6 +218,43 @@ describe("StationWarRoom", () => {
     expect(within(text).getByText(/^Codex gpt-5 in desktop: reviewing, on “Add a test”\./)).toBeInTheDocument();
   });
 
+  it("lets the viewer pick how the characters are drawn, for them alone", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    mount();
+    await desk("Fix the login");
+    const group = screen.getByRole("group", { name: "Character style" });
+    expect(group).toHaveAccessibleDescription(
+      "Only how you see the war room, in this browser: everyone else keeps their own. Anime by default; a character with no anime art yet stays pixel.",
+    );
+    const pixel = within(group).getByRole("button", { name: "Pixel" });
+    const anime = within(group).getByRole("button", { name: "Anime" });
+    // Anime until the viewer picks.
+    expect(anime).toHaveAttribute("aria-pressed", "true");
+    expect(pixel).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(pixel);
+    expect(useApp.getState().preferences.characterStyle).toBe("pixel");
+    expect(localStorage.getItem("vised-character-style")).toBe("pixel");
+    expect(pixel).toHaveAttribute("aria-pressed", "true");
+    expect(anime).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(anime);
+    expect(useApp.getState().preferences.characterStyle).toBe("anime");
+    expect(localStorage.getItem("vised-character-style")).toBe("anime");
+  });
+
+  it("names the character styles in Traditional Chinese", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    mount();
+    const group = screen.getByRole("group", { name: "角色風格" });
+    expect(within(group).getAllByRole("button").map((button) => button.textContent)).toEqual(["像素", "動漫"]);
+    expect(group).toHaveAccessibleDescription(
+      "只改變你在這個瀏覽器看到的戰情室，其他人看到的不受影響。預設為動漫；還沒有動漫圖的角色仍以像素顯示。",
+    );
+    expect(within(group).getByRole("button", { name: "動漫" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("opens a run's actions from its character", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
