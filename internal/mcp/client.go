@@ -142,6 +142,9 @@ type Client struct {
 	// claimedNode is the node the server last said this session holds a live
 	// claim on (W6); "" for none or before the first heartbeat.
 	claimedNode string
+	// noTool is set once the server refused a heartbeat's "tool" field (a hub
+	// from before tools were reported): later heartbeats leave it out.
+	noTool bool
 	// names remembers the server-given name of every session ID this process
 	// has acted as, so switching between them never renames one.
 	names map[string]string

@@ -1,11 +1,21 @@
 // The building as plain text, for a screen reader: each office and room,
-// who is in it doing what, what lies on the meeting table, the racks. The
+// who is in it doing what, what lies on the meeting table, who is out of the
+// office on a usage limit, the racks. The
 // drawing's buttons are the controls; this only says what is there.
 
 import { useMemo } from "react";
 
 import { formatList, useI18n } from "../../i18n";
-import { actorLabel, agentWho, areaName, compactLabel, itemLabel, placeOf, rackLabel } from "../labels";
+import {
+  actorLabel,
+  agentWho,
+  areaName,
+  compactLabel,
+  itemLabel,
+  outdoorVisitorLabel,
+  placeOf,
+  rackLabel,
+} from "../labels";
 import type { Actor, Area, Building } from "../world";
 import { drawnInLounge, visitorLabel } from "./Lounge";
 
@@ -67,6 +77,16 @@ export function BuildingText({ building }: { building: Building }) {
         )}
         {building.lounge.length === 0 && <li>{t("game.lounge.empty")}</li>}
         {building.loungeMore > 0 && <li>{t("game.lounge.more", { count: building.loungeMore })}</li>}
+      </ul>
+      <h3>{areaName(t, "outdoors")}</h3>
+      <ul>
+        {building.outdoors.map((spot) => {
+          if (spot.visitor) return <li key={spot.id}>{outdoorVisitorLabel(t, spot.visitor)}</li>;
+          const actor = spot.actorId ? actorsById.get(spot.actorId) : undefined;
+          return actor ? say(actor) : null;
+        })}
+        {building.outdoors.length === 0 && <li>{t("game.outdoors.empty")}</li>}
+        {building.outdoorsMore > 0 && <li>{t("game.outdoors.more", { count: building.outdoorsMore })}</li>}
       </ul>
       <h3>{t("game.area.serverRoom")}</h3>
       <ul>

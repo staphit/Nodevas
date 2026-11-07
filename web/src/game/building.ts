@@ -4,7 +4,8 @@
 // a glance through its door: who is at a desk, how much waits on the viewer
 // there. Idle projects and the overflow past MAX_COMPACT are door signs only,
 // so a workspace of many projects stays one screen. Agents with nothing to do
-// share a lounge; the runners stand as racks in a server room.
+// share a lounge, agents waiting on a usage limit are out of the office
+// together (outdoors); the runners stand as racks in a server room.
 
 import type { BuildingProject, BuildingResponse, BuildingRun } from "../api/station";
 import type { Runner } from "../api/runners";
@@ -15,6 +16,7 @@ import type { WorldInputs } from "./buildWorld";
 import { nodeTitles } from "./buildWorld";
 import { buildCurrentOffice, holdsSlot } from "./office";
 import { resolveOfficeStyle } from "./officeStyle";
+import { outingOf } from "./outing";
 import { sessionOnline } from "./presence";
 import type {
   Building,
@@ -23,6 +25,7 @@ import type {
   Energy,
   LoungeSpot,
   MiniDesk,
+  OutdoorSpot,
   Pose,
   Rack,
 } from "./world";
@@ -31,6 +34,8 @@ import type {
 export const MAX_COMPACT = 8;
 /** Seats in the lounge before "+N". */
 export const MAX_LOUNGE = 10;
+/** Agents drawn outdoors before "+N". */
+export const MAX_OUTDOORS = 8;
 /** Desks a compact office draws. */
 export const MINI_DESKS = 3;
 /** A compact office's menu: its runs, then what waits on the viewer there. */
@@ -88,14 +93,25 @@ export function compactOffice(p: BuildingProject, now: number): CompactOffice {
   );
 
   const desks: MiniDesk[] = [
-    ...running.map((run) => ({ agent: run.agent, pose: runPoseOf(run, askingRuns.has(run.id)), title: run.title })),
+    ...running.map((run) => ({
+      agent: run.agent,
+      model: run.model,
+      pose: runPoseOf(run, askingRuns.has(run.id)),
+      title: run.title,
+    })),
     ...busySessions.map((session) => ({
       agent: session.agent,
+      model: session.model,
       pose: (p.asks.some((ask) => ask.sessionId === session.id) ? "asking-user" : "working") as Pose,
       title: session.doing || session.name,
     })),
-    ...planning.map((run) => ({ agent: run.agent, pose: runPoseOf(run, askingRuns.has(run.id)), title: run.title })),
-    ...waitingAtDoor.map((run) => ({ agent: run.agent, pose: "awaiting-accept" as Pose, title: run.title })),
+    ...planning.map((run) => ({
+      agent: run.agent,
+      model: run.model,
+      pose: runPoseOf(run, askingRuns.has(run.id)),
+      title: run.title,
+    })),
+    ...waitingAtDoor.map((run) => ({ agent: run.agent, model: run.model, pose: "awaiting-accept" as Pose, title: run.title })),
   ];
 
   const runWaiting = waitingOnYou<BuildingRun>({
@@ -207,7 +223,7 @@ export function racksFor(runners: Runner[], runs: RackRun[]): Rack[] {
 }
 
 /** Other projects' agents with nothing to do: connected sessions idling with
- * no node, and runs asleep until their agent's usage limit resets. The
+ * no node. Runs waiting on a usage limit are outdoors (outdoorVisitors). The
  * current project's own come from its office instead. */
 export function loungeVisitors(remote: BuildingResponse | null, activeProject: string, now: number): LoungeSpot[] {
   const spots: LoungeSpot[] = [];
@@ -233,8 +249,23 @@ export function loungeVisitors(remote: BuildingResponse | null, activeProject: s
         },
       });
     }
+  }
+  return spots;
+}
+
+/** Other projects' runs waiting on their agent's usage limit, each on its
+ * outing (outing.ts). The current project's own come from its office. */
+export function outdoorVisitors(remote: BuildingResponse | null, activeProject: string, now: number): OutdoorSpot[] {
+  const spots: OutdoorSpot[] = [];
+  for (const p of remote?.projects ?? []) {
+    if (p.name === activeProject) continue;
+    const label = p.label || p.name;
+    const go: ClickTarget = { kind: "project", project: p.name };
     for (const run of p.runs) {
-      if (!sleeping(run)) continue;
+      // A plan run waits in its meeting room (areaOf), wherever it is seen.
+      if (run.kind === "plan" || !sleeping(run)) continue;
+      const outing = outingOf(run, now);
+      if (!outing) continue;
       const target = inProject(p.name, { kind: "run", runId: run.id, nodeId: run.nodeId });
       spots.push({
         id: `visitor:${p.name}:run:${run.id}`,
@@ -243,8 +274,8 @@ export function loungeVisitors(remote: BuildingResponse | null, activeProject: s
           label,
           agent: run.agent,
           model: run.model,
-          pose: "limit",
           title: run.title,
+          outing,
           target,
           actions: [target, go],
         },
@@ -300,12 +331,19 @@ export function buildBuilding(inputs: BuildingInputs): Building {
     ...loungeVisitors(remote, activeProject, now),
   ];
 
+  const outdoors: OutdoorSpot[] = [
+    ...(current?.outdoorIds ?? []).map((actorId) => ({ id: actorId, actorId })),
+    ...outdoorVisitors(remote, activeProject, now),
+  ];
+
   return {
     current: current?.office ?? null,
     others: busy.slice(0, MAX_COMPACT),
     doorSigns: [...busy.slice(MAX_COMPACT), ...idle],
     lounge: lounge.slice(0, MAX_LOUNGE),
     loungeMore: Math.max(0, lounge.length - MAX_LOUNGE),
+    outdoors: outdoors.slice(0, MAX_OUTDOORS),
+    outdoorsMore: Math.max(0, outdoors.length - MAX_OUTDOORS),
     racks,
     actors: current?.actors ?? [],
     energy,

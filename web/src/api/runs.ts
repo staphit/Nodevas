@@ -175,6 +175,12 @@ export interface Run {
   costEstimated?: boolean;
   nodeType?: string;
   acceptanceCount?: number;
+  /** The last tool the run's agent called (its raw name, e.g. "Read",
+   * "apply_patch", "mcp__fs__read_file"), or "thinking" for a thinking
+   * event, and when (RFC 3339): what its desk shows it doing
+   * (game/activity.ts). Absent from an older hub, or before any. */
+  lastTool?: string;
+  lastToolAt?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;

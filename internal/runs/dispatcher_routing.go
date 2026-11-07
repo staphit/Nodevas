@@ -34,7 +34,7 @@ func (d *Dispatcher) note(ctx context.Context, r Record, text string) {
 		slog.Warn("runs: note", slog.String("run", r.ID), slog.Any("error", err))
 		return
 	}
-	d.notifyEvents(r)
+	d.notifyEvents(r, ToolSeen{})
 }
 
 // afterEnd runs once per run reaching an end state, whichever way it got

@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BuildingProject, BuildingResponse } from "../../api/station";
+import animeFixture from "../anime/fixture.json";
+import { parseManifest, toSheet } from "../anime/manifest";
+import { resetAnimeSheets } from "../anime/sheets";
 import { readPreferences } from "../../preferences";
 import type { ControlRow } from "../../station/control";
 import { useApp } from "../../store";
@@ -148,7 +151,7 @@ describe("the current office", () => {
         runs: [
           run("a", "login", { status: "running" }),
           run("b", "schema", { status: "failed", finishedAt: ago(1_000) }),
-          run("c", "docs", { status: "queued", retryAt: ago(-60_000) }),
+          run("c", "docs", { status: "queued", retryAt: ago(-60_000), agent: "codex", model: "gpt-5" }),
           run("d", "x1", { status: "succeeded", finishedAt: ago(1_000) }),
         ],
       }),
@@ -159,11 +162,111 @@ describe("the current office", () => {
     expect(desk("failed").querySelector('[data-part="screen.fail.glyph"]')).not.toBeNull();
     expect(desk("finished").querySelector('[data-part="screen.ok.glyph"]')).not.toBeNull();
     expect(desk("finished").querySelector(".px-sprite")).not.toHaveClass("px-anim");
-    // Asleep on a usage limit: on the lounge's sofa, zzz.
-    const lounge = screen.getByRole("region", { name: "Lounge" });
-    const asleep = within(lounge).getByRole("button", { name: /asleep until its usage limit resets/ });
-    expect(asleep.querySelector('[data-part="bubble.sleep"]')).not.toBeNull();
+    // Waiting out a usage limit: out of the office, on an outing.
+    const outdoors = screen.getByRole("region", { name: "Outdoors" });
+    const out = within(outdoors).getByRole("button", { name: /waiting for its usage limit to reset.*back in about 1 min/ });
+    expect(out.querySelector('[data-part$=".backdrop"]')).not.toBeNull();
+    expect(out.querySelector('[data-part="head.front"]')).not.toBeNull();
+    expect(out.querySelector(".px-sprite")).toHaveClass("px-anim");
+    expect(within(screen.getByRole("region", { name: "Lounge" })).queryByRole("button", { name: /usage limit/ })).toBeNull();
     expect(within(desk("working") as HTMLElement).getByText("Login form")).toBeInTheDocument();
+  });
+
+  it("draws what a working agent is doing on its screen, on that activity's loop", () => {
+    const world = building({ runs: [makeRun({ id: "w1", nodeId: "login", status: "running" })] });
+    world.actors[0].activity = "shell";
+    const { container } = mount(world);
+    const desk = container.querySelector(".px-desk.pose-working")!;
+    expect(desk.querySelector('[data-part="screen.shell.prompt"]')).not.toBeNull();
+    expect(desk.querySelector('[data-part="screen.code.lines"]')).toBeNull();
+    const sprite = desk.querySelector<SVGElement>(".px-sprite")!;
+    expect(sprite).toHaveClass("px-anim");
+    expect(sprite.style.getPropertyValue("--px-loop")).toBe("1000ms");
+  });
+
+  it("takes the outing's step and kind from the world, for this project's agent and a visitor", () => {
+    const world = building({ runs: [makeRun({ id: "w1", nodeId: "login", status: "running" })] });
+    const actor = world.actors[0];
+    const outing = { kind: "fish" as const, step: 6, returnsAt: new Date(NOW + 600_000).toISOString(), minutesLeft: 10 };
+    world.actors[0] = { ...actor, pose: "limit", area: "outdoors", outing };
+    world.current = { ...world.current!, work: [] };
+    const target = { kind: "project" as const, project: "app" };
+    world.outdoors = [
+      { id: actor.id, actorId: actor.id },
+      {
+        id: "visitor:app:run:x1",
+        visitor: {
+          project: "app",
+          label: "App",
+          agent: "codex",
+          model: "gpt-5",
+          title: "Search",
+          outing: { ...outing, kind: "hike", step: 7 },
+          target,
+          actions: [target],
+        },
+      },
+    ];
+    world.outdoorsMore = 2;
+    mount(world);
+    const outdoors = screen.getByRole("region", { name: "Outdoors" });
+    const [own, visitor] = within(outdoors).getAllByRole("button");
+    expect(own.querySelector('[data-part="fish.rod"]')).not.toBeNull();
+    expect(own.querySelector('[data-part="fish.bite"]')).not.toBeNull();
+    expect(own).toHaveClass("agent--claude");
+    expect(visitor).toHaveAccessibleName(/Codex gpt-5 from App: Out hiking, back in about 10 min\./);
+    expect(visitor.querySelector('[data-part="hike.summit"]')).not.toBeNull();
+    expect(within(visitor).getByText("App")).toBeInTheDocument();
+    expect(within(outdoors).getByText("2 more out of the office.")).toBeInTheDocument();
+  });
+
+  it("draws each agent as its model's character, wherever it is", () => {
+    const run = (id: string, agent: string, model: string, over: Parameters<typeof makeRun>[0] = {}) =>
+      makeRun({ id, nodeId: id, agent, model, status: "running", ...over });
+    const world = building({
+      runners: [runner("rn1", "mac-mini", 6)],
+      runs: [
+        run("c1", "claude", "opus"),
+        run("w1", "opencode", "deepseek-v4.1-flash-free"),
+        run("s1", "antigravity", "gemini-4-argon"),
+        run("h1", "codex", "gpt-5"),
+        run("o1", "antigravity", "claude-opus-5-5", { status: "queued", retryAt: ago(-60_000) }),
+      ],
+      remote: remoteOf(
+        project("app", {
+          runs: [
+            { id: "x1", nodeId: "n", title: "Search", agent: "opencode", model: "deepseek-v4", kind: "", status: "running", runnerId: "rn1", runnerName: "mac-mini", createdAt: ago(1_000) },
+          ],
+        }),
+      ),
+    });
+    const { container } = mount(world);
+    const office = screen.getByRole("region", { name: "Office Main" });
+    const character = (name: RegExp) => [...within(office).getByRole("button", { name }).classList].find((c) => c.startsWith("char--"));
+    expect(character(/Claude opus/)).toBe("char--claude");
+    expect(character(/OpenCode deepseek/)).toBe("char--whale");
+    expect(character(/Antigravity gemini/)).toBe("char--star");
+    expect(character(/Codex gpt-5/)).toBe("char--gpt");
+    // GPT in pixel art is the person, in Codex's headwear, as it always was.
+    const gpt = within(office).getByRole("button", { name: /Codex gpt-5/ });
+    expect(gpt.querySelector('[data-part="head.back"]')).not.toBeNull();
+    expect(gpt.querySelector('[data-part="headwear.codex"]')).not.toBeNull();
+    // Out on an outing too, and at a small desk in another office.
+    const out = within(screen.getByRole("region", { name: "Outdoors" })).getByRole("button");
+    expect(out).toHaveClass("char--claude");
+    expect(container.querySelector(".px-mini")).toHaveClass("char--whale");
+  });
+
+  it("redraws a desk when its agent's model changes who it is", () => {
+    const world = building({ runs: [makeRun({ id: "r1", status: "running" })] });
+    const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, model: "deepseek-v4" } })).toBe(false);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, agent: "gemini" } })).toBe(false);
+  });
+
+  it("draws no outdoors while nobody is out", () => {
+    mount(building({ runs: [makeRun({ id: "w1", status: "running" })] }));
+    expect(screen.queryByRole("region", { name: "Outdoors" })).not.toBeInTheDocument();
   });
 
   it("lays what waits on the viewer on the meeting table, each a menu", () => {
@@ -319,6 +422,7 @@ describe("the building", () => {
       "Entrance",
       "Other offices",
       "Lounge",
+      "Outdoors",
       "Server room",
     ]);
     expect(within(text).getByText(/in mac-mini: working, on “Login form”\./)).toBeInTheDocument();
@@ -420,5 +524,162 @@ describe("role badges", () => {
     const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, role: "tester" } })).toBe(false);
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, testState: "red" } })).toBe(false);
+  });
+
+  it("redraws a desk when its activity or its outing's step changes", () => {
+    const world = building({ runs: [makeRun({ id: "r1", status: "running" })] });
+    const actor = { ...world.actors[0], activity: "read" as const };
+    const before = { actor, scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor } })).toBe(true);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, activity: "shell" } })).toBe(false);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, activity: undefined } })).toBe(false);
+    const outing = { kind: "camp" as const, step: 2, returnsAt: "", minutesLeft: 9 };
+    const out = { ...before, scene: "outdoor" as const, actor: { ...before.actor, outing } };
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing } } })).toBe(true);
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing, step: 3 } } })).toBe(false);
+    expect(PixelDesk.sameDesk(out, { ...out, actor: { ...out.actor, outing: { ...outing, kind: "hike" } } })).toBe(false);
+  });
+});
+
+describe("the character style", () => {
+  const SHEET = toSheet("gpt", parseManifest(animeFixture)!, "/sheets/fixture.webp");
+  const pick = (style: "pixel" | "anime") => act(() => useApp.getState().updateUIPreference("characterStyle", style));
+
+  beforeEach(() => {
+    // Stored, not just in the store: a stored pick reloads every preference.
+    useApp.getState().updateUIPreference("agentWorkstation", true);
+  });
+
+  afterEach(() => {
+    resetAnimeSheets();
+  });
+
+  it("draws characters from their sheets by default, in pixel art once the viewer picks it, and back", () => {
+    resetAnimeSheets({ sheets: [SHEET] });
+    const world = building({
+      runs: [
+        makeRun({ id: "h1", nodeId: "login", agent: "codex", model: "gpt-5", status: "running" }),
+        makeRun({ id: "c1", nodeId: "schema", status: "running" }),
+      ],
+    });
+    for (const actor of world.actors) actor.activity = "edit";
+    const { container } = mount(world);
+    const gpt = () => container.querySelector(".px-desk.char--gpt")!;
+    const claude = () => container.querySelector(".px-desk.char--claude")!;
+    // Its sheet's desk unit, a badge for the screen it no longer has.
+    const anime = () => {
+      expect(gpt().querySelector('[data-part="anime.desk-type"] image')).toHaveAttribute("href", "/sheets/fixture.webp");
+      expect(gpt().querySelector('[data-part="badge.code"]')).not.toBeNull();
+      for (const part of ["head.back", "chair", "monitor", "desk", "screen.code.lines"]) {
+        expect(gpt().querySelector(`[data-part="${part}"]`), part).toBeNull();
+      }
+    };
+    anime();
+    // Claude's sheet is not there: Claude stays pixel art, never an empty desk.
+    expect(claude().querySelector("image")).toBeNull();
+    expect(claude().querySelector('[data-part^="clawd."]')).not.toBeNull();
+    expect(claude().querySelector('[data-part="screen.code.lines"]')).not.toBeNull();
+    // The desk is memoised and none of its props changed: the style alone redraws it.
+    pick("pixel");
+    expect(gpt().querySelector("image")).toBeNull();
+    expect(gpt().querySelector('[data-part^="badge."]')).toBeNull();
+    for (const part of ["head.back", "chair", "monitor", "screen.code.lines"]) {
+      expect(gpt().querySelector(`[data-part="${part}"]`), part).not.toBeNull();
+    }
+    pick("anime");
+    anime();
+  });
+
+  it("hangs a desk's badge clear of its run's role tag", () => {
+    resetAnimeSheets({ sheets: [SHEET] });
+    const world = building({
+      // A run has a role (a legacy one its kind's), a session none.
+      runs: [makeRun({ id: "g1", nodeId: "login", agent: "codex", model: "gpt-5", status: "running" })],
+      sessions: [makeSession({ id: "s1", name: "laptop", nodeId: "docs", agent: "codex", state: "busy" })],
+    });
+    const { container } = mount(world);
+    const desks = Array.from(container.querySelectorAll(".px-desk.char--gpt"));
+    expect(desks).toHaveLength(2);
+    const tagged = desks.find((desk) => desk.querySelector(".px-badge.is-role"))!;
+    const plain = desks.find((desk) => !desk.querySelector(".px-badge.is-role"))!;
+    // Off the head's top-right, the cell's corner; off its top-left under a role tag.
+    expect(plain.querySelector('[data-part="badge.code"]')).toHaveAttribute("transform", "translate(21 0)");
+    expect(tagged.querySelector('[data-part="badge.code"]')).not.toBeNull();
+    expect(tagged.querySelector('[data-part="badge.code"]')).not.toHaveAttribute("transform");
+  });
+
+  it("hangs a desk's badge clear of its held messages' count too, under the envelope", () => {
+    resetAnimeSheets({ sheets: [SHEET] });
+    const run = makeRun({ id: "g1", nodeId: "login", agent: "codex", model: "gpt-5", status: "running" });
+    const session = makeSession({ id: "s1", name: "app-codex-g1", agent: "codex", run: true, runId: "g1", nodeId: "login" });
+    const held = (count: number) =>
+      Array.from({ length: count }, (_, i) => makeMessage({ id: `m${i}`, to: "app-codex-g1", status: "held" }));
+    const badgeOf = (count: number) => {
+      const { container, unmount } = mount(building({ runs: [run], sessions: [session], held: held(count) }));
+      const desk = container.querySelector(".px-desk.char--gpt")!;
+      const shown = {
+        role: desk.querySelector(".px-badge.is-role") !== null,
+        count: desk.querySelector(".px-badge.is-mail")?.textContent ?? null,
+        badge: desk.querySelector('[data-part="badge.code"]')?.getAttribute("transform") ?? "at 0 0",
+      };
+      unmount();
+      return shown;
+    };
+    // One message: no count, the badge off the head's top-left (the role tag
+    // has the top-right). Two: their count there, the badge under the envelope.
+    expect(badgeOf(1)).toEqual({ role: true, count: null, badge: "at 0 0" });
+    expect(badgeOf(2)).toEqual({ role: true, count: "2", badge: "translate(0 15)" });
+  });
+
+  it("draws an outing and a visitor's outing from the sheet, the bike its own", () => {
+    resetAnimeSheets({ sheets: [SHEET] });
+    const world = building({ runs: [makeRun({ id: "w1", nodeId: "login", agent: "codex", model: "o3", status: "running" })] });
+    const actor = world.actors[0];
+    const outing = { kind: "cycle" as const, step: 3, returnsAt: new Date(NOW + 600_000).toISOString(), minutesLeft: 10 };
+    world.actors[0] = { ...actor, pose: "limit", area: "outdoors", outing };
+    world.current = { ...world.current!, work: [] };
+    const target = { kind: "project" as const, project: "app" };
+    world.outdoors = [
+      { id: actor.id, actorId: actor.id },
+      {
+        id: "visitor:app:run:x1",
+        visitor: {
+          project: "app",
+          label: "App",
+          agent: "opencode",
+          model: "openai/gpt-5",
+          title: "Search",
+          outing: { ...outing, kind: "hike", step: 2 },
+          target,
+          actions: [target],
+        },
+      },
+    ];
+    mount(world);
+    const [own, visitor] = within(screen.getByRole("region", { name: "Outdoors" })).getAllByRole("button");
+    expect(own.querySelector('[data-part="anime.cycle-ride"] image')).not.toBeNull();
+    expect(own.querySelector('[data-part="cycle.bike"]')).toBeNull();
+    expect(own.querySelector('[data-part="cycle.flag"]')).not.toBeNull();
+    expect(visitor.querySelector('[data-part="anime.hike-walk"] image')).not.toBeNull();
+    expect(visitor.querySelector('[data-part="hike.pack"]')).toBeNull();
+  });
+
+  it("keeps the person, and anything at another office's small desk, in pixel art", () => {
+    resetAnimeSheets({ sheets: [SHEET] });
+    const { container } = mount(
+      building({
+        runs: [makeRun({ id: "p1", nodeId: "login", agent: "opencode", model: "default", status: "running" })],
+        remote: remoteOf(
+          project("app", {
+            runs: [
+              { id: "x1", nodeId: "n", title: "Search", agent: "codex", model: "gpt-5", kind: "", status: "running", runnerId: "rn1", runnerName: "mac-mini", createdAt: ago(1_000) },
+            ],
+          }),
+        ),
+      }),
+    );
+    expect(container.querySelector(".px-desk.char--human [data-part='head.back']")).not.toBeNull();
+    expect(container.querySelector(".px-mini.char--gpt")).not.toBeNull();
+    expect(container.querySelector("image")).toBeNull();
   });
 });

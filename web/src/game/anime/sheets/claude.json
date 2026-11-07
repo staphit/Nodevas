@@ -1,0 +1,348 @@
+{
+ "actions": {
+  "door-idle": {
+   "row": 0,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 69,
+    "y": 24,
+    "w": 59,
+    "h": 60
+   },
+   "props": []
+  },
+  "hike-summit": {
+   "row": 1,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 62,
+    "y": 24,
+    "w": 69,
+    "h": 59
+   },
+   "props": []
+  },
+  "hike-walk": {
+   "row": 2,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 66,
+    "y": 22,
+    "w": 52,
+    "h": 60
+   },
+   "props": [
+    "pack"
+   ]
+  },
+  "stream-wade": {
+   "row": 3,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 66,
+    "y": 23,
+    "w": 52,
+    "h": 60
+   },
+   "props": [
+    "pole"
+   ]
+  },
+  "bbq-grill": {
+   "row": 4,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 66,
+    "y": 23,
+    "w": 52,
+    "h": 60
+   },
+   "props": [
+    "tongs"
+   ]
+  },
+  "desk-rest": {
+   "row": 5,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 59,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-type": {
+   "row": 6,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 59,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-chin": {
+   "row": 7,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 60,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-mouse": {
+   "row": 8,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 59,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-ask": {
+   "row": 9,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 68,
+    "y": 23,
+    "w": 60,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-cheer": {
+   "row": 10,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 55,
+    "y": 23,
+    "w": 81,
+    "h": 60
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-slump": {
+   "row": 11,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 67,
+    "y": 27,
+    "w": 61,
+    "h": 59
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-sleep": {
+   "row": 12,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 66,
+    "y": 30,
+    "w": 63,
+    "h": 58
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "sofa-sit": {
+   "row": 13,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 128
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 59,
+    "h": 60
+   },
+   "props": []
+  },
+  "sofa-sleep": {
+   "row": 14,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 128
+   },
+   "head": {
+    "x": 66,
+    "y": 27,
+    "w": 62,
+    "h": 58
+   },
+   "props": []
+  },
+  "camp-sit": {
+   "row": 15,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 128
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 60,
+    "h": 60
+   },
+   "props": []
+  },
+  "fish-sit": {
+   "row": 16,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 128
+   },
+   "head": {
+    "x": 69,
+    "y": 23,
+    "w": 59,
+    "h": 60
+   },
+   "props": [
+    "rod"
+   ],
+   "tips": {
+    "rod": {
+     "x": 186,
+     "y": 36
+    }
+   }
+  },
+  "cycle-ride": {
+   "row": 17,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 50,
+    "y": 27,
+    "w": 63,
+    "h": 58
+   },
+   "props": [
+    "bike"
+   ]
+  }
+ },
+ "image": "claude.webp",
+ "frameW": 192,
+ "frameH": 192,
+ "scale": 6,
+ "style": "anime",
+ "character": "claude"
+}

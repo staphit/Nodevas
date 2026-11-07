@@ -85,6 +85,11 @@ export type WSEvent = {
   /** run-events: "ask" when one of the run's asks started waiting or ended
    * (refetch its asks, not its events). */
   kind?: string;
+  /** run-events: the last tool_call (its tool's name) or thinking event
+   * ("thinking") in the batch the hub stored, and its time (RFC 3339);
+   * absent when the batch had neither, or from an older hub. */
+  tool?: string;
+  toolAt?: string;
   /** autopilot-changed: the goal node the autopilot run belongs to. */
   goalNodeId?: string;
   peers?: Peer[];

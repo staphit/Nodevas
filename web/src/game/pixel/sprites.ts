@@ -54,6 +54,41 @@ export const LEGEND: Legend = {
   j: "led-on",
   J: "led-off",
   u: "paper",
+  // The outdoors (outdoorSprites.ts).
+  "-": "sky",
+  M: "mountain",
+  N: "mountain-dark",
+  "*": "snow",
+  ",": "grass",
+  ";": "grass-dark",
+  ":": "trail",
+  "~": "water",
+  "=": "water-light",
+  O: "rock",
+  "@": "rock-dark",
+  "^": "fire",
+  "!": "fire-light",
+  t: "tent",
+  E: "tent-dark",
+  U: "sun",
+  l: "wood",
+  V: "backpack",
+  "&": "meat",
+  "#": "meat-cooked",
+  // The characters' own colours (pixel/skins.ts), each skin's chars its own:
+  // claude 5 6 7, whale 8 9 0 +, star I X Z %.
+  "8": "whale-hair",
+  "9": "whale-hair-light",
+  "0": "whale-dress",
+  "+": "whale-fin",
+  "5": "clawd",
+  "6": "clawd-dark",
+  "7": "clawd-light",
+  I: "gem-blue",
+  X: "gem-red",
+  Z: "gem-yellow",
+  "%": "gem-green",
+  "»": "gem-limb",
 };
 
 export const sprite = (grid: string) => compileSprite(grid, LEGEND);
@@ -262,6 +297,32 @@ export const QUESTION = sprite(`
   ..yy..
 `);
 
+// ---------- a desk's status badge (an anime figure's) ----------
+
+/** The face of the badge an anime figure has at a desk (its desk unit has a
+ * laptop, not the monitor): wide enough for ✓, tall enough for the screen's
+ * 7-row glyphs. */
+export const BADGE_FACE = { w: 9, h: 7 } as const;
+
+/** The screen's colours a badge's face takes, as LEGEND chars. */
+export type BadgeFace = "n" | "x" | "F" | "K";
+
+const plates = new Map<string, Sprite>();
+
+/** A badge's plate: a face of the screen's colour (n screen-on, x
+ * screen-off, F fail, K ok), w × h (BADGE_FACE at least), in an outline
+ * whose corners are cut, as a bubble's are. */
+export function badgePlate(face: BadgeFace, w: number = BADGE_FACE.w, h: number = BADGE_FACE.h): Sprite {
+  const key = `${face}${w}x${h}`;
+  let plate = plates.get(key);
+  if (!plate) {
+    const edge = `.${"o".repeat(w)}.`;
+    plate = sprite([edge, ...Array.from({ length: h }, () => `o${face.repeat(w)}o`), edge].join("\n"));
+    plates.set(key, plate);
+  }
+  return plate;
+}
+
 // ---------- the agent ----------
 
 /** The head from behind (10×9: hair, ears, neck). */
@@ -288,6 +349,20 @@ export const HEAD_FRONT = sprite(`
   .okkkkkko.
   ..oooooo..
   ...okko...
+`);
+
+/** The head from the side, facing right (the way a rider goes): hair at
+ * the back, an ear, the eye and nose at the front. */
+export const HEAD_SIDE = sprite(`
+  ..oooooo...
+  .ohhhhhho..
+  ohhhhhhhho.
+  ohhhhhkkko.
+  ohhkhkkeko.
+  ohhkhkkkkko
+  .ohhkkkkko.
+  ..ooookkko.
+  ...okko....
 `);
 
 /** Shoulders and back, seated; the shirt is the agent kind's colour. */
@@ -457,6 +532,75 @@ const HALO: Headwear = {
   `),
 };
 
+// From the side (on HEAD_SIDE, facing right): the same things, so each
+// kind still reads by its shape.
+
+/** The beanie from the side: its pompom tipped back, the ribbed band over
+ * the brow, the eye left clear. */
+const BEANIE_SIDE: Headwear = {
+  dx: 0,
+  dy: -3,
+  sprite: sprite(`
+    ..oo.......
+    .owwo......
+    .owwooooo..
+    .oaaaaaaao.
+    oaaaaaaaaao
+    oaAaAaAaAao
+    oAAAAAAAAAo
+  `),
+};
+
+/** The headphones from the side: the band over the top, one cup on the
+ * ear. */
+const HEADPHONES_SIDE: Headwear = {
+  dx: 1,
+  dy: -1,
+  sprite: sprite(`
+    ..mmm.
+    .m....
+    .m....
+    .m....
+    oooo..
+    oaaao.
+    oaAao.
+    oaaao.
+    .ooo..
+  `),
+};
+
+/** The buns from the side: the near one, the far one peeking over it. */
+const BUNS_SIDE: Headwear = {
+  dx: 1,
+  dy: -4,
+  sprite: sprite(`
+    ....oo.
+    .ooohho
+    ohhohho
+    ohhoaa.
+    .aa....
+  `),
+};
+
+/** The hood from the side: over the top and the back of the head, open at
+ * the face. */
+const HOOD_SIDE: Headwear = {
+  dx: -1,
+  dy: -1,
+  sprite: sprite(`
+    ...oooooo...
+    ..oAAAAAAoo.
+    .oAAAAAAAAAo
+    oAAAAAAAAAAo
+    oAAAAAAo....
+    oAAAAAo.....
+    oAAAAAo.....
+    oAAAAAAo....
+    .oAAAAAo....
+    ..oooooo....
+  `),
+};
+
 const HEADWEAR: Record<string, Headwear> = {
   claude: BEANIE,
   codex: HEADPHONES,
@@ -465,9 +609,22 @@ const HEADWEAR: Record<string, Headwear> = {
   antigravity: HALO,
 };
 
-/** What an agent kind (agentColorKey) wears, seen from behind or the front;
- * null for a kind with nothing of its own. */
-export function headwearOf(kind: string, view: "back" | "front"): Headwear | null {
+/** Seen from the side; the halo floats the same from every side. */
+const HEADWEAR_SIDE: Record<string, Headwear> = {
+  claude: BEANIE_SIDE,
+  codex: HEADPHONES_SIDE,
+  gemini: BUNS_SIDE,
+  opencode: HOOD_SIDE,
+  antigravity: HALO,
+};
+
+/** The agent kinds with headwear of their own. */
+export const HEADWEAR_KINDS = Object.keys(HEADWEAR);
+
+/** What an agent kind (agentColorKey) wears, seen from behind, the front or
+ * the side; null for a kind with nothing of its own. */
+export function headwearOf(kind: string, view: "back" | "front" | "side"): Headwear | null {
+  if (view === "side") return HEADWEAR_SIDE[kind] ?? null;
   if (kind === "opencode" && view === "front") return HOOD_FRONT;
   return HEADWEAR[kind] ?? null;
 }

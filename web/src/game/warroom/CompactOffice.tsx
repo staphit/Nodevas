@@ -9,6 +9,7 @@ import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
 import { StationMenu } from "../../station/StationMenu";
+import { characterOf } from "../character";
 import { useGameActions } from "../GameActions";
 import { agentColorKey, compactLabel, styleName, type LabelOf } from "../labels";
 import { PixelSprite } from "../pixel/PixelSprite";
@@ -18,9 +19,10 @@ import { STYLE_GLYPH } from "./OfficeRoom";
 import { menuItem } from "./PixelDesk";
 
 const MiniDeskArt = memo(function MiniDeskArt({ desk }: { desk: MiniDesk }) {
-  const parts = useMemo(() => miniDesk(desk.pose), [desk.pose]);
+  const character = characterOf(desk.agent, desk.model);
+  const parts = useMemo(() => miniDesk(desk.pose, { character }), [desk.pose, character]);
   return (
-    <span className={`px-mini agent--${agentColorKey(desk.agent)} pose-${desk.pose}`}>
+    <span className={`px-mini agent--${agentColorKey(desk.agent)} char--${character} pose-${desk.pose}`}>
       <PixelSprite parts={parts} width={16} height={16} />
     </span>
   );

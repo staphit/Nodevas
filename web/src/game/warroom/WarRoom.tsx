@@ -1,7 +1,8 @@
 // The war room, in pixel art: the workspace as a building. The current
 // project's office first and in full (its work area, its meeting room, its
 // entrance), the other projects' offices as a glance through their doors,
-// then the ground floor: a lounge every project's idle agents share and a
+// then the ground floor: a lounge every project's idle agents share, the
+// outdoors where agents waiting out a usage limit go on an outing, and a
 // server room with a rack per runner. Every agent, item, office and rack is
 // a real button; an agent's menu holds what can be done about it (a run's own
 // controls, through station/runMenuItems). Station mounts it lazily
@@ -11,7 +12,10 @@
 // The drawing is inline SVG at whole art pixels (pixel/PixelSprite), coloured
 // by CSS tokens, so a theme switch costs nothing; animation is CSS steps()
 // over a few frames, off under reduced motion and in a background tab. A
-// heartbeat only redraws a desk whose agent changed (PixelDesk is memoised).
+// character whose pre-rendered anime sheet has the state (game/anime) is
+// drawn from it, stepped the same way, unless the viewer picks pixel
+// characters (game/characterStyle.ts). A heartbeat only redraws a desk whose
+// agent changed (PixelDesk is memoised).
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
@@ -30,6 +34,7 @@ import { BuildingText } from "./BuildingText";
 import { Lounge } from "./Lounge";
 import { OfficeRoom } from "./OfficeRoom";
 import { OtherOffices } from "./OtherOffices";
+import { Outdoors } from "./Outdoors";
 import { ServerRoom } from "./ServerRoom";
 
 export { artPixel };
@@ -182,6 +187,7 @@ export function WarRoom({ building, titleOf, rowOf }: WarRoomProps) {
       <OtherOffices building={building} labelOf={labelOf} />
       <div className="px-ground">
         <Lounge building={building} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} labelOf={labelOf} />
+        <Outdoors building={building} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} labelOf={labelOf} />
         <ServerRoom racks={building.racks} />
       </div>
     </div>

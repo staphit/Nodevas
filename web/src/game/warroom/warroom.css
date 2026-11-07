@@ -80,6 +80,42 @@
   --px-sign: #2f3a48;
   --px-sign-ink: #f3efe4;
 
+  /* The outdoors, by day: an agent waiting out a usage limit. No office
+     style sets these. */
+  --px-sky: #bfe6f7;
+  --px-mountain: #8d9db3;
+  --px-mountain-dark: #6c7c92;
+  --px-snow: #f6f8fb;
+  --px-grass: #7cbf5a;
+  --px-grass-dark: #4f8f3a;
+  --px-trail: #d2ad72;
+  --px-water: #4fa3d9;
+  --px-water-light: #b4e2f7;
+  --px-rock: #a3a39a;
+  --px-rock-dark: #74746c;
+  --px-fire: #e8572a;
+  --px-fire-light: #f9cf4a;
+  --px-tent: #e07a3f;
+  --px-tent-dark: #a8532a;
+  --px-sun: #f7d44a;
+  --px-wood: #8a5a34;
+  --px-backpack: #b8823a;
+  --px-meat: #e98a8a;
+  --px-meat-cooked: #8e4424;
+  /* The characters' own colours (pixel/skins.ts) after this line. */
+  --px-gem-blue: #4a7ff0;
+  --px-gem-red: #ec5a7c;
+  --px-gem-yellow: #f5c431;
+  --px-gem-green: #34b06a;
+  --px-gem-limb: #2b2433;
+  --px-clawd: #de7a52;
+  --px-clawd-dark: #b4552f;
+  --px-clawd-light: #f2a07c;
+  --px-whale-hair: #34539a;
+  --px-whale-hair-light: #7fb6e6;
+  --px-whale-dress: #27325e;
+  --px-whale-fin: #4a8ad6;
+
   --agent-claude: #d97757;
   --agent-codex: #10a37f;
   --agent-gemini: #4285f4;
@@ -143,6 +179,41 @@
 
   --px-sign: #d9cfb8;
   --px-sign-ink: #1d232c;
+
+  /* The outdoors at night: the sun is the moon. */
+  --px-sky: #1b2645;
+  --px-mountain: #46536e;
+  --px-mountain-dark: #323d55;
+  --px-snow: #cbd5e3;
+  --px-grass: #335f37;
+  --px-grass-dark: #234529;
+  --px-trail: #7a6444;
+  --px-water: #22557f;
+  --px-water-light: #5c93bf;
+  --px-rock: #5c6168;
+  --px-rock-dark: #40444b;
+  --px-fire: #f0622f;
+  --px-fire-light: #ffd65e;
+  --px-tent: #b0602f;
+  --px-tent-dark: #7a3f1f;
+  --px-sun: #ece6c4;
+  --px-wood: #6a4528;
+  --px-backpack: #94672f;
+  --px-meat: #c86b72;
+  --px-meat-cooked: #6f3118;
+  /* The characters' own colours (pixel/skins.ts) after this line. */
+  --px-gem-blue: #4f7ae0;
+  --px-gem-red: #dc5878;
+  --px-gem-yellow: #e3b63a;
+  --px-gem-green: #36a062;
+  --px-gem-limb: #aeb7c8;
+  --px-clawd: #d0704b;
+  --px-clawd-dark: #9a4626;
+  --px-clawd-light: #e39272;
+  --px-whale-hair: #3d61b3;
+  --px-whale-hair-light: #6fa6da;
+  --px-whale-dress: #2b3a72;
+  --px-whale-fin: #4c8ad0;
 }
 
 /* ---------- office styles: furniture, wall and floor only ---------- */
@@ -1155,6 +1226,38 @@
   margin-left: auto;
 }
 
+/* The outdoors: an outing per tile (56×44 art pixels, its own sky), on a
+   strip of sky over grass; the tiles wrap, so a phone never scrolls
+   sideways. */
+.px-outdoors {
+  flex: 3 1 330px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+}
+.px-outdoors-field {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: calc(2 * var(--px)) calc(4 * var(--px));
+  padding: var(--px-pad);
+  background: linear-gradient(var(--px-sky) 0 60%, var(--px-grass-dark) 60% calc(60% + var(--px)), var(--px-grass) 0);
+}
+/* 168 CSS pixels at --px 3: a tile fits the narrowest phone, unscaled. */
+.px-cell.is-outdoor {
+  width: calc(56 * var(--px));
+}
+.px-cell.is-outdoor .px-sprite {
+  outline: var(--px) solid var(--px-outline);
+}
+.px-cell.is-outdoor .px-tag {
+  max-width: calc(54 * var(--px));
+}
+
 .px-server-room {
   background: var(--px-server-floor);
 }
@@ -1328,15 +1431,38 @@
   100% { opacity: 0; }
 }
 
-/* A page in the background holds still; a dark rack does not move. */
+/* An anime figure (pixel/PixelSprite: an action's row of its sheet behind
+   the window of its frame): its frames step along the row, on the action's
+   own loop. Rendered art, so smooth, never pixelated; frame 0 whenever it
+   is not moving. */
+.px-anime-strip {
+  image-rendering: auto;
+}
+.px-office[data-motion="full"] .px-anime-strip.is-looping {
+  animation: px-anime var(--px-anime-loop, 800ms) steps(var(--px-anime-steps, 8), end) infinite;
+}
+@keyframes px-anime {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--px-anime-span, 0px)); }
+}
+/* In the night palette, a shade darker. */
+[data-theme="dark"] .px-office .px-anime {
+  filter: brightness(0.9);
+}
+
+/* A page in the background holds still (an anime figure on its frame 0); a
+   dark rack does not move. */
 .px-office[data-paused="true"] .px-f {
   animation-play-state: paused !important;
 }
-.is-lights-off .px-f {
+.px-office[data-paused="true"] .px-anime-strip {
+  animation: none !important;
+}
+.is-lights-off :is(.px-f, .px-anime-strip) {
   animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .px-office .px-f {
+  .px-office :is(.px-f, .px-anime-strip) {
     animation: none !important;
   }
   .px-desk:hover .px-art,

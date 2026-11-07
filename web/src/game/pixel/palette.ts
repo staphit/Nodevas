@@ -54,6 +54,48 @@ export const PIXEL_TOKENS = [
   "led-on",
   "led-off",
   "paper",
+  // The outdoors, where an agent waits out a usage limit: the same in every
+  // office style (warroom.css sets them on .px-office only), a day sky in
+  // the light theme and a night one in the dark.
+  "sky",
+  "mountain",
+  "mountain-dark",
+  "snow",
+  "grass",
+  "grass-dark",
+  "trail",
+  "water",
+  "water-light",
+  "rock",
+  "rock-dark",
+  "fire",
+  "fire-light",
+  "tent",
+  "tent-dark",
+  "sun",
+  "wood",
+  "backpack",
+  "meat",
+  "meat-cooked",
+  // The characters' own colours (pixel/skins.ts: skinClaude, skinWhale,
+  // skinStar), after the outdoors' and, like theirs, never an office style's.
+  // The whale (skinWhale): her hair, its lighter ends, her dress, her tail
+  // and eyes.
+  "whale-hair",
+  "whale-hair-light",
+  "whale-dress",
+  "whale-fin",
+  // Claude (skinClaude): its body, the shade under it and the light on top.
+  "clawd",
+  "clawd-dark",
+  "clawd-light",
+  // The star (skinStar): its bands, from blue to the red, yellow and green
+  // of its points, and its stick limbs.
+  "gem-blue",
+  "gem-red",
+  "gem-yellow",
+  "gem-green",
+  "gem-limb",
 ] as const;
 
 export type PixelToken = (typeof PIXEL_TOKENS)[number];

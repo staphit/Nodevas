@@ -88,6 +88,7 @@ func buildingRun(r runs.Record) BuildingRun {
 		FailureKind: r.FailureKind, RetryOf: r.RetryOf, PipelineID: r.PipelineID, RetryAt: r.RetryAt,
 		PRURL: r.PRURL, PRNumber: r.PRNumber, PRState: r.PRState, CIStatus: r.CIStatus,
 		CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
+		LastTool: r.LastTool, LastToolAt: r.LastToolAt,
 	}
 	if r.Merge != nil {
 		out.Merge = &BuildingRunMerge{Status: r.Merge.Status}
@@ -195,7 +196,7 @@ func Assemble(ctx context.Context, src Sources, actor identity.Actor, readable f
 			bp.Sessions = append(bp.Sessions, BuildingSession{
 				ID: s.ID, Name: s.Name, Agent: s.Agent, Model: s.Model, State: s.State,
 				NodeID: s.NodeID, Doing: excerpt(s.Doing, maxTextRunes), RunID: s.RunID,
-				LastSeen: s.LastSeen, Online: s.Online,
+				LastSeen: s.LastSeen, Online: s.Online, LastTool: s.LastTool, LastToolAt: s.LastToolAt,
 			})
 		}
 		projects[p.Name] = bp

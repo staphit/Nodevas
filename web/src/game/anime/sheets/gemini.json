@@ -1,0 +1,348 @@
+{
+ "actions": {
+  "door-idle": {
+   "row": 0,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 13,
+    "w": 99,
+    "h": 64
+   },
+   "props": []
+  },
+  "hike-summit": {
+   "row": 1,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 13,
+    "w": 99,
+    "h": 64
+   },
+   "props": []
+  },
+  "hike-walk": {
+   "row": 2,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 13,
+    "w": 64,
+    "h": 63
+   },
+   "props": [
+    "pack"
+   ]
+  },
+  "stream-wade": {
+   "row": 3,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 13,
+    "w": 64,
+    "h": 63
+   },
+   "props": [
+    "pole"
+   ]
+  },
+  "bbq-grill": {
+   "row": 4,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 14,
+    "w": 65,
+    "h": 63
+   },
+   "props": [
+    "tongs"
+   ]
+  },
+  "desk-rest": {
+   "row": 5,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-type": {
+   "row": 6,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-chin": {
+   "row": 7,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-mouse": {
+   "row": 8,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-ask": {
+   "row": 9,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-cheer": {
+   "row": 10,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-slump": {
+   "row": 11,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 51,
+    "y": 18,
+    "w": 100,
+    "h": 62
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "desk-sleep": {
+   "row": 12,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 50,
+    "y": 20,
+    "w": 101,
+    "h": 62
+   },
+   "props": [
+    "desk"
+   ]
+  },
+  "sofa-sit": {
+   "row": 13,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 127
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": []
+  },
+  "sofa-sleep": {
+   "row": 14,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 127
+   },
+   "head": {
+    "x": 51,
+    "y": 17,
+    "w": 100,
+    "h": 62
+   },
+   "props": []
+  },
+  "camp-sit": {
+   "row": 15,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 127
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": []
+  },
+  "fish-sit": {
+   "row": 16,
+   "frames": 8,
+   "fps": 10,
+   "view": "front",
+   "anchor": {
+    "x": 96,
+    "y": 127
+   },
+   "head": {
+    "x": 52,
+    "y": 14,
+    "w": 98,
+    "h": 63
+   },
+   "props": [
+    "rod"
+   ],
+   "tips": {
+    "rod": {
+     "x": 186,
+     "y": 36
+    }
+   }
+  },
+  "cycle-ride": {
+   "row": 17,
+   "frames": 8,
+   "fps": 10,
+   "view": "side",
+   "anchor": {
+    "x": 96,
+    "y": 174
+   },
+   "head": {
+    "x": 39,
+    "y": 7,
+    "w": 73,
+    "h": 66
+   },
+   "props": [
+    "bike"
+   ]
+  }
+ },
+ "image": "gemini.webp",
+ "frameW": 192,
+ "frameH": 192,
+ "scale": 6,
+ "style": "anime",
+ "character": "gemini"
+}

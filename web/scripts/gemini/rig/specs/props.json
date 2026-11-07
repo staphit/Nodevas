@@ -1,0 +1,59 @@
+{
+ "pack": {
+  "image": "props/prop_backpack.png",
+  "strap": [
+   780,
+   450
+  ],
+  "height_units": 200,
+  "back_offset": 70,
+  "drop": 100
+ },
+ "bike": {
+  "image": "props/prop_bike.png",
+  "saddle": [
+   390,
+   326
+  ],
+  "crank": [
+   480,
+   620
+  ],
+  "pedal_r": 75,
+  "grip": [
+   600,
+   275
+  ],
+  "ground": [
+   500,
+   755
+  ],
+  "wheel_d": 300,
+  "wheel_d_units": 265,
+  "crank_cut_r": 95
+ },
+ "desk": {
+  "image": "props/prop_desk.png",
+  "left": [
+   0,
+   0
+  ],
+  "right": [
+   100,
+   0
+  ],
+  "width_shoulders": 1.9
+ },
+ "laptop": {
+  "image": "props/prop_laptop.png",
+  "left": [
+   215,
+   745
+  ],
+  "right": [
+   805,
+   745
+  ],
+  "width_shoulders": 1.3
+ }
+}

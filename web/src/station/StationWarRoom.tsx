@@ -15,6 +15,7 @@ import { useI18n } from "../i18n";
 import { lazyWithRetry } from "../lazyWithRetry";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
+import { CharacterStyleSwitch } from "./CharacterStyleSwitch";
 import { autopilotIndex, autopilotOf, controlRows, liveAutopilots, type ControlRow } from "./control";
 import { useControlLoads, useNoRunner, useTitleOf } from "./StationControl";
 import { useStation } from "./stationStore";
@@ -63,6 +64,7 @@ export function StationWarRoom({ world }: { world: World }) {
         <span className="station-control-count" aria-label={count} title={count}>
           {live.length}
         </span>
+        <CharacterStyleSwitch />
       </div>
       {noRunner && (
         <div className="station-cta" role="status">

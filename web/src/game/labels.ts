@@ -7,7 +7,19 @@ import { askQuestionText } from "../agents/AskCard";
 import { excerpt } from "../agents/agentStore";
 import { formatList } from "../i18n";
 import { runnerDisplayName } from "../runners/runnerName";
-import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
+import type { Activity } from "./activity";
+import type { Outing } from "./outing";
+import type {
+  Actor,
+  Area,
+  ClickTarget,
+  CompactOffice,
+  MeetingItem,
+  OfficeStyle,
+  OutdoorSpot,
+  ProjectOffice,
+  Rack,
+} from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -94,6 +106,30 @@ export function poseLabel(t: Translate, pose: Actor["pose"]): string {
   return t(`game.pose.${pose}`);
 }
 
+/** "editing files": what an agent at its desk is doing. */
+export function activityLabel(t: Translate, activity: Activity): string {
+  return t(`game.activity.${activity}`);
+}
+
+/** "Out hiking, back in about 25 min.", or "back any moment" once the
+ * limit's reset is due. */
+export function outingLabel(t: Translate, outing: Pick<Outing, "kind" | "minutesLeft">): string {
+  const kind = t(`game.outing.${outing.kind}`);
+  return outing.minutesLeft > 0
+    ? t("game.outing.label", { kind, minutes: outing.minutesLeft })
+    : t("game.outing.labelSoon", { kind });
+}
+
+/** Another project's agent outdoors, as a lounge visitor is named
+ * (Lounge.visitorLabel): who, from where, and its outing. */
+export function outdoorVisitorLabel(t: Translate, visitor: NonNullable<OutdoorSpot["visitor"]>): string {
+  return t("game.outdoors.visitor", {
+    who: agentWho(visitor.agent, visitor.model),
+    project: visitor.label,
+    outing: outingLabel(t, visitor.outing),
+  });
+}
+
 const BUILTIN_ROLES: ReadonlySet<string> = new Set(["planner", "qa", "tester", "executor", "reviewer", "researcher"]);
 
 /** "Acts as Tester.": the role a run acts in; a session has none. */
@@ -118,6 +154,10 @@ export function actorLabel(t: Translate, actor: Actor, room: string): string {
           pose: poseLabel(t, actor.pose),
         }),
   ];
+  if (actor.activity && (actor.pose === "working" || actor.pose === "reviewing")) {
+    parts.push(t("game.actor.activity", { activity: activityLabel(t, actor.activity) }));
+  }
+  if (actor.outing && actor.pose === "limit") parts.push(outingLabel(t, actor.outing));
   if (actor.role) parts.push(roleSentence(t, actor.role));
   if (actor.ask) parts.push(t("game.actor.asks", { question: excerpt(askQuestionText(t, actor.ask, who), 80) }));
   if (actor.heldMail.length) parts.push(t("game.actor.held", { count: actor.heldMail.length }));

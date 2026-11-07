@@ -1,7 +1,9 @@
 // The current project's office: a character per run (and per agent session
 // with no run in view), each in the part of the office its state puts it
-// (areas.ts): at a desk, at the meeting-room table, at the door, or off to
-// the shared lounge. What waits on the viewer without an agent at it (a PR
+// (areas.ts): at a desk, at the meeting-room table, at the door, off to
+// the shared lounge, or out of the office on an outing while its usage limit
+// resets. A character at work shows what it is doing from its last tool
+// (activity.ts). What waits on the viewer without an agent at it (a PR
 // to merge, a review, a held message) lies on the meeting-room table.
 
 import type { AgentAsk, AgentMessage, AgentSession } from "../api/agents";
@@ -9,13 +11,15 @@ import type { Runner } from "../api/runners";
 import { runFinal, type PipelineState, type Run, type RunBudgetStatus } from "../api/runs";
 import { excerpt } from "../agents/agentStore";
 import type { WaitingItem } from "../station/waiting";
+import { activityOf, type Activity } from "./activity";
 import { areaOf } from "./areas";
 import { joinSessions } from "./joins";
 import { resolveOfficeStyle } from "./officeStyle";
+import { outingOf } from "./outing";
 import { roleOfRun, testStateOf } from "./testState";
 import { finishedRunStaysInRoom, runPose, sessionPose } from "./pose";
 import { bubbleVisible, sessionOnline } from "./presence";
-import type { Actor, ClickTarget, Energy, Meeting, MeetingItem, ProjectOffice, SwappedFrom } from "./world";
+import type { Actor, ClickTarget, Energy, Meeting, MeetingItem, Pose, ProjectOffice, SwappedFrom } from "./world";
 
 /** Failure kinds a fallback run takes over from (runs/dispatcher_routing.go):
  * the previous agent or model could not run, not the task itself failed. */
@@ -75,6 +79,8 @@ export interface CurrentOffice {
   actors: Actor[];
   /** Actor ids that went to the shared lounge. */
   loungeIds: string[];
+  /** Actor ids out of the office while their usage limit resets. */
+  outdoorIds: string[];
 }
 
 /** How many free desks an office shows next to its occupied ones. */
@@ -217,6 +223,31 @@ function swappedFrom(run: Run, byId: Map<string, Run>): SwappedFrom | undefined 
   };
 }
 
+/** Somewhere a last tool is held: a run (RFC 3339) or a session (Unix ms). */
+interface ToolSource {
+  lastTool?: string;
+  lastToolAt?: string | number;
+}
+
+function toolTime(source: ToolSource | undefined): number {
+  const at = source?.lastToolAt;
+  if (typeof at === "number") return at;
+  return at ? Date.parse(at) : NaN;
+}
+
+/** What a character at work is doing: the newest last tool among its
+ * sources (a run and its agent's session report the same agent), drawn only
+ * while it works or reviews. */
+function activityFor(pose: Pose, sources: (ToolSource | undefined)[], now: number): Activity | undefined {
+  if (pose !== "working" && pose !== "reviewing") return undefined;
+  let newest: ToolSource | undefined;
+  for (const source of sources) {
+    if (!source?.lastTool || !Number.isFinite(toolTime(source))) continue;
+    if (!newest || toolTime(source) > toolTime(newest)) newest = source;
+  }
+  return newest ? activityOf(newest.lastTool, newest.lastToolAt, now) : undefined;
+}
+
 function runnerOnline(runner: Runner | undefined): boolean | null {
   return runner ? Boolean(runner.online) : null;
 }
@@ -315,13 +346,14 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
     if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId, askKind: ask.kind });
     for (const message of heldMail) actions.push({ kind: "held-message", messageId: message.id });
     const pose = runPose(run, { runnerOnline: online, asking: Boolean(ask) });
+    const area = areaOf({ kind: "run", pose, nodeId: run.nodeId }, run);
     actors.push({
       id: runActorId(run.id),
       kind: "run",
       agent: run.agent,
       model: run.model,
       project,
-      area: areaOf({ kind: "run", pose, nodeId: run.nodeId }, run),
+      area,
       runnerId: run.runnerId || undefined,
       runnerName: runner?.name || run.runnerName || undefined,
       runnerOnline: online,
@@ -340,6 +372,10 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
       pipelineId: run.pipelineId || undefined,
       role,
       testState: run.pipelineId ? testStateOf(role, byPipeline.get(run.pipelineId) ?? []) : undefined,
+      activity: activityFor(pose, [run, session], now),
+      // Only an agent that left the office is on an outing: a plan run
+      // waiting on its limit stays in its meeting.
+      outing: area === "outdoors" ? outingOf(run, now) : undefined,
       target,
       actions,
     });
@@ -379,6 +415,7 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
       ask,
       bubble: bubbleFor(inputs.messages, session, now),
       heldMail,
+      activity: activityFor(pose, [session], now),
       target,
       actions,
     });
@@ -409,6 +446,7 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
     },
     actors,
     loungeIds: ids("lounge"),
+    outdoorIds: ids("outdoors"),
   };
 }
 

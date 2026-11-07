@@ -1,4 +1,5 @@
 import { markServerReachable, markServerUnreachable } from "./connectivity";
+import { noteServerDate } from "./serverClock";
 import type { Verifier } from "./verify";
 import { LANGUAGE_OPTIONS, translate } from "../i18n";
 import { readPreference, type Language } from "../preferences";
@@ -228,6 +229,9 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
   }
   // Any other answer, an error status included, means the server is there.
   markServerReachable();
+  // And says what time the hub thinks it is (the times it stamps are judged
+  // against that, not this machine's clock).
+  noteServerDate(res.headers?.get?.("Date"));
   if (res.status === 401) {
     notifyUnauthorized();
     throw new UnauthorizedError();

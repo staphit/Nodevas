@@ -27,9 +27,12 @@ type Dispatcher struct {
 	store *Store
 	reg   *runners.Registry
 	// changed is told when a run's status (or anything a run list shows)
-	// changes; events when a run has new events. Either may be nil.
+	// changes; events when a run has new events, with the last tool its
+	// agent called in them (zero for none, and for a hub note) and the run,
+	// whose dispatcher and owner are who may hear that tool. Either may be
+	// nil.
 	changed func(project, nodeID string)
-	events  func(project, runID string)
+	events  func(r Record, tool ToolSeen)
 	// notify is told when a run deserves a notification (RunNotifyEvent);
 	// audit records merge approvals and results. Either may be nil.
 	notify func(project, runID string)
@@ -105,7 +108,7 @@ func (d *Dispatcher) observed(u Update) {
 // NewDispatcher builds a dispatcher. changed and events are the realtime
 // hooks; see Dispatcher. Offers vouch for no dispatcher until SetStepUp says
 // how: failing closed, a runner's auto-accept waits for a person.
-func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(project, runID string)) *Dispatcher {
+func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(r Record, tool ToolSeen)) *Dispatcher {
 	d := &Dispatcher{
 		store: store, reg: reg, changed: changed, events: events,
 		stepUpRequired: true, stepUpWindow: runnerwire.StepUpWindowSeconds * time.Second, now: time.Now,
@@ -198,9 +201,9 @@ func (d *Dispatcher) notifyChanged(r Record) {
 	d.observed(Update{Run: r})
 }
 
-func (d *Dispatcher) notifyEvents(r Record) {
+func (d *Dispatcher) notifyEvents(r Record, tool ToolSeen) {
 	if d.events != nil {
-		d.events(r.Project, r.ID)
+		d.events(r, tool)
 	}
 }
 
@@ -401,10 +404,11 @@ func (d *Dispatcher) Events(ctx context.Context, runnerID, runID string, events 
 	if len(events) > runnerwire.MaxEventsPerMessage {
 		events = events[:runnerwire.MaxEventsPerMessage]
 	}
-	if _, err := d.store.AppendEvents(ctx, runID, events); err != nil {
+	appended, err := d.store.appendEvents(ctx, runID, events)
+	if err != nil {
 		return err
 	}
-	d.notifyEvents(r)
+	d.notifyEvents(r, appended.tool)
 	if carriesUsage(events) {
 		d.usageChanged(r)
 	}

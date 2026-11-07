@@ -61,6 +61,14 @@ const KEYS = [
   ...each("analytics.pick.reason", ["manual", "cheapest_meeting_tier", "explore", "none_meets_tier", "budget_exceeded", "no_runner"]),
   "usage.byRole",
   "runs.route.auto",
+  // War room: what an agent is doing, and its outing on a usage limit.
+  "game.area.outdoors",
+  ...each("game.activity", ["read", "edit", "shell", "search", "web", "think"]),
+  "game.actor.activity",
+  ...each("game.outing", ["hike", "stream", "fish", "camp", "bbq", "cycle", "label", "labelSoon"]),
+  ...each("game.outdoors", ["visitor", "empty", "more"]),
+  // War room: how this viewer draws the characters.
+  ...each("game.characterStyle", ["label", "hint", "pixel", "anime"]),
 ];
 
 // W-23: every new string exists in English and Traditional Chinese.

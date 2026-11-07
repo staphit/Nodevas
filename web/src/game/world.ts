@@ -8,11 +8,14 @@
 
 import type { AgentAsk, AgentAskKind, AgentMessage } from "../api/agents";
 import type { OfficeStyle } from "../types";
+import type { Activity } from "./activity";
+import type { Outing } from "./outing";
 
 export type { OfficeStyle };
 
-/** The parts of a project's office (the lounge is shared by the building). */
-export type Area = "work" | "meeting" | "entrance" | "lounge";
+/** The parts of a project's office (the lounge and the outdoors are shared
+ * by the building). */
+export type Area = "work" | "meeting" | "entrance" | "lounge" | "outdoors";
 
 /** What clicking an entity opens. The drawing maps each kind to an existing
  * UI action (open the node, open the run in the drawer, show a diff); the
@@ -133,6 +136,11 @@ export interface Actor {
   role?: string;
   /** The latest verify of its pipeline, for a Tester or Executor. */
   testState?: "red" | "green";
+  /** What it is doing at its desk (working or reviewing), from its last
+   * tool; absent when unknown or stale. */
+  activity?: Activity;
+  /** Out of the office while its run waits for a usage limit (pose limit). */
+  outing?: Outing;
   /** What a click opens. */
   target: ClickTarget;
   /** Everything the character's popover offers, target first. */
@@ -200,6 +208,8 @@ export interface ProjectOffice {
 /** A desk in another project's office, drawn small. */
 export interface MiniDesk {
   agent: string;
+  /** Who it is drawn as, with the agent (game/character.ts). */
+  model: string;
   pose: Pose;
   title: string;
 }
@@ -232,8 +242,29 @@ export interface LoungeSpot {
     label: string;
     agent: string;
     model: string;
+    /** building.loungeVisitors seats idle sessions only now (a run waiting
+     * on a usage limit is outdoors); "limit" and "offline" stay for the
+     * drawing. */
     pose: "idle" | "limit" | "offline";
     title: string;
+    target: ClickTarget;
+    actions: ClickTarget[];
+  };
+}
+
+/** An agent out of the office while its run waits for a usage limit. */
+export interface OutdoorSpot {
+  id: string;
+  /** The current project's actor (its full menu). */
+  actorId?: string;
+  /** Another project's run. */
+  visitor?: {
+    project: string;
+    label: string;
+    agent: string;
+    model: string;
+    title: string;
+    outing: Outing;
     target: ClickTarget;
     actions: ClickTarget[];
   };
@@ -264,6 +295,10 @@ export interface Building {
   /** The current project's actors first, then visitors; at most 10. */
   lounge: LoungeSpot[];
   loungeMore: number;
+  /** Agents waiting out a usage limit: the current project's first, then
+   * visitors; at most MAX_OUTDOORS. */
+  outdoors: OutdoorSpot[];
+  outdoorsMore: number;
   racks: Rack[];
   /** The current project's actors. */
   actors: Actor[];

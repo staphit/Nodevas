@@ -280,6 +280,13 @@ type Run struct {
 	CreatedAt       string  `json:"createdAt"`
 	StartedAt       string  `json:"startedAt,omitempty"`
 	FinishedAt      string  `json:"finishedAt,omitempty"`
+	// LastTool is the last tool the run's agent called, as its CLI names it
+	// (EventToolCall's Tool), or "thinking" for an EventThinking after it;
+	// LastToolAt is when the hub stored that event (the hub's clock, not the
+	// event's At, which is the runner's). Both "" until the first one, and kept
+	// past MaxRunEvents. What the building draws the agent doing.
+	LastTool   string `json:"lastTool,omitempty"`
+	LastToolAt string `json:"lastToolAt,omitempty"`
 }
 
 // CreateRunRequest is the body of POST /api/runs (project from ?project=).

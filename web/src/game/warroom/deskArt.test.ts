@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+import { ACTIVITIES, type Activity } from "../activity";
 import { OFFICE_STYLES } from "../officeStyle";
-import { CELL } from "../pixel/sprites";
+import { OUTING_KINDS, OUTING_STEPS, type Outing, type OutingKind } from "../outing";
+import { BIKE, BIKE_BARS, BIKE_SADDLE, OUTDOOR_H, OUTDOOR_W } from "../pixel/outdoorSprites";
+import { CELL, HEAD_SIDE, HEADWEAR_KINDS, headwearOf } from "../pixel/sprites";
 import { POSES, type Pose } from "../world";
 import {
+  ACTIVITY_LOOP_MS,
+  deskLoopMs,
   deskScene,
   doorScene,
   itemScene,
   meetingScene,
   miniDesk,
+  OUTDOOR_LOOP_MS,
+  outdoorScene,
   poseAnimated,
   rackScene,
+  shownActivity,
   sofaScene,
   type Placed,
 } from "./deskArt";
@@ -183,5 +191,390 @@ describe("rackScene", () => {
     expect(lit(off)).toBe(0);
     // Unknown state is not off.
     expect(names(rackScene(null, 1, 2))).toContain("led.power");
+  });
+});
+
+describe("activities at a desk", () => {
+  /** The part that says each activity without colour or motion. */
+  const GLYPH: Record<Activity, string> = {
+    read: "screen.read.page",
+    edit: "screen.code.lines",
+    shell: "screen.shell.prompt",
+    search: "screen.search.box",
+    web: "screen.web.globe",
+    think: "bubble.think",
+  };
+
+  it("gives each activity a still picture of its own, with a glyph, for working and reviewing", () => {
+    for (const pose of ["working", "reviewing"] as const) {
+      const seen = new Map<string, Activity>();
+      for (const activity of ACTIVITIES) {
+        const scene = deskScene(pose, "claude", { activity });
+        const key = still(scene).join(",");
+        expect(seen.get(key), `${pose} ${activity} looks like ${seen.get(key)}`).toBeUndefined();
+        seen.set(key, activity);
+        expect(still(scene), `${pose} ${activity}`).toContain(GLYPH[activity]);
+      }
+    }
+  });
+
+  it("draws the arms for the activity: typing for edit and shell, a hand on the chin to read or think", () => {
+    const arms = (activity: Activity) => names(deskScene("working", "codex", { activity })).filter((n) => n.startsWith("arm."));
+    for (const activity of ["edit", "shell"] as const) {
+      expect(arms(activity), activity).toEqual(expect.arrayContaining(["arm.left.up", "arm.right.up"]));
+    }
+    for (const activity of ["read", "think"] as const) expect(arms(activity), activity).toContain("arm.right.chin");
+    for (const activity of ["search", "web"] as const) {
+      expect(names(deskScene("working", "codex", { activity })), activity).toContain("desk.mouse");
+    }
+  });
+
+  it("animates every activity on its own loop, frame 0 the still picture", () => {
+    for (const activity of ACTIVITIES) {
+      expect(ACTIVITY_LOOP_MS[activity], activity).toBeGreaterThan(0);
+      const scene = deskScene("working", "gemini", { activity });
+      expect(scene.some((part) => part.frame), activity).toBe(true);
+      for (const part of scene) if (part.frame) expect(part.frame.index, part.name).toBeLessThan(part.frame.of);
+      expect(deskLoopMs("working", activity)).toBe(ACTIVITY_LOOP_MS[activity]);
+    }
+    expect(deskLoopMs("working", undefined)).toBe(500);
+    expect(deskLoopMs("idle", "shell")).toBeUndefined();
+  });
+
+  it("shows an activity only at work: any other pose keeps its own picture", () => {
+    expect(shownActivity("working", "shell")).toBe("shell");
+    expect(shownActivity("reviewing", "web")).toBe("web");
+    for (const pose of POSES) {
+      if (pose === "working" || pose === "reviewing") continue;
+      expect(shownActivity(pose, "shell"), pose).toBeUndefined();
+      expect(names(deskScene(pose, "claude", { activity: "shell" })), pose).toEqual(names(deskScene(pose, "claude")));
+    }
+    // No activity: the pose's own screen.
+    expect(names(deskScene("reviewing", "claude"))).toContain("screen.review.doc");
+  });
+
+  it("keeps every activity's parts on the desk's grid, at a desk and at the table", () => {
+    for (const activity of ACTIVITIES) {
+      const scenes = [deskScene("working", "codex", { activity, mail: true }), meetingScene("reviewing", "codex", { activity })];
+      for (const scene of scenes) {
+        for (const part of scene) {
+          const where = `${activity} ${part.name}`;
+          expect(Number.isInteger(part.x) && Number.isInteger(part.y), where).toBe(true);
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(CELL);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(CELL);
+        }
+      }
+    }
+  });
+});
+
+describe("outdoorScene", () => {
+  const outing = (kind: OutingKind, step: number): Outing => ({
+    kind,
+    step,
+    returnsAt: "2026-11-05T12:00:00Z",
+    minutesLeft: 30,
+  });
+  const steps = Array.from({ length: OUTING_STEPS }, (_, step) => step);
+  const placedAt = (parts: Placed[], name: string) => {
+    const part = parts.find((p) => p.name === name);
+    return part ? `${part.x},${part.y}` : "";
+  };
+
+  it("keeps every part of every outing, at every step, on its tile's grid", () => {
+    for (const kind of OUTING_KINDS) {
+      for (const step of steps) {
+        for (const part of outdoorScene(outing(kind, step), "antigravity")) {
+          const where = `${kind} ${step} ${part.name}`;
+          expect(Number.isInteger(part.x) && Number.isInteger(part.y), where).toBe(true);
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(OUTDOOR_W);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(OUTDOOR_H);
+        }
+      }
+    }
+  });
+
+  it("says each outing with a prop of its own, not a colour", () => {
+    const CUES: Record<OutingKind, string[]> = {
+      hike: ["hike.backdrop", "hike.flag.pole", "hike.pack"],
+      stream: ["stream.backdrop", "stream.pole", "stream.wade"],
+      fish: ["fish.backdrop", "fish.rod", "fish.bobber.a", "fish.bucket"],
+      camp: ["camp.backdrop", "camp.tent", "camp.fire.a", "camp.sun"],
+      bbq: ["bbq.backdrop", "bbq.grill", "bbq.smoke.a", "bbq.plate", "bbq.tongs.a"],
+      cycle: ["cycle.backdrop", "cycle.bike", "cycle.wheel.back.a", "cycle.wheel.front.a", "cycle.flag"],
+    };
+    const keys = new Set<string>();
+    for (const kind of OUTING_KINDS) {
+      const parts = still(outdoorScene(outing(kind, 3), "claude"));
+      expect(parts, kind).toEqual(expect.arrayContaining(CUES[kind]));
+      // No other outing has them.
+      for (const other of OUTING_KINDS) {
+        if (other === kind) continue;
+        const theirs = names(outdoorScene(outing(other, 3), "claude"));
+        for (const cue of CUES[kind]) expect(theirs, `${other} has ${cue}`).not.toContain(cue);
+      }
+      keys.add(parts.join(","));
+      // The agent is there, in its kind's headwear: from the side on the bike.
+      const head = kind === "cycle" ? "head.side" : "head.front";
+      expect(parts, kind).toEqual(expect.arrayContaining([head, "headwear.claude"]));
+    }
+    expect(keys.size).toBe(OUTING_KINDS.length);
+  });
+
+  it("goes along the outing step by step", () => {
+    for (const kind of ["hike", "stream"] as const) {
+      const heads = steps.map((step) => placedAt(outdoorScene(outing(kind, step), "codex"), "head.front"));
+      expect(new Set(heads).size, kind).toBe(OUTING_STEPS);
+    }
+    const suns = steps.map((step) => placedAt(outdoorScene(outing("camp", step), "codex"), "camp.sun"));
+    expect(new Set(suns).size).toBe(OUTING_STEPS);
+    // Fishing: a bite late on, and the bucket fills.
+    const catches = (step: number) =>
+      names(outdoorScene(outing("fish", step), "codex")).filter((n) => n.startsWith("fish.catch")).length;
+    expect(catches(0)).toBe(0);
+    expect(catches(7)).toBeGreaterThan(catches(3));
+    expect(names(outdoorScene(outing("fish", 0), "codex"))).not.toContain("fish.bite");
+    expect(names(outdoorScene(outing("fish", 6), "codex"))).toContain("fish.bite");
+    // The summit is reached at the last step only.
+    expect(names(outdoorScene(outing("hike", OUTING_STEPS - 1), "codex"))).toContain("hike.summit");
+    expect(names(outdoorScene(outing("hike", 3), "codex"))).not.toContain("hike.summit");
+  });
+
+  it("cooks the barbecue with the wait: raw, seared, done, and the plate fills", () => {
+    const food = (step: number) =>
+      names(outdoorScene(outing("bbq", step), "codex")).filter((n) => n.startsWith("bbq.food."));
+    const doneness = (step: number) => [...new Set(food(step).map((n) => n.split(".").pop()))];
+    // Two skewers on the grill at every step, all as done as each other.
+    for (const step of steps) expect(food(step), `${step}`).toHaveLength(2);
+    expect(doneness(0)).toEqual(["raw"]);
+    expect(doneness(3)).toEqual(["seared"]);
+    expect(doneness(OUTING_STEPS - 1)).toEqual(["done"]);
+    // Raw, seared and done differ in shape (grill marks), not only in colour.
+    const sprites = [0, 3, 7].map((step) => outdoorScene(outing("bbq", step), "codex").find((p) => p.name.startsWith("bbq.food."))!.sprite);
+    const shape = (sprite: (typeof sprites)[number]) =>
+      sprite.layers.filter((layer) => layer.token === "outline").map((layer) => layer.d).join("");
+    expect(new Set(sprites.map(shape)).size).toBe(3);
+    // The plate: empty at first, more skewers on it later on.
+    const plated = (step: number) =>
+      names(outdoorScene(outing("bbq", step), "codex")).filter((n) => n.startsWith("bbq.plate.skewer")).length;
+    expect(plated(0)).toBe(0);
+    expect(plated(5)).toBeGreaterThan(plated(3));
+    expect(plated(OUTING_STEPS - 1)).toBeGreaterThan(plated(5));
+    // Only done skewers go on the plate: none before the grill's are done.
+    for (const step of steps) if (doneness(step)[0] !== "done") expect(plated(step), `${step}`).toBe(0);
+  });
+
+  /** A sprite's opaque pixels, row by row, from its compiled paths. */
+  const pixels = (sprite: Placed["sprite"]) => {
+    const grid = Array.from({ length: sprite.h }, () => Array<string>(sprite.w).fill(""));
+    for (const layer of sprite.layers)
+      for (const [, x, y, n] of layer.d.matchAll(/M(\d+) (\d+)h(\d+)/g))
+        for (let i = 0; i < Number(n); i++) grid[Number(y)][Number(x) + i] = layer.token;
+    return grid;
+  };
+  const span = (row: string[]) => [row.findIndex(Boolean), row.length - [...row].reverse().findIndex(Boolean)];
+
+  it("rides short of the finish pole, never into it", () => {
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "codex");
+      const pole = parts.find((p) => p.name === "cycle.flag.pole")!;
+      for (const name of ["cycle.bike", "cycle.wheel.front.a", "cycle.wheel.front.b"]) {
+        const part = parts.find((p) => p.name === name)!;
+        expect(part.x + part.sprite.w, `${step} ${name}`).toBeLessThanOrEqual(pole.x);
+      }
+    }
+  });
+
+  it("draws solid wheels whose spokes stand out from the road", () => {
+    const parts = outdoorScene(outing("cycle", 0), "codex");
+    for (const name of ["cycle.wheel.back.a", "cycle.wheel.back.b"]) {
+      const grid = pixels(parts.find((p) => p.name === name)!.sprite);
+      for (const [y, row] of grid.entries()) {
+        const [from, to] = span(row);
+        // Nothing of the kerb or road shows through inside the rim.
+        expect(row.slice(from, to).every(Boolean), `${name} row ${y}`).toBe(true);
+      }
+      const spokes = new Set(grid.flat().filter((token) => token && token !== "outline" && token !== "rock-dark"));
+      expect([...spokes], name).not.toContain("rock");
+      expect(spokes.size, name).toBeGreaterThan(0);
+    }
+  });
+
+  /** Every kind's rider, and one with no headwear of its own. */
+  const RIDERS = [...HEADWEAR_KINDS, "other"];
+  const RIDER_PARTS = ["head.side", "body.rider", "arm.reach", "cycle.legs.a", "cycle.legs.b", "cycle.legs.far.a", "cycle.legs.far.b"];
+
+  it("draws the rider from the side, facing the way the bike goes", () => {
+    for (const kind of RIDERS) {
+      const parts = names(outdoorScene(outing("cycle", 3), kind));
+      expect(parts, kind).toEqual(expect.arrayContaining(RIDER_PARTS));
+      for (const front of ["head.front", "body.standing"]) expect(parts, kind).not.toContain(front);
+      if (headwearOf(kind, "front")) expect(parts, kind).toContain(`headwear.${kind}`);
+      else expect(parts.some((n) => n.startsWith("headwear.")), kind).toBe(false);
+    }
+    // The profile looks right, to the finish: the eye in the head's front half.
+    const eye = pixels(HEAD_SIDE).flatMap((row, y) => row.map((token, x) => ({ token, x, y }))).filter((p) => p.token === "eye");
+    expect(eye.length).toBeGreaterThan(0);
+    for (const { x } of eye) expect(x).toBeGreaterThan(HEAD_SIDE.w / 2);
+  });
+
+  it("gives every kind's headwear a side view of its own shape, on the head and in the tile", () => {
+    const outline = (sprite: Placed["sprite"]) => pixels(sprite).map((row) => row.map(Boolean).join()).join("|");
+    for (const kind of HEADWEAR_KINDS) {
+      const side = headwearOf(kind, "side");
+      expect(side, kind).not.toBeNull();
+      expect(side!.sprite.w, kind).toBeGreaterThan(0);
+      // Over the head, not off to one side of it.
+      expect(side!.dx + side!.sprite.w, kind).toBeGreaterThan(0);
+      expect(side!.dx, kind).toBeLessThan(HEAD_SIDE.w);
+      // Its shape tells the kinds apart, not only its colour.
+      for (const other of HEADWEAR_KINDS)
+        if (other !== kind) expect(outline(headwearOf(other, "side")!.sprite), `${kind} ${other}`).not.toBe(outline(side!.sprite));
+    }
+    expect(headwearOf("other", "side")).toBeNull();
+  });
+
+  it("keeps the rider's eye showing under every kind's headwear, skin behind it", () => {
+    for (const kind of RIDERS) {
+      for (const step of steps) {
+        const parts = outdoorScene(outing("cycle", step), kind);
+        // The scene as drawn: later parts over earlier ones.
+        const drawn = new Map<string, string>();
+        for (const part of parts)
+          pixels(part.sprite).forEach((row, y) =>
+            row.forEach((token, x) => token && drawn.set(`${part.x + x},${part.y + y}`, token)),
+          );
+        const head = parts.find((p) => p.name === "head.side")!;
+        const eyes = pixels(head.sprite).flatMap((row, y) => row.flatMap((t, x) => (t === "eye" ? [{ x: head.x + x, y: head.y + y }] : [])));
+        expect(eyes.length, `${kind} ${step}`).toBeGreaterThan(0);
+        for (const { x, y } of eyes) {
+          expect(drawn.get(`${x},${y}`), `${kind} ${step} eye`).toBe("eye");
+          expect(drawn.get(`${x - 1},${y}`), `${kind} ${step} behind the eye`).toBe("skin");
+        }
+      }
+    }
+  });
+
+  it("keeps the rider on the tile and short of the finish pole at every step", () => {
+    for (const kind of RIDERS) {
+      for (const step of steps) {
+        const parts = outdoorScene(outing("cycle", step), kind);
+        const pole = parts.find((p) => p.name === "cycle.flag.pole")!;
+        const rider = parts.filter((p) => RIDER_PARTS.includes(p.name) || p.name.startsWith("headwear."));
+        expect(rider.length, `${kind} ${step}`).toBeGreaterThanOrEqual(RIDER_PARTS.length);
+        for (const part of rider) {
+          const where = `${kind} ${step} ${part.name}`;
+          expect(part.x, where).toBeGreaterThanOrEqual(0);
+          expect(part.y, where).toBeGreaterThanOrEqual(0);
+          expect(part.y + part.sprite.h, where).toBeLessThanOrEqual(OUTDOOR_H);
+          expect(part.x + part.sprite.w, where).toBeLessThanOrEqual(pole.x);
+        }
+      }
+    }
+  });
+
+  it("pedals in two frames, knee up then knee down, with the wheels", () => {
+    const parts = outdoorScene(outing("cycle", 3), "codex");
+    const find = (name: string) => parts.find((p) => p.name === name)!;
+    for (const leg of ["cycle.legs", "cycle.legs.far"]) {
+      expect(find(`${leg}.a`).frame, leg).toEqual({ index: 0, of: 2 });
+      expect(find(`${leg}.b`).frame, leg).toEqual({ index: 1, of: 2 });
+    }
+    expect(find("cycle.wheel.back.a").frame).toEqual({ index: 0, of: 2 });
+    // The foot: its lowest pixel is higher with the knee up (a) than down (b).
+    const lowest = (part: Placed) => part.y + pixels(part.sprite).map((row) => row.some(Boolean)).lastIndexOf(true);
+    expect(lowest(find("cycle.legs.a"))).toBeLessThan(lowest(find("cycle.legs.b")));
+    // The far leg is the other way round.
+    expect(lowest(find("cycle.legs.far.a"))).toBeGreaterThan(lowest(find("cycle.legs.far.b")));
+    // The far leg is behind the bike, the near one in front of it.
+    const order = names(parts);
+    expect(order.indexOf("cycle.legs.far.a")).toBeLessThan(order.indexOf("cycle.bike"));
+    expect(order.indexOf("cycle.legs.a")).toBeGreaterThan(order.indexOf("cycle.bike"));
+  });
+
+  it("marks the saddle and the bars where BIKE draws them", () => {
+    const grid = pixels(BIKE);
+    /** The first opaque run on a row of BIKE. */
+    const firstRun = (y: number) => {
+      const x = grid[y].findIndex(Boolean);
+      let w = 0;
+      while (grid[y][x + w]) w++;
+      return { x, y, w };
+    };
+    // The bars are the top of the bike; the saddle is the first thing below them.
+    expect(BIKE_BARS).toEqual(firstRun(0));
+    expect(BIKE_SADDLE).toEqual(firstRun(1));
+    // Clear above both, for the hand and the seat of the pants.
+    for (let i = 0; i < BIKE_SADDLE.w; i++) expect(grid[BIKE_SADDLE.y - 1][BIKE_SADDLE.x + i], `saddle ${i}`).toBe("");
+    expect(BIKE_BARS.y).toBe(0);
+  });
+
+  it("sits the rider on the saddle, hands on the bars", () => {
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "gemini");
+      const find = (name: string) => parts.find((p) => p.name === name)!;
+      const bike = find("cycle.bike");
+      /** A part's opaque pixels on an absolute row, as absolute columns. */
+      const onRow = (part: Placed, y: number, token?: string) =>
+        (pixels(part.sprite)[y - part.y] ?? []).flatMap((t, x) => (t && (!token || t === token) ? [part.x + x] : []));
+      const saddle = Array.from({ length: BIKE_SADDLE.w }, (_, i) => bike.x + BIKE_SADDLE.x + i);
+      const bars = Array.from({ length: BIKE_BARS.w }, (_, i) => bike.x + BIKE_BARS.x + i);
+      for (const leg of ["cycle.legs.a", "cycle.legs.b"]) {
+        // Right on top of the saddle, across all of it: the seat of the pants.
+        expect(onRow(find(leg), bike.y + BIKE_SADDLE.y - 1), `${step} ${leg}`).toEqual(expect.arrayContaining(saddle));
+        expect(onRow(find(leg), bike.y + BIKE_SADDLE.y - 2, "pants").length, `${step} ${leg}`).toBeGreaterThan(0);
+      }
+      // A hand right over the bars.
+      const hand = onRow(find("arm.reach"), bike.y + BIKE_BARS.y - 1, "skin");
+      expect(hand.length, `${step}`).toBeGreaterThan(0);
+      for (const x of hand) expect(bars, `${step}`).toContain(x);
+      // The torso joins the hips: the shirt's lowest row sits on the pants' top.
+      const body = find("body.rider");
+      expect(body.y + body.sprite.h, `${step}`).toBeGreaterThanOrEqual(find("cycle.legs.a").y);
+    }
+  });
+
+  it("rides along the road a step at a time, and reaches the finish at the last step", () => {
+    const bikes = steps.map((step) => placedAt(outdoorScene(outing("cycle", step), "codex"), "cycle.bike"));
+    expect(new Set(bikes).size).toBe(OUTING_STEPS);
+    const xs = steps.map((step) => outdoorScene(outing("cycle", step), "codex").find((p) => p.name === "cycle.bike")!.x);
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+    // The rider stays on the bike: head over the frame at every step.
+    for (const step of steps) {
+      const parts = outdoorScene(outing("cycle", step), "codex");
+      const bike = parts.find((p) => p.name === "cycle.bike")!;
+      const head = parts.find((p) => p.name === "head.side")!;
+      expect(head.x, `${step}`).toBeGreaterThanOrEqual(bike.x);
+      expect(head.x + head.sprite.w, `${step}`).toBeLessThanOrEqual(bike.x + bike.sprite.w);
+    }
+    expect(names(outdoorScene(outing("cycle", OUTING_STEPS - 1), "codex"))).toContain("cycle.finish");
+    expect(names(outdoorScene(outing("cycle", OUTING_STEPS - 2), "codex"))).not.toContain("cycle.finish");
+  });
+
+  it("clamps a step out of range to the outing's ends", () => {
+    expect(outdoorScene(outing("hike", -3), "codex")).toEqual(outdoorScene(outing("hike", 0), "codex"));
+    expect(outdoorScene(outing("hike", 99), "codex")).toEqual(outdoorScene(outing("hike", OUTING_STEPS - 1), "codex"));
+  });
+
+  it("moves on its own loop, its still frame whole", () => {
+    for (const kind of OUTING_KINDS) {
+      expect(OUTDOOR_LOOP_MS[kind], kind).toBeGreaterThan(0);
+      const parts = outdoorScene(outing(kind, 2), "gemini");
+      expect(parts.some((part) => part.frame && part.frame.index > 0), kind).toBe(true);
+      for (const part of parts) if (part.frame) expect(part.frame.index, part.name).toBeLessThan(part.frame.of);
+    }
+    // Still, the hiker has legs and the fire burns.
+    expect(still(outdoorScene(outing("hike", 2), "gemini"))).toContain("legs.walk.a");
+    expect(still(outdoorScene(outing("camp", 2), "gemini"))).toContain("camp.fire.a");
+    // Still, the barbecue smokes and the bike has both wheels and pedals.
+    expect(still(outdoorScene(outing("bbq", 2), "gemini"))).toEqual(expect.arrayContaining(["bbq.smoke.a", "bbq.tongs.a"]));
+    expect(still(outdoorScene(outing("cycle", 2), "gemini"))).toEqual(
+      expect.arrayContaining(["cycle.wheel.back.a", "cycle.wheel.front.a", "cycle.legs.a"]),
+    );
+    expect(still(outdoorScene(outing("cycle", 2), "gemini"))).not.toContain("cycle.legs.b");
   });
 });
