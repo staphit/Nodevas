@@ -120,7 +120,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 		if r.Method != http.MethodDelete && r.ContentLength != 0 {
 			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			multipartUpload := mediaType == "multipart/form-data" &&
-				(r.URL.Path == "/api/projects/import" ||
+				(r.URL.Path == "/api/projects/import" || r.URL.Path == "/api/themes" ||
 					(strings.HasPrefix(r.URL.Path, "/api/nodes/") &&
 						(strings.HasSuffix(r.URL.Path, "/files") ||
 							strings.HasSuffix(r.URL.Path, "/pages/import"))))

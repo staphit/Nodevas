@@ -643,6 +643,7 @@ func serve(args []string) {
 	srv.UseAgentsDB(database)
 	srv.UseRunnersDB(database)
 	srv.UseMembersDB(database)
+	srv.UseThemesDB(database)
 	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
 		fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}

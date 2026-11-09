@@ -21,6 +21,7 @@ export interface SettingsEntry {
 export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { label: "appearance.theme", page: "general" },
   { label: "appearance.language", page: "general" },
+  { label: "themePacks.title", page: "general", row: "themePacks" },
   { label: "settingsPage.layout", page: "general", row: "layout" },
   { label: "editor.mode", page: "general", row: "layout" },
   { label: "editor.fontSize", page: "general", row: "layout" },

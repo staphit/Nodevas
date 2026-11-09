@@ -21,6 +21,7 @@ import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
 import { stationApi } from "./station";
+import { themesApi } from "./themes";
 import { usageApi } from "./usage";
 import { workspaceApi } from "./workspace";
 
@@ -265,6 +266,7 @@ export type {
   BuildingWaiting,
   WaitingRunLike,
 } from "./station";
+export type { ThemePack, ThemePackList } from "./themes";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -301,4 +303,5 @@ export const api = {
   ...planApi,
   ...controlApi,
   ...stationApi,
+  ...themesApi,
 };

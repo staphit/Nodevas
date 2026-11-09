@@ -37,6 +37,7 @@ import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAcces
 import { followupArrived as copilotFollowupArrived, runnersChanged as copilotRunnersChanged } from "./copilot/session";
 import { AgentChatRoot } from "./agents/AgentChatRoot";
 import { useAgents } from "./agents/agentStore";
+import { useThemePacks } from "./theme-pack/themePackStore";
 import { useUsage } from "./usage/usageStore";
 import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
@@ -330,6 +331,11 @@ function MainApp() {
         case "usage-changed":
           // A session reported its tokens: an open Usage dialog refetches.
           useUsage.getState().onUsageEvent();
+          break;
+        case "themes-changed":
+          // The id is a pack: the list is refetched once something has asked
+          // for it, and the manifest on show if it is that pack's.
+          useThemePacks.getState().onChanged(ev.id);
           break;
         case "runs-changed":
           // The id is a node: its run list is refetched if something shows it.

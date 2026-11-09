@@ -515,6 +515,10 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 	if isHeavyPath(path) {
 		return ClassHeavy, 2.0
 	}
+	// Taking a zip in, on the same path as the list every Settings page reads.
+	if method == http.MethodPost && path == "/api/themes" {
+		return ClassHeavy, 2.0
+	}
 	if isExpensivePath(path) {
 		return ClassExpensive, 2.0
 	}

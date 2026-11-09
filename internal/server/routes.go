@@ -18,6 +18,7 @@ import (
 	runsapi "nodevas/internal/httpapi/runs"
 	stationapi "nodevas/internal/httpapi/station"
 	"nodevas/internal/httpapi/system"
+	themesapi "nodevas/internal/httpapi/themes"
 	usageapi "nodevas/internal/httpapi/usage"
 	"nodevas/internal/usage"
 )
@@ -98,6 +99,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.usage != nil {
 		usageapi.New(s.pm, s.usage).Register(api)
+	}
+	if s.themes != nil {
+		themesapi.New(s.themes, s.themesChanged).Register(api)
 	}
 	if s.runners != nil {
 		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithRepo(s.repo).WithLinks(s.runnerLinkOptions()).Register(api)

@@ -72,6 +72,9 @@ export type WSEvent = {
     | "run-notify"
     | "session-changes"
     | "usage-changed"
+    // A theme pack was imported, replaced or deleted, or the site default
+    // changed; the id is the pack's.
+    | "themes-changed"
     // W7: an autopilot run changed; the id is the autopilot run's.
     | "autopilot-changed"
     // The copilot followed up in one of this account's conversations (a plan

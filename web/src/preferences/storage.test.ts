@@ -22,6 +22,32 @@ beforeEach(() => {
   configurePreferenceStorage(null);
 });
 
+describe("the theme pack a viewer picked", () => {
+  it("starts on the site default", () => {
+    configurePreferenceStorage(fakeStorage());
+    expect(readPreference("themePack")).toBe("");
+  });
+
+  it.each(["none", "magic", "a-1", "0"])("keeps %s", (stored) => {
+    configurePreferenceStorage(fakeStorage({ "vised-theme-pack": stored }));
+    expect(readPreference("themePack")).toBe(stored);
+  });
+
+  it("goes back to the site default once chosen again", () => {
+    const storage = fakeStorage();
+    configurePreferenceStorage(storage);
+    writePreference("themePack", "magic");
+    writePreference("themePack", "");
+    configurePreferenceStorage(storage);
+    expect(readPreference("themePack")).toBe("");
+  });
+
+  it.each(["../up", "Magic", "a/b", "-a", "x".repeat(41)])("falls back from a stored %s, no pack's id", (stored) => {
+    configurePreferenceStorage(fakeStorage({ "vised-theme-pack": stored }));
+    expect(readPreference("themePack")).toBe("");
+  });
+});
+
 describe("validation", () => {
   it("clamps an out-of-range stored width instead of resetting it", () => {
     configurePreferenceStorage(fakeStorage({ "vised-explorer-width": "5000" }));
