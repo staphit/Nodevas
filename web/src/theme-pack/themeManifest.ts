@@ -18,6 +18,8 @@ export interface ThemeScene {
 
 export interface ThemeCharacter {
   match: { agents: string[]; models: string[] };
+  /** Stands in for agents no character matches. A pack has at most one. */
+  fallback?: true;
   scenes: Record<string, ThemeScene>;
 }
 
@@ -99,13 +101,14 @@ function parseCharacter(raw: unknown, canvas: [number, number], rooms: Set<strin
   const agents = rawMatch.agents ?? [];
   const models = rawMatch.models ?? [];
   if (!isStringList(agents) || !isStringList(models)) return undefined;
+  if (raw.fallback !== undefined && typeof raw.fallback !== "boolean") return undefined;
   const scenes: Record<string, ThemeScene> = {};
   for (const [name, value] of Object.entries(rawScenes)) {
     const scene = parseScene(value, canvas, rooms);
     if (!PART_ID.test(name) || !scene) return undefined;
     scenes[name] = scene;
   }
-  return { match: { agents, models }, scenes };
+  return raw.fallback === true ? { match: { agents, models }, fallback: true, scenes } : { match: { agents, models }, scenes };
 }
 
 /**

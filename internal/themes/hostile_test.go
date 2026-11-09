@@ -44,6 +44,15 @@ func TestASpoiledManifestRefusesTheWholeZip(t *testing.T) {
 		{"unknown language", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": "a", "fr": "b"} }},
 		{"unknown top-level field", func(d map[string]any, _ map[string][]byte) { d["script"] = "alert(1)" }},
 		{"unknown scene field", func(d map[string]any, _ map[string][]byte) { sceneOf(d)["onload"] = "alert(1)" }},
+		{"fallback that is no boolean", func(d map[string]any, _ map[string][]byte) {
+			d["characters"].(map[string]any)["claude"].(map[string]any)["fallback"] = "yes"
+		}},
+		// Two would leave which one stands in for an unknown agent to map order.
+		{"two fallback characters", func(d map[string]any, _ map[string][]byte) {
+			characters := d["characters"].(map[string]any)
+			characters["claude"].(map[string]any)["fallback"] = true
+			characters["other"] = map[string]any{"fallback": true}
+		}},
 		{"canvas of one number", func(d map[string]any, _ map[string][]byte) { d["canvas"] = []any{100} }},
 		{"canvas of three numbers", func(d map[string]any, _ map[string][]byte) { d["canvas"] = []any{100, 100, 100} }},
 		{"canvas of zero", func(d map[string]any, _ map[string][]byte) { d["canvas"] = []any{0, 100} }},

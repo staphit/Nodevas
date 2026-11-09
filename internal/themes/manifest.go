@@ -92,8 +92,10 @@ type Manifest struct {
 
 // Character is one figure and the scenes it can be drawn in.
 type Character struct {
-	Match  Match            `json:"match"`
-	Scenes map[string]Scene `json:"scenes"`
+	Match Match `json:"match"`
+	// Fallback stands in for agents no character matches. A pack has at most one.
+	Fallback bool             `json:"fallback,omitempty"`
+	Scenes   map[string]Scene `json:"scenes"`
 }
 
 // Match says which agents and models a character stands for.
@@ -186,6 +188,7 @@ func (m *Manifest) validate() error {
 	if len(m.Characters) > maxCharacters {
 		return refusal("a pack can have at most %d characters", "一個套件最多 %d 個角色", maxCharacters)
 	}
+	fallbacks := 0
 	for id, character := range m.Characters {
 		if !namePattern.MatchString(id) {
 			return refusal("the character id %s is not valid", "角色代號 %s 無效", shown(id))
@@ -193,6 +196,12 @@ func (m *Manifest) validate() error {
 		if err := m.validateCharacter(id, character); err != nil {
 			return err
 		}
+		if character.Fallback {
+			fallbacks++
+		}
+	}
+	if fallbacks > 1 {
+		return refusal("a pack can have at most one fallback character", "一個套件最多一個 fallback 角色")
 	}
 	return nil
 }

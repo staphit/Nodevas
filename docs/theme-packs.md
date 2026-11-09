@@ -76,8 +76,9 @@ Folder names are up to you. The only fixed name is `theme.json`, which must sit 
 | `canvas` | Width and height of every room | Two integers from 1 to 8192 |
 | `rooms` | Room id → image | Ids below |
 | `characters` | Character id → its `match` and `scenes` | Ids below |
-| `match.agents` | Which agents this character stands for: `claude`, `codex`, `gemini`, `opencode`, `antigravity` | At most 16 |
+| `match.agents` | Which agents this character stands for: `claude`, `codex` (GPT), `gemini`, `opencode`, `antigravity` | At most 16 |
 | `match.models` | Which models it stands for; `*` is intended as a wildcard | At most 16, at most 64 characters each |
+| `fallback` | Optional. `true` makes this character stand in for agents no other character matches | At most one in a pack |
 | `scenes` | Scene name → one image of this character | Ids below |
 | `room` | Which room the scene happens in | Must be in `rooms` |
 | `image` | The person's transparent image | Must be in the zip |
@@ -111,6 +112,44 @@ Avoid PowerShell's `Compress-Archive`: older versions write backslashes into pat
 Open **Settings → General → Theme packs**, choose **Import a zip**, then pick your pack under **Your theme**. If the zip is refused, the message says what to fix, and any pack with that id keeps working.
 
 Other people on the same server can see your pack in their list and choose it, so it is not private. It shows for them only if they choose it, or if an admin makes it the site default. You can delete your own pack. An admin can delete any pack.
+
+## Install several packs and switch
+
+Import each pack with its own `id`. They all stay installed, up to 5 per person, and you switch under **Settings → General → Theme packs → Your theme**:
+
+| Your theme | What you see |
+| --- | --- |
+| Site default | The pack an admin chose for the site, or the built-in people if none |
+| Built-in pixel people | No pack |
+| A pack's name | That pack |
+
+Your choice is kept in this browser, so another browser or device has its own. It changes only what you see. Importing a pack does not select it.
+
+## Replace one character
+
+A pack does not need every character. To replace only GPT, give one character the agent and models GPT runs under. The character's id is yours to choose, because `match` is what connects it. GPT's agent is `codex`:
+
+```text
+"characters": {
+  "my-gpt": {
+    "match": {"agents": ["codex"], "models": ["gpt*", "o1*", "o3*", "o4*"]},
+    "scenes": { ... }
+  }
+}
+```
+
+To change one character in an existing pack, replace its images, update `x`, `y`, `w`, `h` and `box` if the size or place changed, raise `version`, zip it again and import it. The same `id` replaces the old pack.
+
+## How a pack connects to agents
+
+These are the rules the war room will follow. It does not read packs yet, so none of them can be seen working today.
+
+| Situation | What it will show |
+| --- | --- |
+| Which character is this agent? | First a character whose `match.models` fits the running model, then one whose `match.agents` fits the agent. The model comes first because it says who is really working: opencode running a GPT model shows GPT |
+| No character matches | The pack's `fallback` character; with none, the built-in pixel person |
+| The character has no image for this state | Its `idle` scene; with no `idle`, the built-in pixel person |
+| Several people in one room | Each at their own `x` and `y`. Nothing moves them apart, so keep your spots from overlapping |
 
 ## Limits
 

@@ -41,6 +41,12 @@ describe("a theme manifest", () => {
     expect(parseThemeManifest(manifest())).toEqual(manifest());
   });
 
+  it("keeps a fallback character, and adds nothing when there is none", () => {
+    const parsed = parseThemeManifest(broken((raw) => (raw.characters.claude.fallback = true)));
+    expect(parsed?.characters.claude.fallback).toBe(true);
+    expect(parseThemeManifest(manifest())?.characters.claude).not.toHaveProperty("fallback");
+  });
+
   it("needs no author, rooms, characters or match to be readable", () => {
     const parsed = parseThemeManifest({
       schema: 1,
@@ -89,6 +95,7 @@ describe("a theme manifest", () => {
     ["a room image of another type", broken((raw) => (raw.rooms.up = "a.svg"))],
     ["a bad character id", broken((raw) => (raw.characters.__proto_x = { scenes: {} }))],
     ["a character that is no object", broken((raw) => (raw.characters.claude = 1))],
+    ["fallback that is no boolean", broken((raw) => (raw.characters.claude.fallback = "yes"))],
     ["match that is no object", broken((raw) => (raw.characters.claude.match = "claude"))],
     ["agents of numbers", broken((raw) => (raw.characters.claude.match.agents = [1]))],
     ["a bad scene name", broken((raw) => (raw.characters.claude.scenes["Read Up"] = scene()))],
