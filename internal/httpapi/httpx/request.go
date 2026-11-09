@@ -43,6 +43,8 @@ var projectScopedPathExempt = []string{
 	"/api/runner/",
 	// Station's building reads every project the viewer may, checking each.
 	"/api/station/",
+	// Theme packs are the server's, whichever project is open.
+	"/api/themes",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

@@ -122,6 +122,17 @@ function stringListPref(
   };
 }
 
+/** "" or a theme pack's id (the word "none" reads as one); see `themePack`. */
+function themePackPref(key: string, scope: PreferenceScope): PreferenceSpec<string> {
+  return {
+    key,
+    scope,
+    fallback: () => "",
+    decode: (raw) => (raw === "" || /^[a-z0-9][a-z0-9-]{0,39}$/.test(raw) ? raw : undefined),
+    encode: (value) => value,
+  };
+}
+
 /** The editor's modes and text sizes; the drawer's toolbar and the Settings
  * view's editor defaults both edit these preferences. */
 export const EDITOR_MODES = ["live", "source", "preview"] as const;
@@ -144,6 +155,9 @@ export const PREFERENCE_SCHEMA = {
   // The browser's language until the viewer picks one.
   language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, browserLanguage),
   textScale: numberPref("vised-text-scale", "appearance", TEXT_SCALE),
+  // The theme pack this viewer picked: "" follows the site default, "none" is
+  // the built-in pixel people, anything else a pack's id.
+  themePack: themePackPref("vised-theme-pack", "appearance"),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),
@@ -213,6 +227,7 @@ export const PREFERENCE_SCHEMA = {
     [
       "project",
       "appearance",
+      "themePacks",
       "notifications",
       "backup",
       "workstation",

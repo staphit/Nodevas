@@ -177,6 +177,11 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/api/projects/export", ClassHeavy, 2.0},
 		{http.MethodPost, "/api/projects/import", ClassHeavy, 2.0},
 		{http.MethodPost, "/api/projects/import-path", ClassHeavy, 2.0},
+		{http.MethodPost, "/api/themes", ClassHeavy, 2.0},
+		// Only taking a zip in is heavy: a list and an image are reads.
+		{http.MethodGet, "/api/themes", ClassRead, 1.0},
+		{http.MethodGet, "/api/themes/magic/files/rooms/lounge.webp", ClassRead, 1.0},
+		{http.MethodDelete, "/api/themes/magic", ClassWrite, 1.0},
 		{http.MethodPost, "/api/nodes/node-1/pages/import", ClassHeavy, 2.0},
 		{http.MethodPost, "/api/remote/push", ClassHeavy, 2.0},
 		{http.MethodPost, "/api/remote/import", ClassHeavy, 2.0},

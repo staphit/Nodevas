@@ -11,6 +11,9 @@ var renameRetryDelays = []time.Duration{
 	250 * time.Millisecond, 250 * time.Millisecond,
 }
 
+// RenameWithRetry is renameWithRetry for a rename the store does not do itself.
+func RenameWithRetry(rename func() error) error { return renameWithRetry(rename) }
+
 // renameWithRetry runs rename, retrying while it fails the way a file briefly
 // held open by another process makes it fail (on Windows: access denied or a
 // sharing violation on the target). Any other error, or success, returns at

@@ -221,6 +221,11 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
   } finally {
     window.clearTimeout(timeout);
   }
+  return acceptAnswer(res);
+}
+
+/** What any answer means before its body is read: the hub's state, a sign-in. */
+async function acceptAnswer(res: Response): Promise<Response> {
   // A proxy answering for a hub that is down is no answer from the hub.
   if (await isGatewayFailure(res)) {
     markServerUnreachable();
@@ -246,7 +251,49 @@ export async function req<T>(
   init?: RequestInit,
   verify?: Verifier<T>,
 ): Promise<T> {
-  const res = await send(url, init);
+  return readAnswer(await send(url, init), url, verify);
+}
+
+/**
+ * A multipart POST that reports how much has been sent, which fetch cannot.
+ * Otherwise what req() does, but with no time limit: a large file on a slow
+ * link is not a hung request, and send()'s 30 s would cut it off.
+ */
+export async function uploadWithProgress<T>(
+  url: string,
+  body: FormData,
+  onProgress?: (sent: number, total: number) => void,
+): Promise<T> {
+  const res = await new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Accept-Language", requestLanguage());
+    if (projectOverride) xhr.setRequestHeader("X-Nodevas-Project", projectOverride);
+    const token = csrfToken();
+    if (token) xhr.setRequestHeader("X-CSRF-Token", token);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      const type = xhr.getResponseHeader("Content-Type");
+      resolve(
+        new Response(xhr.status === 204 ? null : xhr.responseText, {
+          status: xhr.status,
+          headers: type ? { "Content-Type": type } : {},
+        }),
+      );
+    };
+    xhr.onerror = () => {
+      markServerUnreachable();
+      reject(new NetworkError());
+    };
+    xhr.send(body);
+  });
+  return readAnswer<T>(await acceptAnswer(res), url);
+}
+
+/** Turns an answer into its value, or its refusal into the error callers expect. */
+async function readAnswer<T>(res: Response, url: string, verify?: Verifier<T>): Promise<T> {
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
     throw new ConflictError(

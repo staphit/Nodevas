@@ -28,6 +28,7 @@ import (
 	"nodevas/internal/runs"
 	"nodevas/internal/safego"
 	"nodevas/internal/store"
+	"nodevas/internal/themes"
 	"nodevas/internal/usage"
 	"path/filepath"
 	"strconv"
@@ -57,6 +58,8 @@ type Server struct {
 	// runs serves /api/runs and the run traffic on the runner socket; nil
 	// until UseRunnersDB.
 	runs *runs.Dispatcher
+	// themes keeps theme packs; nil until UseThemesDB.
+	themes *themes.Store
 	// usage keeps agent sessions' token usage and the prices that cost it;
 	// nil until UseAgentsDB.
 	usage *usage.Store
