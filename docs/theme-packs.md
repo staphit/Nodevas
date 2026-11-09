@@ -42,7 +42,6 @@ Folder names are up to you. The only fixed name is `theme.json`, which must sit 
 ```json
 {
   "schema": 1,
-  "id": "my-pack",
   "name": {"en": "My pack", "zh-TW": "我的主題"},
   "version": "1.0.0",
   "author": "your name",
@@ -69,8 +68,7 @@ Folder names are up to you. The only fixed name is `theme.json`, which must sit 
 | Field | Meaning | Rule |
 | --- | --- | --- |
 | `schema` | Format version | Exactly `1` |
-| `id` | The pack's id. Importing the same id again replaces your pack | Lowercase letters, digits and `-`, at most 40. Not `none` or `default` |
-| `name` | Name shown in Settings | `en` is required, `zh-TW` is optional, at most 64 characters each |
+| `name` | Name shown in Settings. `en` also identifies the pack: importing the same name again replaces your pack | `en` is required and uses English letters and digits, with at most 40 of them. `zh-TW` is optional. At most 64 characters each. Not `none` or `default` |
 | `version` | Your version | 1 to 64 characters |
 | `author` | Who made it | At most 64 characters |
 | `canvas` | Width and height of every room | Two integers from 1 to 8192 |
@@ -85,7 +83,7 @@ Folder names are up to you. The only fixed name is `theme.json`, which must sit 
 | `x`, `y`, `w`, `h` | The rectangle the image fills, in canvas pixels. Keep `w` and `h` the image's own size | Integers, inside the canvas |
 | `box` | Left, top, right, bottom of the person inside the canvas: the area meant for clicking | Inside the canvas, left < right, top < bottom |
 
-Room ids, character ids and scene names use lowercase letters, digits, `_` and `-`, at most 64 characters. A pack can have at most 256 rooms, 64 characters, and 256 scenes per character. An unknown field anywhere refuses the zip, which catches typos.
+Room ids, character ids and scene names use lowercase letters, digits, `_` and `-`, at most 64 characters. Punctuation and spaces in `name.en` are ignored when comparing names, so `Magic world` and `magic-world` are the same pack. If someone else already imported that name, change yours. A pack can have at most 256 rooms, 64 characters, and 256 scenes per character. An unknown field anywhere refuses the zip, which catches typos.
 
 Scene names you can use now, which may change before the war room reads them:
 
@@ -109,13 +107,13 @@ Avoid PowerShell's `Compress-Archive`: older versions write backslashes into pat
 
 ### 6. Import it
 
-Open **Settings → General → Theme packs**, choose **Import a zip**, then pick your pack under **Your theme**. If the zip is refused, the message says what to fix, and any pack with that id keeps working.
+Open **Settings → General → Theme packs**, choose **Import a zip**, then pick your pack under **Your theme**. If the zip is refused, the message says what to fix, and any pack with that name keeps working.
 
 Other people on the same server can see your pack in their list and choose it, so it is not private. It shows for them only if they choose it, or if an admin makes it the site default. You can delete your own pack. An admin can delete any pack.
 
 ## Install several packs and switch
 
-Import each pack with its own `id`. They all stay installed, up to 5 per person, and you switch under **Settings → General → Theme packs → Your theme**:
+Import each pack under its own name in `name.en`. They all stay installed, up to 5 per person, and you switch under **Settings → General → Theme packs → Your theme**:
 
 | Your theme | What you see |
 | --- | --- |
@@ -138,7 +136,7 @@ A pack does not need every character. To replace only GPT, give one character th
 }
 ```
 
-To change one character in an existing pack, replace its images, update `x`, `y`, `w`, `h` and `box` if the size or place changed, raise `version`, zip it again and import it. The same `id` replaces the old pack.
+To change one character in an existing pack, replace its images, update `x`, `y`, `w`, `h` and `box` if the size or place changed, raise `version`, zip it again and import it. The same `name.en` replaces the old pack. Changing `name.en` makes a new pack instead: the old one stays until you delete it.
 
 ## How a pack connects to agents
 

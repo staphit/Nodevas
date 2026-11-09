@@ -280,7 +280,7 @@ func (s *Store) admit(ctx context.Context, id, owner string, size int64, limits 
 		return err
 	}
 	if err == nil && current != owner {
-		return conflict("the id %q belongs to a pack someone else imported", "代號「%s」屬於別人匯入的套件", id)
+		return conflict("someone else imported a pack with this name (%s); change name.en", "別人已匯入同名的主題包（%s），請修改 name.en", id)
 	}
 	var count int
 	var others int64

@@ -36,7 +36,7 @@ var (
 )
 
 const manifestFor = `{
-  "schema": 1, "id": "ID", "name": {"en": "Magic world", "zh-TW": "魔法世界"}, "version": "1.0.0", "author": "someone",
+  "schema": 1, "name": {"en": "ID", "zh-TW": "魔法世界"}, "version": "1.0.0", "author": "someone",
   "canvas": [1536, 864], "rooms": {"lounge": "rooms/lounge.webp"},
   "characters": {"claude": {"match": {"agents": ["claude"], "models": ["claude*"]}, "scenes": {
     "read": {"room": "lounge", "image": "figures/read.png", "x": 100, "y": 200, "w": 300, "h": 500, "box": [120, 210, 380, 700]}}}}}`
@@ -175,7 +175,7 @@ func TestUploadAnswersTheContractsPack(t *testing.T) {
 		t.Errorf("%d fields in %s", len(fields), rec.Body)
 	}
 	name := fields["name"].(map[string]any)
-	if name["en"] != "Magic world" || name["zh-TW"] != "魔法世界" {
+	if name["en"] != "magic" || name["zh-TW"] != "魔法世界" {
 		t.Errorf("name = %v", name)
 	}
 	if fields["mine"] != true || fields["canDelete"] != true || fields["owner"] != "alice" {

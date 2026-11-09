@@ -23,7 +23,7 @@ func TestImportStoresThePack(t *testing.T) {
 	s, database := newTestStore(t)
 	pack := mustImport(t, s, "alice", "magic")
 	if pack.ID != "magic" || pack.OwnerID != "alice" || pack.Version != "1.0.0" || pack.Author != "someone" ||
-		pack.Name.En != "Magic world" || pack.Name.ZhTW != "魔法世界" {
+		pack.Name.En != "magic" || pack.Name.ZhTW != "魔法世界" {
 		t.Fatalf("pack = %+v", pack)
 	}
 	if pack.CreatedAt == "" || pack.UpdatedAt == "" {
@@ -253,14 +253,14 @@ func TestQuotas(t *testing.T) {
 			mustImport(t, s, "alice", id)
 		}
 		doc := manifestDoc()
-		doc["id"] = "a6"
+		doc["name"] = map[string]any{"en": "a6"}
 		_, err := doImport(ctx, s, "alice", packZip(t, doc, goodFiles()))
 		expectRefused(t, err, http.StatusForbidden)
 		if _, err := os.Stat(filepath.Join(s.dir, "a6")); !os.IsNotExist(err) {
 			t.Fatalf("the sixth pack is on disk: %v", err)
 		}
 		// Replacing is not a sixth, and somebody else has their own five.
-		doc["id"] = "a5"
+		doc["name"] = map[string]any{"en": "a5"}
 		if _, err := doImport(ctx, s, "alice", packZip(t, doc, goodFiles())); err != nil {
 			t.Fatalf("replacing at the quota: %v", err)
 		}
@@ -273,7 +273,8 @@ func TestQuotas(t *testing.T) {
 		limits.MaxServerBytes = first.SizeBytes*2 - 1
 		s.SetLimits(limits)
 		doc := manifestDoc()
-		doc["id"] = "second"
+		// As long a name as the first's, so the two packs weigh the same.
+		doc["name"] = map[string]any{"en": "magix", "zh-TW": "魔法世界"}
 		_, err := doImport(ctx, s, "bob", packZip(t, doc, goodFiles()))
 		expectRefused(t, err, http.StatusForbidden)
 		expectNoTrace(t, s, database, "magic")

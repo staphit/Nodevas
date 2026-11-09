@@ -25,14 +25,14 @@ func TestASpoiledManifestRefusesTheWholeZip(t *testing.T) {
 	}{
 		{"schema 2", func(d map[string]any, _ map[string][]byte) { d["schema"] = 2 }},
 		{"no schema", func(d map[string]any, _ map[string][]byte) { delete(d, "schema") }},
-		{"id with capitals", func(d map[string]any, _ map[string][]byte) { d["id"] = "Magic" }},
-		{"id starting with a hyphen", func(d map[string]any, _ map[string][]byte) { d["id"] = "-magic" }},
-		{"id of 41 characters", func(d map[string]any, _ map[string][]byte) { d["id"] = strings.Repeat("a", 41) }},
-		{"id walking out", func(d map[string]any, _ map[string][]byte) { d["id"] = "../magic" }},
-		{"id with a trailing newline", func(d map[string]any, _ map[string][]byte) { d["id"] = "magic\n" }},
+		// An id comes from the name, so a zip cannot choose one for itself.
+		{"an id in theme.json", func(d map[string]any, _ map[string][]byte) { d["id"] = "magic" }},
+		{"a name with nothing to make an id of", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": "!!!"} }},
+		{"a name of 41 letters", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": strings.Repeat("a", 41)} }},
+		{"a name that is not ASCII", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": "魔法 world"} }},
 		// "none" is the web preference's built-in people, "default" a route.
-		{"the reserved id none", func(d map[string]any, _ map[string][]byte) { d["id"] = "none" }},
-		{"the reserved id default", func(d map[string]any, _ map[string][]byte) { d["id"] = "default" }},
+		{"the reserved name none", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": "None"} }},
+		{"the reserved name default", func(d map[string]any, _ map[string][]byte) { d["name"] = map[string]any{"en": "default"} }},
 		{"empty version", func(d map[string]any, _ map[string][]byte) { d["version"] = "" }},
 		{"long version", func(d map[string]any, _ map[string][]byte) { d["version"] = strings.Repeat("1", 65) }},
 		{"long author", func(d map[string]any, _ map[string][]byte) { d["author"] = strings.Repeat("a", 65) }},
@@ -175,7 +175,7 @@ func TestManifestCounts(t *testing.T) {
 	}
 
 	doc = manifestDoc()
-	doc["id"] = "characters"
+	doc["name"] = map[string]any{"en": "characters"}
 	one := doc["characters"].(map[string]any)["claude"]
 	characters := map[string]any{}
 	for i := range 65 {
@@ -185,7 +185,7 @@ func TestManifestCounts(t *testing.T) {
 	expectRefused(t, importErr(t, s, doc, goodFiles()), http.StatusBadRequest)
 
 	doc = manifestDoc()
-	doc["id"] = "scenes"
+	doc["name"] = map[string]any{"en": "scenes"}
 	scene := sceneOf(doc)
 	scenes := map[string]any{}
 	for i := range 257 {
@@ -468,7 +468,7 @@ func TestSizeLimits(t *testing.T) {
 	})
 	t.Run("a file at the limit", func(t *testing.T) {
 		doc, files := manifestDoc(), goodFiles()
-		doc["id"] = "atlimit"
+		doc["name"] = map[string]any{"en": "atlimit"}
 		files["figures/claude/read.png"] = sized(int(limits.MaxFileBytes))
 		if err := importErr(t, s, doc, files); err != nil {
 			t.Fatalf("at the limit: %v", err)

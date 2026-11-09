@@ -152,12 +152,8 @@ func (m *Manifest) validate() error {
 	if m.Schema != manifestSchema {
 		return refusal("theme.json schema must be %d", "theme.json 的 schema 必須是 %d", manifestSchema)
 	}
-	if !ValidID(m.ID) {
-		return refusal("the pack id %s is not valid: lowercase letters, digits and hyphens, at most 40",
-			"套件代號 %s 無效：只能用小寫字母、數字與連字號，最多 40 個字元", shown(m.ID))
-	}
-	if reservedIDs[m.ID] {
-		return refusal("the pack id %s is reserved; choose another", "套件代號 %s 已保留，請換一個", shown(m.ID))
+	if m.ID != "" {
+		return refusal("theme.json must not have an id: it comes from name.en", "theme.json 不可以有 id：代號由 name.en 產生")
 	}
 	if m.Version == "" || !shortText(m.Version) {
 		return refusal("version must be 1 to %d characters", "version 必須是 1 到 %d 個字元", maxTextRunes)
@@ -171,6 +167,11 @@ func (m *Manifest) validate() error {
 	if !shortText(m.Name.En) || !shortText(m.Name.ZhTW) {
 		return refusal("each name must be at most %d characters", "每個名稱最多 %d 個字元", maxTextRunes)
 	}
+	id, err := packID(m.Name.En)
+	if err != nil {
+		return err
+	}
+	m.ID = id
 	if len(m.Canvas) != 2 || m.Canvas[0] < 1 || m.Canvas[0] > maxCanvas || m.Canvas[1] < 1 || m.Canvas[1] > maxCanvas {
 		return refusal("canvas must be two integers from 1 to %d", "canvas 必須是兩個 1 到 %d 的整數", maxCanvas)
 	}
@@ -287,6 +288,38 @@ func (m *Manifest) fillEmpties() {
 		}
 		m.Characters[id] = character
 	}
+}
+
+// packID is the id a pack's English name gives it: an author writes a name, but
+// a folder and a URL need something plainer. Only ASCII letters and digits
+// survive, runs of anything else become one hyphen, and a letter from another
+// script refuses the name, as dropping it could turn two names into one.
+func packID(name string) (string, error) {
+	var id strings.Builder
+	gap := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r > 0x7f:
+			return "", refusal("name.en %s must use English letters and digits; put other languages in their own name",
+				"name.en %s 只能用英文字母和數字；其他語言請寫在各自的名稱", shown(name))
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			if gap && id.Len() > 0 {
+				id.WriteByte('-')
+			}
+			id.WriteRune(r)
+			gap = false
+		default:
+			gap = true
+		}
+	}
+	result := id.String()
+	if !ValidID(result) {
+		return "", refusal("name.en %s needs 1 to 40 letters and digits to name a pack", "name.en %s 需要 1 到 40 個英文字母或數字才能當主題包名稱", shown(name))
+	}
+	if reservedIDs[result] {
+		return "", refusal("the name %s is reserved; choose another", "名稱 %s 已保留，請換一個", shown(name))
+	}
+	return result, nil
 }
 
 // ValidID reports whether id has the form of a pack id. A reserved id has it

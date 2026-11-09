@@ -25,7 +25,7 @@ func themeZip(t *testing.T, id string) []byte {
 	var out bytes.Buffer
 	writer := zip.NewWriter(&out)
 	files := map[string]string{
-		"theme.json": `{"schema":1,"id":"` + id + `","name":{"en":"Magic"},"version":"1","canvas":[100,100],
+		"theme.json": `{"schema":1,"name":{"en":"` + id + `"},"version":"1","canvas":[100,100],
 			"rooms":{"lounge":"lounge.webp"},"characters":{}}`,
 		"lounge.webp": "RIFF\x10\x00\x00\x00WEBPVP8 body",
 	}

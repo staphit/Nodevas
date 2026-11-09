@@ -35,8 +35,7 @@ func newTestStore(t *testing.T) (*Store, *db.DB) {
 func manifestDoc() map[string]any {
 	return map[string]any{
 		"schema":  1,
-		"id":      "magic",
-		"name":    map[string]any{"en": "Magic world", "zh-TW": "魔法世界"},
+		"name":    map[string]any{"en": "Magic", "zh-TW": "魔法世界"},
 		"version": "1.0.0",
 		"author":  "someone",
 		"canvas":  []any{1536, 864},
@@ -126,11 +125,11 @@ func doImport(ctx context.Context, s *Store, owner string, archive []byte) (Pack
 	return s.Import(ctx, owner, bytes.NewReader(archive), int64(len(archive)))
 }
 
-// mustImport imports a good pack with the given id as owner.
+// mustImport imports a good pack named for the given id as owner.
 func mustImport(t testing.TB, s *Store, owner, id string) Pack {
 	t.Helper()
 	doc := manifestDoc()
-	doc["id"] = id
+	doc["name"] = map[string]any{"en": id, "zh-TW": "魔法世界"}
 	pack, err := doImport(context.Background(), s, owner, packZip(t, doc, goodFiles()))
 	if err != nil {
 		t.Fatalf("import %s: %v", id, err)
