@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodevasBinary } from "./database";
-import { expect, freshProject, test } from "./fixture";
+import { asTeamHub, expect, freshProject, setPreferences, test } from "./fixture";
 
 // Agent interaction against the real binary: an agent raises its hand
 // (ask_user: approval, question, choice) or relays a tool-permission prompt
@@ -251,13 +251,7 @@ async function askOverHttp(page: Page, body: Record<string, unknown>): Promise<A
 
 /** Switches the UI language for this page and reloads into it. */
 async function useLanguage(page: Page, language: "en" | "zh-TW", extra: Record<string, string> = {}) {
-  await page.addInitScript(
-    ({ language, extra }) => {
-      localStorage.setItem("vised-language", language);
-      for (const [key, value] of Object.entries(extra)) localStorage.setItem(key, value);
-    },
-    { language, extra },
-  );
+  await setPreferences(page, { "vised-language": language, ...extra });
   await page.reload();
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible({ timeout: 15_000 });
 }
@@ -567,6 +561,9 @@ test("runner details show the permission relay read-only, with the command to ch
     route.fulfill({ json: { runners: [runner("r-on", "desktop", true), runner("r-off", "laptop", false)] } }),
   );
   await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [] } }));
+  // Runner details are a team hub's: the single-user edition lists no
+  // runners, its own is This computer.
+  await asTeamHub(page);
   await freshProject(page, ["設計稿"]);
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
 

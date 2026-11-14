@@ -1,4 +1,4 @@
-import { expect, freshProject, test } from "./fixture";
+import { expect, freshProject, setPreferences, test } from "./fixture";
 
 // A project's office style against the real binary: chosen from the door
 // sign in Station, saved in graph.yaml (office_style) through the graph save,
@@ -6,10 +6,7 @@ import { expect, freshProject, test } from "./fixture";
 
 test("office style: chosen from the door sign, kept, and shown in Settings", async ({ page }) => {
   await freshProject(page);
-  await page.addInitScript(() => {
-    localStorage.setItem("vised-language", "en");
-    localStorage.setItem("vised-project-mode", "station");
-  });
+  await setPreferences(page, { "vised-language": "en", "vised-project-mode": "station" });
   await page.reload();
 
   const office = page.getByRole("region", { name: /^Office / });
