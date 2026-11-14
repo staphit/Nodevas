@@ -151,8 +151,8 @@ for (const [name, viewport] of Object.entries({
     });
     await page.reload();
 
-    const panel = page.getByRole("region", { name: "War room" });
-    await expect(panel.getByRole("heading", { name: "War room" })).toBeVisible({ timeout: 15_000 });
+    const panel = page.getByRole("region", { name: "Agent activity" });
+    await expect(panel.getByRole("heading", { name: "Agent activity" })).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByTitle("3 active runs")).toHaveText("3");
     // Three live runs, each a character in the room.
     await expect(panel.getByRole("button", { name: /^Claude opus in mac-mini: working, on “Auth API”/ })).toBeVisible();

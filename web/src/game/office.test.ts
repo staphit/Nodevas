@@ -190,9 +190,11 @@ describe("run characters", () => {
       runId: run.id,
       ownerName: "bea",
       pose: "waiting-ci",
-      target: { kind: "run", runId: run.id, nodeId: "login" },
+      // A click opens the run's workspace; the run view is next in its menu.
+      target: { kind: "run-workspace", runId: run.id, nodeId: "login" },
     });
     expect(a.actions).toEqual([
+      { kind: "run-workspace", runId: run.id, nodeId: "login" },
       { kind: "run", runId: run.id, nodeId: "login" },
       { kind: "node", nodeId: "login" },
       { kind: "run-diff", runId: run.id, nodeId: "login" },
@@ -203,7 +205,7 @@ describe("run characters", () => {
   it("offers no diff without changes and no PR link that is not http(s)", () => {
     const run = makeRun({ prUrl: "javascript:alert(1)" });
     const a = office({ runs: [run] }).actors[0];
-    expect(a.actions.map((t) => t.kind)).toEqual(["run", "node"]);
+    expect(a.actions.map((t) => t.kind)).toEqual(["run-workspace", "run", "node"]);
   });
 
   it("keeps parallel reviewers on one node apart, around one meeting table", () => {
@@ -443,11 +445,44 @@ describe("which runs get a seat", () => {
     expect(seatedRuns([{ ...done, status: "cancelled" }], NOW)).toEqual([]);
   });
 
+  it("never seats a run whose work was discarded", () => {
+    const failed = makeRun({ status: "failed", finishedAt: ago(1000), workspace: "discarded" });
+    expect(seatedRuns([failed], NOW)).toEqual([]);
+    const merged = makeRun({ status: "failed", finishedAt: ago(1000), workspace: "merged_local" });
+    expect(seatedRuns([merged], NOW)).toEqual([merged]);
+  });
+
+  it("keeps a run while its workspace action waits for the runner", () => {
+    const done = makeRun({
+      status: "succeeded",
+      finishedAt: ago(FINISHED_SHOW_MS + 1),
+      workspaceAction: { id: "w", runId: "r", action: "merge_local", status: "pending", requestedBy: "bea", createdAt: "" },
+    });
+    expect(seatedRuns([done], NOW)).toEqual([done]);
+  });
+
   it("lets a finished run go after a day", () => {
     const failed = makeRun({ status: "failed", finishedAt: ago(FINISHED_RUN_SEAT_MS + 1) });
     expect(seatedRuns([failed], NOW)).toEqual([]);
     const recent = makeRun({ status: "failed", finishedAt: ago(FINISHED_RUN_SEAT_MS - 1) });
     expect(seatedRuns([recent], NOW)).toEqual([recent]);
+  });
+
+  it("never lets a run with no node (a global agent's) replace another", () => {
+    const failed = makeRun({ nodeId: "", global: true, status: "failed", createdAt: ago(50_000), finishedAt: ago(40_000) });
+    const newer = makeRun({ nodeId: "", global: true, createdAt: ago(10_000) });
+    expect(seatedRuns([failed, newer], NOW)).toEqual([failed, newer]);
+  });
+});
+
+describe("global agents' characters", () => {
+  it("are named by their task's title when there is no node", () => {
+    const run = makeRun({ nodeId: "", project: "", global: true, title: "Bump the deps" });
+    const { actors } = office({ runs: [run] });
+    expect(actor(actors, runActorId(run.id)).nodeTitle).toBe("Bump the deps");
+    // A node's title still wins over a run's own.
+    const nodeRun = makeRun({ nodeId: "login", title: "ignored" });
+    expect(actor(office({ runs: [nodeRun] }).actors, runActorId(nodeRun.id)).nodeTitle).toBe("Login form");
   });
 });
 

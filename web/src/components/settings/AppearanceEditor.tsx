@@ -1,15 +1,18 @@
 import { useApp, usePreference } from "../../store";
 import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../../i18n";
 import { EDITOR_FONT_SIZE, EDITOR_MODES, TEXT_SCALE } from "../../preferences/schema";
+import { useEdition } from "../../runners/edition";
 import { confirmAction } from "../ConfirmDialog";
 import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
 
-/** Local preferences only — nothing here reaches the project files. The
+/** Personal preferences — nothing here reaches the project files. The
  * theme, the language, the tour and help; the rest of the local preferences
- * are LayoutEditor's, a row of their own in Settings. */
+ * are LayoutEditor's, a row of their own in Settings. Choices follow the
+ * account (preferences/sync.ts); panel sizes stay on this device. */
 export function AppearanceEditor() {
   const { language, setLanguage, t } = useI18n();
+  const single = useEdition() === "single";
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
   const updateUIPreference = useApp((s) => s.updateUIPreference);
@@ -19,7 +22,9 @@ export function AppearanceEditor() {
   return (
     <section className="settings-section">
       <p className="settings-hint">
-        {t("appearance.localOnly")}
+        {[t(single ? "prefsSync.local" : "prefsSync.account"), t("prefsSync.deviceOnly")].join(
+          language === "zh-TW" ? "" : " ",
+        )}
       </p>
       <div className="settings-row">
         <span>{t("appearance.theme")}</span>

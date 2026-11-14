@@ -15,6 +15,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	prefsapi "nodevas/internal/httpapi/prefs"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
 	"nodevas/internal/runners"
@@ -527,6 +528,17 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 	if method == http.MethodGet && analyticsReportPath(path) {
 		return ClassExpensive, 1.0
 	}
+	// Checking a folder before adding it as a repo changes nothing: a person
+	// clicking through folders in the picker is normal use.
+	if method == http.MethodPost && repoInspectPath(path) {
+		return ClassRead, 1.0
+	}
+	// Saving a preference follows a person's clicks (the app batches them):
+	// past the burst it waits its turn as a read does, never refused at
+	// once.
+	if method == http.MethodPatch && path == prefsapi.Path {
+		return ClassRead, 1.0
+	}
 	if isUnsafeMethod(method) {
 		return ClassWrite, 1.0
 	}
@@ -576,6 +588,16 @@ func analyticsReportPath(path string) bool {
 		return true
 	}
 	return false
+}
+
+// repoInspectPath is POST /api/runners/:id/repos/inspect.
+func repoInspectPath(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/runners/")
+	if !ok {
+		return false
+	}
+	id, suffix, ok := strings.Cut(rest, "/")
+	return ok && id != "" && suffix == "repos/inspect"
 }
 
 func expensivePath(path string) bool {

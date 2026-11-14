@@ -929,7 +929,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 	}
 	req := runs.StartRequest{
 		Body: body, Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName,
-		SteppedUpAt: rec.SteppedUpAt,
+		SteppedUpAt: rec.SteppedUpAt, Origin: runnerwire.OriginAutopilot,
 		// The DAG only schedules dispatchable members, so the type gate in
 		// runs.Start passes; it is still stated rather than assumed.
 		LoadNode: func() (runs.NodeInfo, bool, error) {

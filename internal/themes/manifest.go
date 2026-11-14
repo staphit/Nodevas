@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"nodevas/internal/locale"
@@ -26,8 +27,14 @@ const (
 	maxCharacters  = 64
 	maxScenes      = 256
 	maxMatches     = 16
+	maxFrames      = 16
+	maxClickFrames = 4
 	maxTextRunes   = 64
 	maxPathBytes   = 200
+	maxPlaceRunes  = 40
+	maxWordRunes   = 120
+	maxLineRunes   = 200
+	maxTitleRunes  = 40
 	// maxShownRunes is how much of a name from a zip an error repeats.
 	maxShownRunes = 80
 )
@@ -37,30 +44,78 @@ var (
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 )
 
+// hexColor is the only form a skin's colour may have: #rgb, #rrggbb or
+// #rrggbbaa. The value ends up in a CSS custom property, so nothing that could
+// say more than a colour passes.
+var hexColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+
+// skinSchemes are the built-in palettes a skin's colours start from, skinFonts
+// the typefaces it may ask for, and skinColors the colours it may set.
+var (
+	skinSchemes = map[string]bool{"light": true, "dark": true}
+	skinFonts   = map[string]bool{"sans": true, "serif": true}
+	skinColors  = map[string]bool{
+		"bg": true, "surface": true, "surface-2": true, "border": true, "border-strong": true,
+		"hover": true, "text": true, "text-2": true, "accent": true, "accent-text": true,
+	}
+)
+
+// placeIDs are the six places of the war room a pack may name.
+var placeIDs = map[string]bool{
+	"work": true, "meeting": true, "entrance": true, "lounge": true, "away": true, "runners": true,
+}
+
+// wordKeys are the pieces of the story war room's interface a pack may word
+// its own way.
+var wordKeys = map[string]bool{
+	"narrator": true, "unnamed": true, "task": true, "people": true, "notices": true, "others": true,
+	"nobody": true, "count": true, "runnerCount": true, "failed": true, "empty": true,
+	"noticesLine": true, "runnersLine": true, "heldLine": true, "more": true, "status": true,
+	"role": true, "node": true, "runner": true, "tokens": true, "project": true, "held": true, "tests": true,
+}
+
+// lineStates are the states an agent has a line for in the dialogue box.
+var lineStates = map[string]bool{
+	"offline": true, "asking-user": true, "failed": true, "limit": true, "awaiting-accept": true,
+	"waiting-ci": true, "reviewing": true, "working": true, "finished": true, "idle": true,
+}
+
 // reservedIDs mean something else where a pack id goes: "none" is the web
 // preference's value for the built-in people, "default" the route
 // PUT /api/themes/default.
 var reservedIDs = map[string]bool{"none": true, "default": true}
 
-// imageTypes are the only files a pack holds, by extension: a file is served
-// as the type its extension says, never as what its bytes look like.
-var imageTypes = map[string]string{
-	".webp": "image/webp",
-	".png":  "image/png",
-	".jpg":  "image/jpeg",
-	".jpeg": "image/jpeg",
-}
+// imageTypes and clipTypes are the only files a pack holds, by extension: a
+// file is served as the type its extension says, never as what its bytes look
+// like. A clip is only ever a scene's video or click video; everything else
+// is an image.
+var (
+	imageTypes = map[string]string{
+		".webp": "image/webp",
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+	}
+	clipTypes = map[string]string{
+		".mp4":  "video/mp4",
+		".webm": "video/webm",
+	}
+)
 
-// ContentType is the type a pack's image is served as, and false for a name
-// that is no image a pack may hold.
+// ContentType is the type a pack's image or clip is served as, and false for
+// a name that is no file a pack may hold.
 func ContentType(name string) (string, bool) {
-	contentType, ok := imageTypes[path.Ext(name)]
+	extension := path.Ext(name)
+	if contentType, ok := imageTypes[extension]; ok {
+		return contentType, true
+	}
+	contentType, ok := clipTypes[extension]
 	return contentType, ok
 }
 
-// matchesImageType reports whether a file's leading bytes are the type its
+// matchesType reports whether a file's leading bytes are the type its
 // extension says, so that a page cannot arrive dressed as a picture.
-func matchesImageType(name string, head []byte) bool {
+func matchesType(name string, head []byte) bool {
 	switch path.Ext(name) {
 	case ".webp":
 		return len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP"
@@ -68,6 +123,12 @@ func matchesImageType(name string, head []byte) bool {
 		return bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n"))
 	case ".jpg", ".jpeg":
 		return bytes.HasPrefix(head, []byte{0xFF, 0xD8, 0xFF})
+	case ".mp4":
+		// The first box of an MP4 is its ftyp, after the box's four-byte size.
+		return len(head) >= 8 && string(head[4:8]) == "ftyp"
+	case ".webm":
+		// The EBML header every WebM starts with.
+		return bytes.HasPrefix(head, []byte{0x1A, 0x45, 0xDF, 0xA3})
 	}
 	return false
 }
@@ -88,14 +149,43 @@ type Manifest struct {
 	Canvas     []int                `json:"canvas"`
 	Rooms      map[string]string    `json:"rooms"`
 	Characters map[string]Character `json:"characters"`
+	// Skin colours the whole app, not only the war room. Nil is the app's own
+	// colours.
+	Skin *Skin `json:"skin,omitempty"`
+	// Places is the pack's names for places of the war room, by place.
+	Places map[string]Name `json:"places,omitempty"`
+	// Words is the pack's wording for the story war room's interface, by the
+	// piece it words.
+	Words map[string]Name `json:"words,omitempty"`
+	// Lines is what an agent says in the dialogue box, by its state. A
+	// character's own lines win over these, and these over the app's.
+	Lines map[string]Name `json:"lines,omitempty"`
+}
+
+// Skin is a pack's colours for the app.
+type Skin struct {
+	// Scheme is the built-in palette Colors start from: "light" or "dark".
+	Scheme string `json:"scheme"`
+	// Font is "sans" or "serif"; empty leaves the app's own.
+	Font string `json:"font,omitempty"`
+	// Colors are hex colours by the name the app knows each as.
+	Colors map[string]string `json:"colors,omitempty"`
 }
 
 // Character is one figure and the scenes it can be drawn in.
 type Character struct {
 	Match Match `json:"match"`
 	// Fallback stands in for agents no character matches. A pack has at most one.
-	Fallback bool             `json:"fallback,omitempty"`
-	Scenes   map[string]Scene `json:"scenes"`
+	Fallback bool `json:"fallback,omitempty"`
+	// Sign is an image that floats over the character, in the scenes that say
+	// where.
+	Sign   string           `json:"sign,omitempty"`
+	Scenes map[string]Scene `json:"scenes"`
+	// Title is what the character is called on the dialogue box's name plate,
+	// before the agent's own name. Nil is no title.
+	Title *Name `json:"title,omitempty"`
+	// Lines is what this character says in the dialogue box, by its state.
+	Lines map[string]Name `json:"lines,omitempty"`
 }
 
 // Match says which agents and models a character stands for.
@@ -104,15 +194,39 @@ type Match struct {
 	Models []string `json:"models"`
 }
 
-// Scene places one image of a character in a room.
+// Scene places one image of a character on the canvas: over a room, or with
+// no room as the whole picture.
 type Scene struct {
-	Room  string    `json:"room"`
+	Room  string    `json:"room,omitempty"`
 	Image string    `json:"image"`
 	X     int       `json:"x"`
 	Y     int       `json:"y"`
 	W     int       `json:"w"`
 	H     int       `json:"h"`
 	Box   []float64 `json:"box"`
+	// Frames makes Image a strip of frames side by side, each W by H.
+	Frames *Frames `json:"frames,omitempty"`
+	// Video is a clip played silent and looping in place of Image. Image
+	// stays the still picture: shown before the clip plays, wherever nothing
+	// may move, and wherever else the scene is drawn.
+	Video string `json:"video,omitempty"`
+	// ClickVideo is a clip played once, silent, when the picture is clicked,
+	// before the loop (or the still) comes back. It starts and ends on Image.
+	ClickVideo string `json:"clickVideo,omitempty"`
+	// Sign is where the character's sign goes over this picture: the x and y
+	// of its centre and its width, in canvas pixels.
+	Sign []float64 `json:"sign,omitempty"`
+}
+
+// Frames says how a strip of frames is played. Frame 0 is the still picture;
+// each other frame holds only what it changes and is drawn over frame 0.
+type Frames struct {
+	Count int `json:"count"`
+	// Blink is the frame played now and then. Nil is none: 0 could not say
+	// so, being the still picture.
+	Blink *int `json:"blink,omitempty"`
+	// Click is the frames played in order on a click.
+	Click []int `json:"click,omitempty"`
 }
 
 // refusal is a zip the uploader has to fix.
@@ -204,6 +318,100 @@ func (m *Manifest) validate() error {
 	if fallbacks > 1 {
 		return refusal("a pack can have at most one fallback character", "一個套件最多一個 fallback 角色")
 	}
+	if m.Skin != nil {
+		if err := validateSkin(*m.Skin); err != nil {
+			return err
+		}
+	}
+	if err := validatePlaces(m.Places); err != nil {
+		return err
+	}
+	if err := validateWords(m.Words); err != nil {
+		return err
+	}
+	return validateLines("lines", m.Lines)
+}
+
+func validateSkin(skin Skin) error {
+	if !skinSchemes[skin.Scheme] {
+		return refusal(`skin.scheme must be "light" or "dark"`, `skin.scheme 必須是 "light" 或 "dark"`)
+	}
+	if skin.Font != "" && !skinFonts[skin.Font] {
+		return refusal(`skin.font must be "sans" or "serif"`, `skin.font 必須是 "sans" 或 "serif"`)
+	}
+	for name, value := range skin.Colors {
+		if !skinColors[name] {
+			return refusal("skin.colors has no colour %s", "skin.colors 沒有 %s 這個顏色", shown(name))
+		}
+		if !hexColor.MatchString(value) {
+			return refusal("skin.colors.%s must be a hex colour: #rgb, #rrggbb or #rrggbbaa",
+				"skin.colors.%s 必須是十六進位色碼：#rgb、#rrggbb 或 #rrggbbaa", name)
+		}
+	}
+	return nil
+}
+
+func validatePlaces(places map[string]Name) error {
+	for id, name := range places {
+		if !placeIDs[id] {
+			return refusal("places has no place %s", "places 沒有 %s 這個地點", shown(id))
+		}
+		if name.En == "" {
+			return refusal("place %s needs an English name (en)", "地點 %s 必須有英文名稱（en）", id)
+		}
+		for _, text := range []string{name.En, name.ZhTW} {
+			if utf8.RuneCountInString(text) > maxPlaceRunes {
+				return refusal("place %s: each name must be at most %d characters", "地點 %s：每個名稱最多 %d 個字元", id, maxPlaceRunes)
+			}
+			if strings.ContainsFunc(text, unicode.IsControl) {
+				return refusal("place %s: a name must not have control characters", "地點 %s：名稱不可以有控制字元", id)
+			}
+		}
+	}
+	return nil
+}
+
+func validateWords(words map[string]Name) error {
+	for key, text := range words {
+		if !wordKeys[key] {
+			return refusal("words has no word %s", "words 沒有 %s 這個用語", shown(key))
+		}
+		if err := validateWording("words."+key, text, maxWordRunes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateLines checks the lines at where: the pack's "lines", or one
+// character's.
+func validateLines(where string, lines map[string]Name) error {
+	for state, text := range lines {
+		if !lineStates[state] {
+			return refusal("%s has no state %s", "%s 沒有 %s 這個狀態", where, shown(state))
+		}
+		if err := validateWording(where+"."+state, text, maxLineRunes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateWording checks one text a pack words its own way: English is
+// required, and neither language may run past limit or hold a control
+// character. The app replaces {node} in a line; nothing here reads it.
+func validateWording(where string, text Name, limit int) error {
+	if text.En == "" {
+		return refusal("%s needs English text (en)", "%s 必須有英文文字（en）", where)
+	}
+	for _, value := range []string{text.En, text.ZhTW} {
+		if utf8.RuneCountInString(value) > limit {
+			return refusal("%s: each text must be at most %d characters", "%s：每段文字最多 %d 個字元", where, limit)
+		}
+		if strings.ContainsFunc(value, unicode.IsControl) {
+			return refusal("%s: a text must not have control characters", "%s：文字不可以有控制字元", where)
+		}
+	}
 	return nil
 }
 
@@ -218,6 +426,19 @@ func (m *Manifest) validateCharacter(id string, character Character) error {
 			}
 		}
 	}
+	if character.Sign != "" {
+		if err := validateImagePath(character.Sign); err != nil {
+			return err
+		}
+	}
+	if character.Title != nil {
+		if err := validateWording("characters."+id+".title", *character.Title, maxTitleRunes); err != nil {
+			return err
+		}
+	}
+	if err := validateLines("characters."+id+".lines", character.Lines); err != nil {
+		return err
+	}
 	if len(character.Scenes) > maxScenes {
 		return refusal("character %s can have at most %d scenes", "角色 %s 最多 %d 個場景", shown(id), maxScenes)
 	}
@@ -228,12 +449,17 @@ func (m *Manifest) validateCharacter(id string, character Character) error {
 		if err := m.validateScene(id, name, scene); err != nil {
 			return err
 		}
+		if scene.Sign != nil && character.Sign == "" {
+			return refusal("scene %s/%s places a sign, but character %s has no sign image",
+				"場景 %s/%s 指定了 sign 的位置，但角色 %s 沒有 sign 圖片", id, name, shown(id))
+		}
 	}
 	return nil
 }
 
 func (m *Manifest) validateScene(character, name string, scene Scene) error {
-	if _, ok := m.Rooms[scene.Room]; !ok {
+	// No room is a whole picture: nothing is drawn under the image.
+	if _, ok := m.Rooms[scene.Room]; !ok && scene.Room != "" {
 		return refusal("scene %s/%s names the unknown room %s", "場景 %s/%s 指定了不存在的房間 %s", character, name, shown(scene.Room))
 	}
 	if err := validateImagePath(scene.Image); err != nil {
@@ -250,18 +476,78 @@ func (m *Manifest) validateScene(character, name string, scene Scene) error {
 		box[2] > float64(width) || box[3] > float64(height) {
 		return refusal("scene %s/%s: box must be left, top, right, bottom inside the canvas", "場景 %s/%s：box 必須是畫布內的左、上、右、下", character, name)
 	}
+	if scene.Frames != nil {
+		if err := validateFrames(character, name, *scene.Frames); err != nil {
+			return err
+		}
+	}
+	if scene.Video != "" {
+		if err := validateClipPath(scene.Video); err != nil {
+			return err
+		}
+		// A clip is the movement: nothing would play the strip.
+		if scene.Frames != nil {
+			return refusal("scene %s/%s: a scene with a video cannot also have frames", "場景 %s/%s：有 video 的場景不能同時有 frames", character, name)
+		}
+	}
+	if scene.ClickVideo != "" {
+		if err := validateClipPath(scene.ClickVideo); err != nil {
+			return err
+		}
+		// The strip has its own click frames: two answers to one click.
+		if scene.Frames != nil {
+			return refusal("scene %s/%s: a scene with a clickVideo cannot also have frames", "場景 %s/%s：有 clickVideo 的場景不能同時有 frames", character, name)
+		}
+	}
+	// Stated as what must hold, so that NaN passes nothing.
+	if sign := scene.Sign; sign != nil && !(len(sign) == 3 && sign[0] >= 0 && sign[0] <= float64(width) &&
+		sign[1] >= 0 && sign[1] <= float64(height) && sign[2] > 0 && sign[2] <= float64(width)) {
+		return refusal("scene %s/%s: sign must be x, y and a width inside the canvas", "場景 %s/%s：sign 必須是畫布內的 x、y 和寬度", character, name)
+	}
 	return nil
 }
 
-// images is every file the manifest names.
-func (m *Manifest) images() map[string]bool {
+// validateFrames checks a strip's count and that every frame it plays is one
+// after the still picture. The image is not opened to see that it is the
+// strip's size.
+func validateFrames(character, name string, frames Frames) error {
+	if frames.Count < 2 || frames.Count > maxFrames {
+		return refusal("scene %s/%s: frames.count must be from 2 to %d", "場景 %s/%s：frames.count 必須是 2 到 %d", character, name, maxFrames)
+	}
+	if len(frames.Click) > maxClickFrames {
+		return refusal("scene %s/%s: frames.click can have at most %d frames", "場景 %s/%s：frames.click 最多 %d 個影格", character, name, maxClickFrames)
+	}
+	played := append([]int{}, frames.Click...)
+	if frames.Blink != nil {
+		played = append(played, *frames.Blink)
+	}
+	for _, frame := range played {
+		if frame < 1 || frame >= frames.Count {
+			return refusal("scene %s/%s: blink and click must name frames from 1 to %d", "場景 %s/%s：blink 和 click 必須是 1 到 %d 的影格",
+				character, name, frames.Count-1)
+		}
+	}
+	return nil
+}
+
+// files is every file the manifest names: its images and its clips.
+func (m *Manifest) files() map[string]bool {
 	named := make(map[string]bool, len(m.Rooms))
 	for _, image := range m.Rooms {
 		named[image] = true
 	}
 	for _, character := range m.Characters {
+		if character.Sign != "" {
+			named[character.Sign] = true
+		}
 		for _, scene := range character.Scenes {
 			named[scene.Image] = true
+			if scene.Video != "" {
+				named[scene.Video] = true
+			}
+			if scene.ClickVideo != "" {
+				named[scene.ClickVideo] = true
+			}
 		}
 	}
 	return named
@@ -354,9 +640,34 @@ func validateImagePath(name string) error {
 	if !validPath(name) {
 		return refusal("the path %s is not allowed in a pack", "套件不允許路徑 %s", shown(name))
 	}
+	if _, ok := imageTypes[path.Ext(name)]; !ok {
+		return refusal("%s is not allowed: an image in a pack is only .webp, .png, .jpg or .jpeg",
+			"不允許 %s：套件的圖片只能是 .webp、.png、.jpg 或 .jpeg", shown(name))
+	}
+	return nil
+}
+
+func validateClipPath(name string) error {
+	if !validPath(name) {
+		return refusal("the path %s is not allowed in a pack", "套件不允許路徑 %s", shown(name))
+	}
+	if _, ok := clipTypes[path.Ext(name)]; !ok {
+		return refusal("%s is not allowed: a scene's video or clickVideo is only .mp4 or .webm",
+			"不允許 %s：場景的 video 或 clickVideo 只能是 .mp4 或 .webm", shown(name))
+	}
+	return nil
+}
+
+// validateFilePath checks a file of the zip before the manifest is read. Its
+// extension is all that says whether it is an image or a clip, so a name the
+// manifest gives it later must agree.
+func validateFilePath(name string) error {
+	if !validPath(name) {
+		return refusal("the path %s is not allowed in a pack", "套件不允許路徑 %s", shown(name))
+	}
 	if _, ok := ContentType(name); !ok {
-		return refusal("%s is not allowed: a pack holds only .webp, .png, .jpg and .jpeg images",
-			"不允許 %s：套件只能有 .webp、.png、.jpg、.jpeg 圖片", shown(name))
+		return refusal("%s is not allowed: a pack holds only .webp, .png, .jpg and .jpeg images, and .mp4 and .webm videos",
+			"不允許 %s：套件只能有 .webp、.png、.jpg、.jpeg 圖片，以及 .mp4、.webm 影片", shown(name))
 	}
 	return nil
 }

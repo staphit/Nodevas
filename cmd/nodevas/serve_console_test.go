@@ -191,7 +191,35 @@ func TestRunnerUnderServeDoesNotPassItOn(t *testing.T) {
 	}
 }
 
+// The edition serve set is read once and removed: only the runner serve
+// started for a single-user hub may act as its built-in runner, never an
+// agent's own `nodevas runner`. Anything but "single" counts for nothing.
+func TestRunnerEditionIsTakenOnce(t *testing.T) {
+	t.Setenv(localRunnerEditionEnv, "single")
+	if got := takeRunnerEdition(); got != "single" {
+		t.Fatalf("edition = %q", got)
+	}
+	if _, set := os.LookupEnv(localRunnerEditionEnv); set {
+		t.Fatal("the runner left NODEVAS_RUNNER_EDITION for its children")
+	}
+	if got := takeRunnerEdition(); got != "" {
+		t.Fatalf("read twice: %q", got)
+	}
+	t.Setenv(localRunnerEditionEnv, "team")
+	if got := takeRunnerEdition(); got != "" {
+		t.Fatalf("edition team = %q", got)
+	}
+	// runnerStopContext drops it too, for a runner that never read it.
+	t.Setenv(localRunnerEditionEnv, "single")
+	_, stop := runnerStopContext()
+	defer stop()
+	if _, set := os.LookupEnv(localRunnerEditionEnv); set {
+		t.Fatal("runnerStopContext left NODEVAS_RUNNER_EDITION")
+	}
+}
+
 func TestStopWhenParentChanges(t *testing.T) {
+
 	var parent atomic.Int64
 	parent.Store(100)
 	getppid := func() int { return int(parent.Load()) }

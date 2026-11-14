@@ -201,11 +201,16 @@ func resolveRepoPath(root, rel string) (string, error) {
 			if _, lerr := os.Lstat(full); lerr == nil {
 				return "", refuseRepo(runnerwire.RepoErrBadPath, "the path is not inside the repo")
 			}
+			// So is a missing file under a link out: "no such file" there
+			// would tell what exists outside the repo.
+			if !existingInside(root, full) {
+				return "", refuseRepo(runnerwire.RepoErrBadPath, "the path is not inside the repo")
+			}
 			return "", refuseRepo(runnerwire.RepoErrNotFound, "no such file")
 		}
 		return "", refuseRepo(runnerwire.RepoErrBadPath, "the path is not inside the repo")
 	}
-	if !inside(root, real) {
+	if !inside(root, real) || throughMountPoint(root, real) {
 		return "", refuseRepo(runnerwire.RepoErrBadPath, "the path is not inside the repo")
 	}
 	if relReal, err := filepath.Rel(root, real); err == nil && relReal != "." {
@@ -215,6 +220,43 @@ func resolveRepoPath(root, rel string) (string, error) {
 		}
 	}
 	return real, nil
+}
+
+// existingInside reports whether the deepest existing directory above full
+// is inside root, links and junctions included.
+func existingInside(root, full string) bool {
+	for p := filepath.Dir(full); inside(root, p); p = filepath.Dir(p) {
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			return inside(root, real) && !throughMountPoint(root, real)
+		}
+		if p == root {
+			break
+		}
+	}
+	return true
+}
+
+// throughMountPoint reports whether any part of target below root is a
+// Windows junction (or another mount point). EvalSymlinks does not follow
+// those, so where one leads is unknown, and an agent needs no privilege to
+// make one: it is never gone through, whatever it points at.
+func throughMountPoint(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." {
+		return false
+	}
+	cur := root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			return false
+		}
+		if info.Mode()&fs.ModeIrregular != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // gitPath reports whether rel is in a .git directory: the repo's own or a
@@ -260,12 +302,17 @@ func listRepo(root, rel string) (runnerwire.RepoListing, error) {
 		}
 		entry := runnerwire.RepoEntry{Name: name, Type: "file"}
 		switch {
-		case e.Type()&fs.ModeSymlink != 0:
+		// A Windows junction reads as irregular, not as a symlink: it is a
+		// link all the same.
+		case e.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0:
 			entry.Type = "symlink"
 			target, err := filepath.EvalSymlinks(filepath.Join(dir, name))
-			entry.Escape = err != nil || !inside(root, target)
+			entry.Escape = err != nil || !inside(root, target) || throughMountPoint(root, target)
 		case e.IsDir():
 			entry.Type = "dir"
+		case !e.Type().IsRegular():
+			// A FIFO, socket or device: named, never read.
+			entry.Type = "other"
 		default:
 			if info, err := e.Info(); err == nil {
 				entry.Size = info.Size()
@@ -298,7 +345,15 @@ func readRepoFile(root, rel string) (runnerwire.RepoFile, error) {
 	if err != nil {
 		return runnerwire.RepoFile{}, err
 	}
-	f, err := os.Open(real)
+	// Only a regular file is opened, and without waiting: a run's worktree
+	// is the agent's, and a FIFO there would hold this read (and a repo slot)
+	// for good. The mode is checked again once open, in case it was swapped.
+	if info, err := os.Stat(real); err != nil {
+		return runnerwire.RepoFile{}, refuseRepo(runnerwire.RepoErrNotFound, "the file cannot be read")
+	} else if !info.Mode().IsRegular() {
+		return runnerwire.RepoFile{}, refuseRepo(runnerwire.RepoErrBadPath, "not a file")
+	}
+	f, err := openNoBlock(real)
 	if err != nil {
 		return runnerwire.RepoFile{}, refuseRepo(runnerwire.RepoErrNotFound, "the file cannot be read")
 	}

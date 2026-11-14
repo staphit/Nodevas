@@ -8,6 +8,7 @@ import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
 import { NodeTitleField } from "./inspector/NodeMetaForm";
 import { usePopoutLiveUpdates } from "../collab/popoutLiveUpdates";
+import { useThemeSkin } from "../theme-pack/themeSkin";
 import { readNodePageTitle } from "./drawer/useNodePages";
 
 export function PopoutEditor() {
@@ -16,7 +17,6 @@ export function PopoutEditor() {
   const nodeID = params.get("node") ?? "";
   const pageID = params.get("page") ?? "main";
   const graph = useApp((state) => state.graph);
-  const theme = useApp((state) => state.theme);
   const loadAll = useApp((state) => state.loadAll);
   const refreshProjects = useApp((state) => state.refreshProjects);
   const refreshTrash = useApp((state) => state.refreshTrash);
@@ -34,9 +34,8 @@ export function PopoutEditor() {
   const node = nodeById(graph, nodeID);
   const title = node?.title || nodeID || t("node.title");
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+  // This window is the app too: the same light or dark, the same skin.
+  useThemeSkin();
 
   const textScale = usePreference("textScale");
   useEffect(() => applyTextScale(textScale), [textScale]);

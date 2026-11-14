@@ -72,6 +72,8 @@ var accountLevelPaths = []string{
 	"/api/analytics/tiers",
 	"/api/analytics/overview",
 	"/api/analytics/retention",
+	// A person's own app preferences.
+	"/api/me/",
 }
 
 // readOnlyPosts are POST routes that change nothing: a viewer may use them.
@@ -93,6 +95,7 @@ var projectlessPaths = []string{
 	"/api/runs/routing",
 	"/api/usage/prices",
 	"/api/notify/",
+	"/api/me/",
 }
 
 func accountLevelPath(path string) bool {

@@ -182,7 +182,7 @@ func TestAskFallsBack(t *testing.T) {
 		asked = 0
 		log.Reset()
 		j := &jobs{c: &Client{Config: &Config{AutoAccept: c.policy}, Accepter: c.accepter, Log: &log}}
-		ok, reason := j.ask(context.Background(), c.run)
+		ok, _, reason := j.ask(context.Background(), c.run)
 		if ok != c.ok || asked != c.asked || !strings.HasPrefix(reason, c.reason) || (c.reason == "" && reason != "") {
 			t.Errorf("%s: = %v, %q (asked %d)", c.name, ok, reason, asked)
 		}
@@ -362,7 +362,7 @@ func TestAskRemoteTyping(t *testing.T) {
 		r := &run{job: job, repo: runnerwire.Repo{ID: "r1", Name: "demo"}}
 		var log bytes.Buffer
 		j := &jobs{c: &Client{Config: &Config{AutoAccept: policy}, Log: &log}}
-		if ok, reason := j.ask(context.Background(), r); !ok {
+		if ok, _, reason := j.ask(context.Background(), r); !ok {
 			t.Fatalf("not auto-accepted: %q", reason)
 		}
 		if r.remoteTyping != allow {

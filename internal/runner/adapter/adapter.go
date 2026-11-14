@@ -66,8 +66,14 @@ type RunEnv struct {
 	Branch string
 	// TempDir is private to this run and removed when it ends.
 	TempDir string
-	// MCP is the nodevas MCP server the agent should be given.
+	// MCP is the nodevas MCP server the agent should be given. With NoBoard
+	// only its Command is set: the nodevas executable, for agy's hooks.
 	MCP MCPServer
+	// NoBoard: a global agent's run (runnerwire.Job.Global) has no board.
+	// The agent gets no nodevas MCP server at all, so no claim_task, no
+	// ask_user and no permission relay, whatever PermissionRelay says; the
+	// owner's own nodevas server is kept out where the CLI allows it.
+	NoBoard bool
 	// PermissionMode is the owner's setting for how freely this kind of agent
 	// may act: Claude Code's --permission-mode, Codex's --sandbox, Gemini
 	// CLI's --approval-mode. "" is the adapter's safe default.
@@ -170,8 +176,12 @@ const headlessAskNote = "Nobody is watching this terminal, but a person can answ
 // A review job (runnerwire.JobReview) gets a reviewer's preamble instead; the
 // runner has already added the PR's diff to its job.Prompt. A revise job
 // (runnerwire.JobRevise) gets the implementer's preamble on the PR's branch,
-// and after the task the review it must address.
+// and after the task the review it must address. A global agent's job
+// (runnerwire.Job.Global) gets GlobalPrompt: it has no node and no board.
 func Prompt(job runnerwire.Job, branch string) string {
+	if job.Global {
+		return GlobalPrompt(job, branch)
+	}
 	switch job.Kind {
 	case runnerwire.JobReview:
 		return reviewPrompt(job)

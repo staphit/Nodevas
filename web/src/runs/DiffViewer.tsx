@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import type { FileChange, Run, RunChanges } from "../api";
 import { IconClose } from "../icons";
 import { useI18n } from "../i18n";
+import { readPreference } from "../preferences";
+import { useApp, usePreference } from "../store";
 import {
   findDiffFile,
   parsePatch,
@@ -18,7 +20,6 @@ import { useRuns } from "./runStore";
 
 export type DiffLayout = "unified" | "split";
 
-const LAYOUT_KEY = "nodevas.runs.diffLayout";
 /** Side by side needs room for two columns of code. */
 export const WIDE_QUERY = "(min-width: 900px)";
 /** Lines rendered for a file before "show more", and per press after. */
@@ -32,20 +33,9 @@ const STATUS_LETTER: Record<string, string> = {
   renamed: "R",
 };
 
+/** The reader's layout: a preference that follows the account. */
 export function readDiffLayout(): DiffLayout {
-  try {
-    return window.localStorage.getItem(LAYOUT_KEY) === "unified" ? "unified" : "split";
-  } catch {
-    return "split";
-  }
-}
-
-export function writeDiffLayout(layout: DiffLayout): void {
-  try {
-    window.localStorage.setItem(LAYOUT_KEY, layout);
-  } catch {
-    // A private window or blocked storage: the choice lasts this session.
-  }
+  return readPreference("diffLayout");
 }
 
 function useMediaQuery(query: string): boolean {
@@ -306,6 +296,122 @@ export function ChangesSummary({ changes, files }: { changes: RunChanges; files:
   );
 }
 
+/** What a diff view needs from the changes it shows: the files, the parsed
+ * patch, the chosen file and the layout (the reader's choice on a wide
+ * screen, unified on a phone). Shared by the dialog and the inline body. */
+function useDiffState(changes: RunChanges | null | undefined) {
+  const wide = useMediaQuery(WIDE_QUERY);
+  const preferred = usePreference("diffLayout");
+  const layout: DiffLayout = wide ? preferred : "unified";
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const held = changes ?? null;
+  const parsed = useMemo(
+    () => (held?.patch && !held.patchTruncated && !held.patchPruned ? parsePatch(held.patch) : []),
+    [held],
+  );
+  const files = useMemo(() => (held ? changedFiles(held, parsed) : []), [held, parsed]);
+  // A wide screen always shows a file; a phone starts on the list.
+  const selected = files.find((file) => file.path === selectedPath) ?? (wide ? files[0] : undefined);
+  const chooseLayout = (next: DiffLayout) => useApp.getState().updateUIPreference("diffLayout", next);
+  return { wide, layout, chooseLayout, held, parsed, files, selected, setSelectedPath };
+}
+
+type DiffState = ReturnType<typeof useDiffState>;
+
+/** Side by side or unified, on a screen wide enough for the choice. */
+function DiffLayoutPicker({ state }: { state: DiffState }) {
+  const { t } = useI18n();
+  if (!state.wide || !state.held || state.files.length === 0) return null;
+  return (
+    <div className="run-diff-layout" role="group" aria-label={t("diff.layout")}>
+      {(["split", "unified"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={state.layout === option}
+          onClick={() => state.chooseLayout(option)}
+        >
+          {t(option === "split" ? "diff.split" : "diff.unified")}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The file list and the chosen file's hunks, or why there are none. */
+function DiffPanes({
+  state,
+  changes,
+  loading,
+  error,
+  prHref,
+  prNumber,
+}: {
+  state: DiffState;
+  changes: RunChanges | null | undefined;
+  loading: boolean;
+  error?: string;
+  prHref: string;
+  prNumber?: number;
+}) {
+  const { t } = useI18n();
+  const { wide, held, files, selected, parsed, layout, setSelectedPath } = state;
+  if (changes === undefined) {
+    return error ? (
+      <div className="notify-message error" role="alert">
+        {error}
+      </div>
+    ) : (
+      <p className="run-diff-note">{loading ? t("common.loading") : ""}</p>
+    );
+  }
+  if (!held) return <p className="run-diff-note">{t("diff.none")}</p>;
+  if (files.length === 0) return <p className="run-diff-note">{t("diff.empty")}</p>;
+  return (
+    <div className={`run-diff-body${wide ? " is-wide" : ""}${selected ? " has-file" : ""}`}>
+      <nav className="run-diff-files" aria-label={t("diff.files")}>
+        <ul>
+          {files.map((file) => (
+            <li key={file.path}>
+              <button
+                type="button"
+                className="run-diff-file-button"
+                aria-current={file.path === selected?.path ? "true" : undefined}
+                onClick={() => setSelectedPath(file.path)}
+              >
+                <StatusLetter status={file.status} />
+                <span className="run-diff-file-path mono">{file.path}</span>
+                {file.binary ? (
+                  <span className="run-diff-bin">bin</span>
+                ) : (
+                  <LineCounts additions={file.additions} deletions={file.deletions} />
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      {selected && (
+        <section className="run-diff-file" aria-label={selected.path}>
+          {!wide && (
+            <button type="button" className="run-diff-back" onClick={() => setSelectedPath(null)}>
+              ← {t("diff.back")}
+            </button>
+          )}
+          <FileView
+            change={selected}
+            file={findDiffFile(parsed, selected.path, selected.oldPath)}
+            changes={held}
+            prHref={prHref}
+            prNumber={prNumber}
+            layout={layout}
+          />
+        </section>
+      )}
+    </div>
+  );
+}
+
 /**
  * A set of changes (RunChanges shape), read-only: the file list and, for the
  * chosen file, its hunks — side by side on a wide screen (or unified, the
@@ -338,10 +444,8 @@ export function DiffDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const wide = useMediaQuery(WIDE_QUERY);
-  const [preferred, setPreferred] = useState<DiffLayout>(readDiffLayout);
-  const layout: DiffLayout = wide ? preferred : "unified";
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const state = useDiffState(changes);
+  const { held, files } = state;
 
   useEffect(() => {
     // Captured first and stopped: the Drawer underneath closes on Escape too,
@@ -355,85 +459,6 @@ export function DiffDialog({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
-
-  const held = changes ?? null;
-  const parsed = useMemo(
-    () => (held?.patch && !held.patchTruncated && !held.patchPruned ? parsePatch(held.patch) : []),
-    [held],
-  );
-  const files = useMemo(() => (held ? changedFiles(held, parsed) : []), [held, parsed]);
-
-  // A wide screen always shows a file; a phone starts on the list.
-  const selected =
-    files.find((file) => file.path === selectedPath) ?? (wide ? files[0] : undefined);
-
-  const chooseLayout = (next: DiffLayout) => {
-    setPreferred(next);
-    writeDiffLayout(next);
-  };
-
-  let content: React.ReactNode;
-  if (changes === undefined) {
-    content = error ? (
-      <div className="notify-message error" role="alert">
-        {error}
-      </div>
-    ) : (
-      <p className="run-diff-note">{loading ? t("common.loading") : ""}</p>
-    );
-  } else if (!held) {
-    content = <p className="run-diff-note">{t("diff.none")}</p>;
-  } else if (files.length === 0) {
-    content = <p className="run-diff-note">{t("diff.empty")}</p>;
-  } else {
-    content = (
-      <div className={`run-diff-body${wide ? " is-wide" : ""}${selected ? " has-file" : ""}`}>
-        <nav className="run-diff-files" aria-label={t("diff.files")}>
-          <ul>
-            {files.map((file) => (
-              <li key={file.path}>
-                <button
-                  type="button"
-                  className="run-diff-file-button"
-                  aria-current={file.path === selected?.path ? "true" : undefined}
-                  onClick={() => setSelectedPath(file.path)}
-                >
-                  <StatusLetter status={file.status} />
-                  <span className="run-diff-file-path mono">{file.path}</span>
-                  {file.binary ? (
-                    <span className="run-diff-bin">bin</span>
-                  ) : (
-                    <LineCounts additions={file.additions} deletions={file.deletions} />
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        {selected && (
-          <section className="run-diff-file" aria-label={selected.path}>
-            {!wide && (
-              <button
-                type="button"
-                className="run-diff-back"
-                onClick={() => setSelectedPath(null)}
-              >
-                ← {t("diff.back")}
-              </button>
-            )}
-            <FileView
-              change={selected}
-              file={findDiffFile(parsed, selected.path, selected.oldPath)}
-              changes={held}
-              prHref={prHref}
-              prNumber={prNumber}
-              layout={layout}
-            />
-          </section>
-        )}
-      </div>
-    );
-  }
 
   // Portalled: the Drawer that opens it may be transformed (the phone sheet),
   // which would pin a fixed backdrop to the Drawer instead of the viewport.
@@ -451,20 +476,7 @@ export function DiffDialog({
             <h2 id="run-diff-title">{title ?? t("diff.title")}</h2>
             <p className="mono">{subtitle}</p>
           </div>
-          {wide && held && files.length > 0 && (
-            <div className="run-diff-layout" role="group" aria-label={t("diff.layout")}>
-              {(["split", "unified"] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={layout === option}
-                  onClick={() => chooseLayout(option)}
-                >
-                  {t(option === "split" ? "diff.split" : "diff.unified")}
-                </button>
-              ))}
-            </div>
-          )}
+          <DiffLayoutPicker state={state} />
           <button
             type="button"
             className="confirm-dialog-close"
@@ -479,11 +491,70 @@ export function DiffDialog({
             {summary ? summary(held, files.length) : <ChangesSummary changes={held} files={files.length} />}
           </div>
         )}
-        {content}
+        <DiffPanes
+          state={state}
+          changes={changes}
+          loading={loading}
+          error={error}
+          prHref={prHref}
+          prNumber={prNumber}
+        />
         {footer}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** A run's changes, fetched when first shown, and the summary line its diff
+ * shows them under. */
+function useRunChanges(run: Run) {
+  const held = useRuns((s) => s.changesByRun[run.id]);
+  const loading = useRuns((s) => Boolean(s.changesLoading[run.id]));
+  const error = useRuns((s) => s.changesErrors[run.id]);
+  const loadChanges = useRuns((s) => s.loadChanges);
+  useEffect(() => {
+    void loadChanges(run.id, run.commit);
+  }, [run.id, run.commit, loadChanges]);
+  const summary = (changes: RunChanges, files: number) => (
+    <RunChangesSummary
+      run={{
+        ...run,
+        additions: changes.additions,
+        deletions: changes.deletions,
+        filesChanged: files,
+        commit: changes.commit || run.commit,
+      }}
+    />
+  );
+  return { changes: held ? held.changes : undefined, loading, error, summary };
+}
+
+/**
+ * A run's changes against its base, without a frame of its own: the agent
+ * workspace's Changes tab. RunDiffDialog below is this in a frame.
+ */
+export function RunDiffBody({ run }: { run: Run }) {
+  const { changes, loading, error, summary } = useRunChanges(run);
+  const state = useDiffState(changes);
+  const { held, files } = state;
+  return (
+    <div className="run-diff-inline">
+      {held && files.length > 0 && (
+        <div className="run-diff-summary run-diff-inline-head">
+          {summary(held, files.length)}
+          <DiffLayoutPicker state={state} />
+        </div>
+      )}
+      <DiffPanes
+        state={state}
+        changes={changes}
+        loading={loading}
+        error={error}
+        prHref={safeExternalUrl(run.prUrl) ?? ""}
+        prNumber={run.prNumber}
+      />
+    </div>
   );
 }
 
@@ -493,19 +564,11 @@ export function DiffDialog({
  */
 export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void }) {
   const { t } = useI18n();
-  const held = useRuns((s) => s.changesByRun[run.id]);
-  const loading = useRuns((s) => Boolean(s.changesLoading[run.id]));
-  const error = useRuns((s) => s.changesErrors[run.id]);
-  const loadChanges = useRuns((s) => s.loadChanges);
-
-  useEffect(() => {
-    void loadChanges(run.id, run.commit);
-  }, [run.id, run.commit, loadChanges]);
-
+  const { changes, loading, error, summary } = useRunChanges(run);
   const branch = run.branch || run.base;
   return (
     <DiffDialog
-      changes={held ? held.changes : undefined}
+      changes={changes}
       loading={loading}
       error={error}
       subtitle={t("diff.subtitle", {
@@ -514,17 +577,7 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
       })}
       prHref={safeExternalUrl(run.prUrl) ?? ""}
       prNumber={run.prNumber}
-      summary={(changes, files) => (
-        <RunChangesSummary
-          run={{
-            ...run,
-            additions: changes.additions,
-            deletions: changes.deletions,
-            filesChanged: files,
-            commit: changes.commit || run.commit,
-          }}
-        />
-      )}
+      summary={summary}
       footer={
         // Read the diff, then approve: the merge sits at the foot, where a
         // thumb reaches it on a phone. Empty (and hidden) without a PR.

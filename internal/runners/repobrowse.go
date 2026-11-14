@@ -23,6 +23,9 @@ var (
 	ErrRepoBrowseOff  = locale.Errorf("repo browsing is off on this runner", "這個 runner 關閉了 repo 瀏覽")
 	ErrRepoTimeout    = locale.Errorf("the runner did not answer in time", "runner 沒有及時回應")
 	ErrRepoRunnerGone = locale.Errorf("the runner disconnected before it answered", "runner 在回應前就斷線了")
+	// ErrRunnerOutdated: the runner is from before run workspaces
+	// (runnerwire.CapRunWorkspace).
+	ErrRunnerOutdated = locale.Errorf("update nodevas on the runner to see run workspaces", "請更新 runner 上的 nodevas 才能查看執行工作區")
 )
 
 // DefaultRepoTimeout bounds one browse call.
@@ -69,12 +72,55 @@ func (r *RepoRelay) Browse(ctx context.Context, accountID, runnerID string, req 
 	if !r.reg.Online(runnerID) {
 		return runnerwire.RepoDone{}, ErrRunnerOffline
 	}
+	// Run-scoped ops go through BrowseRun only.
+	if runnerwire.RunRepoOp(req.Op) {
+		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
 	if runner.Info == nil || !slices.Contains(runner.Info.Capabilities, runnerwire.CapRepoBrowse) {
 		return runnerwire.RepoDone{}, ErrRepoBrowseOff
 	}
 	if !slices.ContainsFunc(runner.Info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == req.RepoID }) {
 		return runnerwire.RepoDone{}, ErrRepoNotFound
 	}
+	return r.call(ctx, accountID, runnerID, req)
+}
+
+// BrowseRun is Browse for one run's worktree (runnerwire.RunRepoOp):
+// req.RunID names the run, which the caller has checked is one of
+// runnerID's runs in req.RepoID. The runner must know run workspaces, and,
+// for anything but run_info, browse repos.
+func (r *RepoRelay) BrowseRun(ctx context.Context, accountID, runnerID string, req runnerwire.RepoRequest) (runnerwire.RepoDone, error) {
+	if accountID == "" || runnerID == "" || req.RunID == "" || !runnerwire.RunRepoOp(req.Op) {
+		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
+	runner, err := r.reg.Get(ctx, runnerID)
+	if errors.Is(err, ErrNotFound) {
+		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
+	if err != nil {
+		return runnerwire.RepoDone{}, err
+	}
+	// The run's own runner's owner only; administrators are no exception.
+	if runner.OwnerID != accountID {
+		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
+	if !r.reg.Online(runnerID) {
+		return runnerwire.RepoDone{}, ErrRunnerOffline
+	}
+	if runner.Info == nil || !slices.Contains(runner.Info.Capabilities, runnerwire.CapRunWorkspace) {
+		return runnerwire.RepoDone{}, ErrRunnerOutdated
+	}
+	if req.Op != runnerwire.RepoOpRunInfo && !slices.Contains(runner.Info.Capabilities, runnerwire.CapRepoBrowse) {
+		return runnerwire.RepoDone{}, ErrRepoBrowseOff
+	}
+	if !slices.ContainsFunc(runner.Info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == req.RepoID }) {
+		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
+	return r.call(ctx, accountID, runnerID, req)
+}
+
+// call sends req to runnerID and waits for its answer.
+func (r *RepoRelay) call(ctx context.Context, accountID, runnerID string, req runnerwire.RepoRequest) (runnerwire.RepoDone, error) {
 	id, err := newCallID()
 	if err != nil {
 		return runnerwire.RepoDone{}, err

@@ -8,7 +8,9 @@ import { autoAcceptOutcome } from "./autoAccept";
 /**
  * The dispatch dialog's last word before sending: whether the chosen runner
  * starts this run on its own, would once the dispatcher verifies it is them,
- * or waits for someone at it to accept.
+ * or waits for someone at it to accept. This computer's built-in runner
+ * (single-user edition) starts it right away, unless its owner asked to be
+ * asked before every run.
  */
 export function AutoAcceptNote({
   runner,
@@ -26,6 +28,20 @@ export function AutoAcceptNote({
   const { t } = useI18n();
   const stepUp = useStepUp((s) => s.status);
   const policy = runner.info?.autoAccept;
+
+  if (runner.builtIn) {
+    const ask = Boolean(runner.info?.local?.askEveryRun);
+    return (
+      <p
+        className={`run-note run-auto-note${ask ? "" : " is-auto"}`}
+        data-testid="dispatch-auto-accept"
+        data-outcome={ask ? "ask" : "local"}
+      >
+        {t(ask ? "dispatch.asksFirst" : "dispatch.startsNow")}
+      </p>
+    );
+  }
+
   const outcome = autoAcceptOutcome(policy, stepUp, { repoId, agent, mode });
   const repo = runner.info?.repos?.find((item) => item.id === repoId)?.name || repoId;
   const values = { runner: runnerDisplayName(t, runner.name), repo, agent };

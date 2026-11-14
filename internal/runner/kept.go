@@ -252,6 +252,38 @@ func PruneKept(ctx context.Context, dataDir string, dryRun bool) (PruneReport, e
 	return report, writeFileAtomic(keptPath(dataDir), entries)
 }
 
+// DropKept forgets the kept worktree at path, if it is listed: the person
+// discarded or merged it from the hub. A record that cannot be read is left
+// as it is.
+func DropKept(ctx context.Context, dataDir, path string) error {
+	if _, err := os.Lstat(keptPath(dataDir)); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	unlock, err := lockKept(context.WithoutCancel(ctx), dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	entries, err := loadKept(dataDir)
+	if err != nil {
+		return err
+	}
+	kept := slices.DeleteFunc(slices.Clone(entries), func(e KeptWorktree) bool { return sameRepoPath(e.Path, path) })
+	if len(kept) == len(entries) {
+		return nil
+	}
+	return writeFileAtomic(keptPath(dataDir), kept)
+}
+
+// keptListed reports whether a worktree at path is in the record.
+func keptListed(dataDir, path string) bool {
+	entries, err := KeptWorktrees(dataDir)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(entries, func(e KeptWorktree) bool { return sameRepoPath(e.Path, path) })
+}
+
 // keptUnsafe is why a kept worktree must not be removed, or "".
 func keptUnsafe(ctx context.Context, dataDir string, e KeptWorktree) string {
 	rel, err := filepath.Rel(filepath.Join(dataDir, "worktrees"), e.Path)

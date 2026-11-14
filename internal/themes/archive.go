@@ -88,7 +88,7 @@ func readArchive(archive io.ReaderAt, size int64, limits Limits) (*parsedArchive
 		if entry.Name == ManifestFile {
 			manifestEntry = entry
 		} else {
-			if err := validateImagePath(entry.Name); err != nil {
+			if err := validateFilePath(entry.Name); err != nil {
 				return nil, err
 			}
 			images = append(images, entry)
@@ -122,7 +122,10 @@ func readArchive(archive io.ReaderAt, size int64, limits Limits) (*parsedArchive
 	if err != nil {
 		return nil, err
 	}
-	named := manifest.images()
+	// The manifest names a clip only as a scene's video or click video and an
+	// image only where an image goes, so with every file named, each is used
+	// as what its extension says.
+	named := manifest.files()
 	for name := range named {
 		if !files[name] {
 			return nil, refusal("theme.json names %s, which is not in the zip", "theme.json 指定的 %s 不在 zip 中", shown(name))
@@ -204,8 +207,8 @@ func extractImage(root *os.Root, dir string, entry *zip.File, limits Limits, tot
 		return 0, damaged(entry.Name)
 	}
 	head = head[:n]
-	if !matchesImageType(entry.Name, head) {
-		return 0, refusal("%s is not the image type its extension says", "%s 不是副檔名所標示的圖片類型", shown(entry.Name))
+	if !matchesType(entry.Name, head) {
+		return 0, refusal("%s is not the image or video type its extension says", "%s 不是副檔名所標示的圖片或影片類型", shown(entry.Name))
 	}
 
 	target := filepath.Join(dir, filepath.FromSlash(entry.Name))

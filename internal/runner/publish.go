@@ -18,7 +18,10 @@ import (
 //     message and Nodevas-Node / Nodevas-Run trailers.
 //  2. What the run changed goes to the hub (changes), even when it is nothing.
 //  3. With autoPR on, the branch is pushed and a pull request opened; the hub
-//     hears how that went (pr), success or not, and the PR is watched.
+//     hears how that went (pr), success or not, and the PR is watched. A
+//     global agent's run (global.go) does so only when its job asked for a
+//     pull request (Job.NoPR false): the runner may do less than the hub
+//     asks, never more than autoPR allows.
 //
 // Worktrees: one whose run changed nothing is removed at once, with its
 // branch. One with a PR stays until the PR is merged or closed. Every other
@@ -28,7 +31,7 @@ import (
 func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runnerwire.RunChanges, *runnerwire.PRInfo) {
 	ctx := j.ctx // a cancel from the hub no longer applies: the agent is done
 	job := r.job
-	cfg := j.c.Config
+	cfg := j.runCfg(r)
 
 	message := commitMessage(result.Summary, job)
 	committed := j.commit(ctx, r, wt, message)
@@ -53,10 +56,14 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("committed %s on %s: %d files, +%d −%d",
 			short(changes.Commit), wt.Branch, len(changes.Files), changes.Additions, changes.Deletions)})
 	}
-	if !cfg.AutoPROn() {
+	if job.NoPR || !cfg.AutoPROn() {
 		if changes.Commit != "" {
-			j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-				Text: fmt.Sprintf("autoPR is off: branch %s stays in %s", wt.Branch, wt.Path)})
+			text := fmt.Sprintf("autoPR is off: branch %s stays in %s", wt.Branch, wt.Path)
+			if job.NoPR {
+				text = fmt.Sprintf("kept on the runner: branch %s in %s (no pull request asked)", wt.Branch, wt.Path)
+				j.c.logf("run %s: %s", job.RunID, text)
+			}
+			j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		}
 		return &changes, nil
 	}
@@ -87,7 +94,7 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 // wrong ends up in PRInfo.Error, for the hub to show on the run.
 func (j *jobs) openPR(ctx context.Context, r *run, wt Worktree, result runnerwire.RunResult, message string) runnerwire.PRInfo {
 	job := r.job
-	cfg := j.c.Config
+	cfg := j.runCfg(r)
 	fail := func(format string, args ...any) runnerwire.PRInfo {
 		return runnerwire.PRInfo{Error: truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}
 	}
@@ -137,7 +144,7 @@ func (j *jobs) openPR(ctx context.Context, r *run, wt Worktree, result runnerwir
 // runnerName is how a PR names this runner: its own label, else the hub's
 // name for it, else the machine's.
 func (j *jobs) runnerName() string {
-	if name := j.c.Config.Name; name != "" {
+	if name := j.c.cfg().Name; name != "" {
 		return name
 	}
 	j.mu.Lock()

@@ -6,10 +6,10 @@ const log = require("electron-log");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
-const net = require("node:net");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const metadata = require("./package.json");
+const { backendPort } = require("./port.cjs");
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // The first start of a new install creates the embedded PostgreSQL (initdb
@@ -57,19 +57,6 @@ autoUpdater.channel = metadata.build?.publish?.[0]?.channel || "testflight";
 // Only the testflight channel is allowed to pull prereleases; a stable build
 // must never be silently moved onto a pre-release feed.
 autoUpdater.allowPrerelease = autoUpdater.channel === "testflight";
-
-function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-}
 
 function backendExecutable() {
   const binaryName = process.platform === "win32" ? "nodevas.exe" : "nodevas";
@@ -218,7 +205,9 @@ async function startBackend() {
   await fs.promises.mkdir(workspace, { recursive: true });
   await fs.promises.access(executable, fs.constants.X_OK);
 
-  const port = await reservePort();
+  // The same port every launch (port.cjs), so the page keeps its origin and
+  // what the browser stored for it.
+  const port = await backendPort(app.getPath("userData"), { log });
   backendURL = `http://127.0.0.1:${port}`;
   backendLaunch = { executable, workspace, port };
   spawnBackend();

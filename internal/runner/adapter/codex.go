@@ -74,19 +74,12 @@ func (Codex) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.IgnoreUserConfig {
 		args = append(args, "--ignore-user-config")
 	}
-	args = append(args,
-		// Headless, nobody can approve anything: a command the sandbox does
-		// not allow fails and the model sees that, instead of the run hanging.
-		"-c", "approval_policy='never'",
-		"-c", "mcp_servers.nodevas.command="+tomlString(env.MCP.Command),
-		"-c", "mcp_servers.nodevas.args="+tomlArray(env.MCP.Args),
-		// The nodevas tools need no approval: the preamble tells the agent to
-		// claim its node, and the hub limits those tools to the agent routes.
-		"-c", "mcp_servers.nodevas.default_tools_approval_mode='approve'",
-		"-c", "mcp_servers.nodevas.tool_timeout_sec="+strconv.Itoa(codexToolTimeoutSec),
-		// The prompt is read from stdin.
-		"-",
-	)
+	// Headless, nobody can approve anything: a command the sandbox does
+	// not allow fails and the model sees that, instead of the run hanging.
+	args = append(args, "-c", "approval_policy='never'")
+	args = append(args, codexMCPArgs(env)...)
+	// The prompt is read from stdin.
+	args = append(args, "-")
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
@@ -95,6 +88,22 @@ func (Codex) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("codex: %w", err)
 	}
 	return cmd, nil
+}
+
+// codexMCPArgs are the -c overrides that give a run its nodevas server;
+// none for a run with no board (RunEnv.NoBoard). The nodevas tools need no
+// approval: the preamble tells the agent to claim its node, and the hub
+// limits those tools to the agent routes.
+func codexMCPArgs(env RunEnv) []string {
+	if env.NoBoard {
+		return nil
+	}
+	return []string{
+		"-c", "mcp_servers.nodevas.command=" + tomlString(env.MCP.Command),
+		"-c", "mcp_servers.nodevas.args=" + tomlArray(env.MCP.Args),
+		"-c", "mcp_servers.nodevas.default_tools_approval_mode='approve'",
+		"-c", "mcp_servers.nodevas.tool_timeout_sec=" + strconv.Itoa(codexToolTimeoutSec),
+	}
 }
 
 // codexParser reads `codex exec --json`: one JSON object per line, typed

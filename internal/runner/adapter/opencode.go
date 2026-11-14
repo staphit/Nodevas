@@ -185,7 +185,9 @@ func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 		if mode == "full" {
 			permission["execute"] = "allow"
 		}
-		permission["nodevas_*"] = "allow"
+		if !env.NoBoard {
+			permission["nodevas_*"] = "allow"
+		}
 	}
 	if interactive {
 		for tool, rule := range permission {
@@ -194,28 +196,34 @@ func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 			}
 		}
 	}
-	command := append([]string{env.MCP.Command}, env.MCP.Args...)
-	servers := map[string]any{
-		"nodevas": map[string]any{
+	// The run's own nodevas server, unless it has no board (RunEnv.NoBoard):
+	// then every server is switched off, the owner's own "nodevas" too when
+	// OpenCode loads one (OpenCodeEveryMCPServer listed it).
+	servers := map[string]any{}
+	if !env.NoBoard {
+		command := append([]string{env.MCP.Command}, env.MCP.Args...)
+		servers["nodevas"] = map[string]any{
 			"type":        "local",
 			"command":     command,
 			"enabled":     true,
 			"timeout":     openCodeToolTimeoutMs,
 			"environment": map[string]string{"NODEVAS_AGENT": "opencode"},
-		},
+		}
 	}
+	own := func(name string) bool { return name == "nodevas" && !env.NoBoard }
 	for _, name := range env.DisableMCP {
-		if name != "nodevas" {
+		if !own(name) {
 			servers[name] = map[string]any{"enabled": false}
 		}
 	}
 	var mcp any = servers
 	if openCode2(env) {
-		nodevas := servers["nodevas"].(map[string]any)
-		delete(nodevas, "enabled")
-		nodevas["codemode"] = false
+		if nodevas, ok := servers["nodevas"].(map[string]any); ok && own("nodevas") {
+			delete(nodevas, "enabled")
+			nodevas["codemode"] = false
+		}
 		for name := range servers {
-			if name != "nodevas" {
+			if !own(name) {
 				// Nothing listens on the discard port, and a disabled server
 				// is not connected to anyway.
 				servers[name] = map[string]any{"type": "remote", "url": "http://127.0.0.1:9", "disabled": true}

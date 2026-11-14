@@ -3,8 +3,10 @@ import { ADVANCED_ROWS, type SettingsPage, type SettingsRow } from "./openSettin
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 /** What an entry needs to be offered: the workstation shown, a server with
- * accounts, a signed-in account there, or its administrator. */
-export type SettingsNeed = "workstation" | "team" | "account" | "admin";
+ * accounts, a signed-in account there, or its administrator; the team
+ * edition's runner pages ("runners"), or the single-user edition's This
+ * computer ("local"). */
+export type SettingsNeed = "workstation" | "team" | "account" | "admin" | "runners" | "local";
 
 export interface SettingsEntry {
   /** The label's i18n key: entries are found by the words the page uses. */
@@ -30,14 +32,17 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { label: "notify.title", page: "general", row: "reminders" },
   { label: "settingsPage.part.copilot", page: "general", row: "copilot" },
   { label: "workstation.label", page: "agents" },
-  { label: "settingsPage.part.runners", page: "agents", needs: ["workstation"] },
-  { label: "runners.add", page: "agents", add: true, needs: ["workstation"] },
+  { label: "settingsPage.part.runners", page: "agents", needs: ["workstation", "runners"] },
+  { label: "runners.add", page: "agents", add: true, needs: ["workstation", "runners"] },
+  { label: "local.title", page: "agents", needs: ["workstation", "local"] },
+  { label: "repoAdd.title", page: "agents", needs: ["workstation", "local"] },
+  { label: "local.askEveryRun", page: "agents", needs: ["workstation", "local"] },
   { label: "runners.link.open", page: "agents", needs: ["workstation", "team"] },
   { label: "settingsPage.part.budget", page: "agents", row: "budget", needs: ["workstation"] },
   { label: "settingsPage.part.routing", page: "agents", row: "routing", needs: ["workstation"] },
   { label: "roles.settings.title", page: "agents", row: "roles", needs: ["workstation"] },
   { label: "stages.title", page: "agents", row: "stages", needs: ["workstation"] },
-  { label: "runners.autoAccept", page: "agents", row: "autoAccept", needs: ["workstation"] },
+  { label: "runners.autoAccept", page: "agents", row: "autoAccept", needs: ["workstation", "runners"] },
   { label: "settingsPage.usageDetails", page: "agents", row: "usage", needs: ["workstation"] },
   { label: "settingsPage.part.analytics", page: "agents", row: "analytics", needs: ["workstation"] },
   { label: "runners.link.accessTitle", page: "agents", row: "accessToken", needs: ["workstation", "admin"] },

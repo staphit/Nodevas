@@ -53,9 +53,10 @@ func (OpenCodeACP) NewConversation(job runnerwire.Job, env RunEnv) Conversation 
 }
 
 // openCodeACPRelay reports whether a run relays its permission requests:
-// permissionRelay on, the owner's edit setting, and a run that may write.
+// permissionRelay on, the owner's edit setting, and a run that may write
+// and has a board to ask through.
 func openCodeACPRelay(job runnerwire.Job, env RunEnv) bool {
-	return env.PermissionRelay && !ReadOnly(job) && PermissionRelayApplies("opencode", env.PermissionMode, true)
+	return env.PermissionRelay && !env.NoBoard && !ReadOnly(job) && PermissionRelayApplies("opencode", env.PermissionMode, true)
 }
 
 func (OpenCodeACP) Classify(text string) string { return classify(openCodeFailures, text) }

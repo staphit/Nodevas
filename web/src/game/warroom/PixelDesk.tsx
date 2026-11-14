@@ -6,12 +6,12 @@
 // otherwise. The name tag under it is plain text, so it stays sharp at any
 // zoom.
 
-import { memo, useMemo, type CSSProperties } from "react";
+import { memo, useMemo, type CSSProperties, type ReactNode } from "react";
 
 import { excerpt } from "../../agents/agentStore";
 import { useI18n } from "../../i18n";
 import type { ControlRow } from "../../station/control";
-import { RunMenu } from "../../station/runMenuItems";
+import { RunItems, type MenuShell } from "../../station/runMenuItems";
 import { StationMenu, type StationMenuItem } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
 import {
@@ -57,14 +57,9 @@ export const EmptySeat = memo(function EmptySeat({ style, edge }: { style: Offic
   );
 });
 
-export interface AgentDeskProps {
+/** An agent as a button: who it is, and what its menu acts on. */
+export interface AgentFace {
   actor: Actor;
-  /** Where it is drawn: at a desk, at the meeting table, at the door, on a
-   * sofa. */
-  scene: DeskSceneKind;
-  style: OfficeStyle;
-  /** A meeting seat's place along the table. */
-  edge?: MeetingOptions["edge"];
   /** The sentence that names it: who, where, doing what, on which node. */
   label: string;
   /** More about it for its menu's heading: a review's votes and round. */
@@ -74,16 +69,27 @@ export interface AgentDeskProps {
   titleOf: TitleOf;
 }
 
+export interface AgentDeskProps extends AgentFace {
+  /** Where it is drawn: at a desk, at the meeting table, at the door, on a
+   * sofa. */
+  scene: DeskSceneKind;
+  style: OfficeStyle;
+  /** A meeting seat's place along the table. */
+  edge?: MeetingOptions["edge"];
+}
+
 /** What a desk shows and offers: when none of it changed, a heartbeat that
  * rebuilt the world does not redraw it. The label carries the ask, the held
  * mail, the bubble, the swap and the energy; the row, the run's state. */
 export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
+  return a.scene === b.scene && a.style === b.style && a.edge === b.edge && sameAgent(a, b);
+}
+
+/** The same of an agent, wherever it is drawn. */
+export function sameAgent(a: AgentFace, b: AgentFace): boolean {
   return (
     a.label === b.label &&
     a.detail === b.detail &&
-    a.scene === b.scene &&
-    a.style === b.style &&
-    a.edge === b.edge &&
     a.actor.id === b.actor.id &&
     a.actor.pose === b.actor.pose &&
     a.actor.nodeTitle === b.actor.nodeTitle &&
@@ -93,6 +99,7 @@ export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
     a.actor.energy?.cap === b.actor.energy?.cap &&
     a.actor.role === b.actor.role &&
     a.actor.testState === b.actor.testState &&
+    a.actor.cannotAsk === b.actor.cannotAsk &&
     sameTargets(a.actor.actions, b.actor.actions) &&
     a.row === b.row &&
     a.titleOf === b.titleOf
@@ -133,6 +140,95 @@ export function menuItem(
   });
 }
 
+interface ActorItemsProps {
+  actor: Actor;
+  row?: ControlRow;
+  titleOf: TitleOf;
+  /** Draws the items: as a menu, or as buttons of the caller's own. */
+  children: (items: StationMenuItem[]) => ReactNode;
+}
+
+/** What can be done about an agent: a run's controls, with what only its
+ * character knows first, or a session's targets. */
+export function ActorItems({ actor, row, titleOf, children }: ActorItemsProps) {
+  const { t } = useI18n();
+  const { dispatch } = useGameActions();
+  const asItem = menuItem(t, dispatch, titleOf);
+  if (actor.kind === "run" && row) {
+    const extra = urgentFirst(actor.actions.filter((target) => EXTRA_FOR_RUN.has(target.kind))).map(asItem);
+    return (
+      <RunItems row={row} titleOf={titleOf} extra={extra}>
+        {children}
+      </RunItems>
+    );
+  }
+  return <>{children(urgentFirst(actor.actions).map(asItem))}</>;
+}
+
+/** The same, as a menu on a trigger of the caller's own. */
+export function ActorMenu({ actor, row, titleOf, ...shell }: MenuShell & Omit<ActorItemsProps, "children">) {
+  return (
+    <ActorItems actor={actor} row={row} titleOf={titleOf}>
+      {(items) => <StationMenu items={items} {...shell} />}
+    </ActorItems>
+  );
+}
+
+/** What is pinned on an agent: its role, its tests' lamp, the mail held for
+ * it, whom it took over from, and what it just said. The drawing shows one
+ * held message itself, so only more are counted. */
+export function ActorBadges({ actor }: { actor: Actor }) {
+  const { t } = useI18n();
+  const held = actor.heldMail.length;
+  return (
+    <>
+      {actor.role && (
+        <span className={`px-badge is-role role--${roleBadgeKey(actor.role)}`} aria-hidden="true">
+          {t(`warroom.roleBadge.${roleBadgeKey(actor.role)}`)}
+        </span>
+      )}
+      {actor.testState && (
+        <span
+          className={`px-badge is-test is-${actor.testState}`}
+          role="img"
+          aria-label={t(`warroom.test.${actor.testState}`)}
+        />
+      )}
+      {actor.cannotAsk && (
+        <span className="px-badge is-noask" aria-hidden="true">
+          {t("globalAgents.noAskShort")}
+        </span>
+      )}
+      {held > 1 && (
+        <span className="px-badge is-mail" aria-hidden="true">
+          {held}
+        </span>
+      )}
+      {actor.swappedFrom && (
+        <span className="px-badge is-swap" aria-hidden="true">
+          ⇄ {agentName(actor.swappedFrom.agent)}
+        </span>
+      )}
+      {actor.bubble && (
+        <span className="px-say" aria-hidden="true">
+          {excerpt(actor.bubble.body, 48)}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** The tokens a run has used: a meter against its cap, or the count. */
+export function EnergyMark({ energy }: { energy: NonNullable<Actor["energy"]> }) {
+  if (!energy.cap) return <span className="px-tag-tokens">⚡{formatTokens(energy.used)}</span>;
+  const ratio = Math.min(1, energy.used / energy.cap);
+  return (
+    <span className="px-meter" title={formatTokens(energy.used)}>
+      <span style={{ width: `${Math.max(4, ratio * 100)}%` }} />
+    </span>
+  );
+}
+
 function sceneParts(
   scene: DeskSceneKind,
   pose: Actor["pose"],
@@ -164,7 +260,6 @@ export const AgentDesk = memo(function AgentDesk({
   titleOf,
 }: AgentDeskProps) {
   const { t } = useI18n();
-  const { dispatch } = useGameActions();
   const kind = agentColorKey(actor.agent);
   const mail = actor.heldMail.length > 0;
   const pose = actor.pose;
@@ -172,9 +267,7 @@ export const AgentDesk = memo(function AgentDesk({
   const loop = scene === "door" ? undefined : POSE_LOOP_MS[actor.pose];
   const who = agentWho(actor.agent, actor.model);
   const energy = actor.energy;
-  const ratio = energy?.cap ? Math.min(1, energy.used / energy.cap) : undefined;
   const width = scene === "sofa" ? SEAT_W : CELL;
-  const asItem = menuItem(t, dispatch, titleOf);
 
   const shell = {
     label,
@@ -192,53 +285,15 @@ export const AgentDesk = memo(function AgentDesk({
             // The loop's length, for the frames' steps() animation.
             style={loop ? ({ ["--px-loop" as string]: `${loop}ms` } as CSSProperties) : undefined}
           />
-          {actor.role && (
-            <span className={`px-badge is-role role--${roleBadgeKey(actor.role)}`} aria-hidden="true">
-              {t(`warroom.roleBadge.${roleBadgeKey(actor.role)}`)}
-            </span>
-          )}
-          {actor.testState && (
-            <span
-              className={`px-badge is-test is-${actor.testState}`}
-              role="img"
-              aria-label={t(`warroom.test.${actor.testState}`)}
-            />
-          )}
-          {actor.heldMail.length > 1 && (
-            <span className="px-badge is-mail" aria-hidden="true">
-              {actor.heldMail.length}
-            </span>
-          )}
-          {actor.swappedFrom && (
-            <span className="px-badge is-swap" aria-hidden="true">
-              ⇄ {agentName(actor.swappedFrom.agent)}
-            </span>
-          )}
-          {actor.bubble && (
-            <span className="px-say" aria-hidden="true">
-              {excerpt(actor.bubble.body, 48)}
-            </span>
-          )}
+          <ActorBadges actor={actor} />
         </span>
         <span className="px-tag" aria-hidden="true">
           <span className="px-tag-who">{scene === "sofa" ? agentName(actor.agent) : who}</span>
           <span className="px-tag-what">{actor.nodeTitle || actor.sessionName || poseLabel(t, actor.pose)}</span>
-          {energy &&
-            scene !== "sofa" &&
-            (ratio !== undefined ? (
-              <span className="px-meter" title={formatTokens(energy.used)}>
-                <span style={{ width: `${Math.max(4, ratio * 100)}%` }} />
-              </span>
-            ) : (
-              <span className="px-tag-tokens">⚡{formatTokens(energy.used)}</span>
-            ))}
+          {energy && scene !== "sofa" && <EnergyMark energy={energy} />}
         </span>
       </>
     ),
   };
-  if (actor.kind === "run" && row) {
-    const extra = urgentFirst(actor.actions.filter((target) => EXTRA_FOR_RUN.has(target.kind))).map(asItem);
-    return <RunMenu row={row} titleOf={titleOf} extra={extra} {...shell} />;
-  }
-  return <StationMenu items={urgentFirst(actor.actions).map(asItem)} {...shell} />;
+  return <ActorMenu actor={actor} row={row} titleOf={titleOf} {...shell} />;
 }, sameDesk);

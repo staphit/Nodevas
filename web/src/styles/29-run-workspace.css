@@ -1,0 +1,409 @@
+/* Agent workspace: one run's worktree, changes and terminal in one panel,
+ * with the owner's merge and discard. Wide on a desk, the whole screen on a
+ * phone. Below the confirmations (z-index 80) so they stack over it. */
+.run-ws-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--scrim) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+.run-ws-dialog {
+  display: flex;
+  width: min(1100px, 100%);
+  height: min(860px, calc(100vh - 48px));
+  height: min(860px, calc(100dvh - 48px));
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 18px 48px var(--shadow);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-ws-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 6px 18px;
+}
+.run-ws-head h2 {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  font-size: calc(14px * var(--font-scale, 1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-ws-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 18px 10px;
+}
+.run-ws-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.run-ws-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+}
+.run-ws-facts > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+.run-ws-facts dt {
+  color: var(--text-2);
+}
+.run-ws-facts dd {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-ws-facts .mono {
+  font-family: var(--mono);
+}
+.run-ws-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border: 1px solid var(--text-2);
+  border-radius: 50%;
+}
+.run-ws-dot.is-online {
+  border-color: var(--st-done-fg);
+  background: var(--st-done-fg);
+}
+.run-ws-info {
+  margin: 0;
+  color: var(--text-2);
+}
+.run-ws-info.is-error {
+  color: var(--st-failed-fg);
+}
+.run-ws-status-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-ws-status-line small {
+  flex: 1 1 100%;
+  color: var(--text-2);
+}
+.run-ws-status-line.is-pending {
+  color: var(--st-progress-fg);
+}
+.run-ws-status-line.is-done {
+  color: var(--pr-merged-fg);
+  font-weight: 600;
+}
+.run-ws-status-line.is-failed {
+  color: var(--st-failed-fg);
+}
+.run-ws-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.run-ws-pr-merge {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.run-ws-merge,
+.run-ws-discard,
+.run-workspace-open,
+.run-ws-tool {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-ws-merge {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+  font-weight: 600;
+}
+.run-ws-discard {
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
+}
+.run-ws-merge:disabled,
+.run-ws-discard:disabled {
+  border-color: var(--border);
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: not-allowed;
+  font-weight: 500;
+}
+.run-ws-tool[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.run-ws-refusal {
+  flex: 1 1 100%;
+}
+.run-workspace-open {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.run-workspace-chip {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.run-workspace-chip.is-merged_local {
+  border-color: var(--pr-merged-fg);
+  color: var(--pr-merged-fg);
+}
+.run-ws-tablist {
+  display: flex;
+  gap: 2px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.run-ws-tablist [role="tab"] {
+  min-height: 32px;
+  margin-bottom: -1px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.run-ws-tablist [role="tab"].active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+.run-ws-panels {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.run-ws-panel {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+.run-ws-panel[hidden] {
+  display: none;
+}
+.run-ws-panel > .run-timeline-wrap,
+.run-ws-panel > .run-term {
+  margin: 10px 14px;
+}
+.run-diff-inline {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.run-diff-inline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+}
+.run-ws-note {
+  margin: 10px 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  line-height: 1.5;
+  list-style: none;
+}
+
+/* Files: the tree beside the open file. */
+.run-ws-files {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.run-ws-files-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.run-ws-files-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+  border-top: 1px solid var(--border);
+}
+.run-ws-files-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+}
+.run-ws-tree,
+.run-ws-status {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run-ws-row {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.run-ws-row:hover {
+  background: var(--surface-2);
+}
+.run-ws-row.on {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+.run-ws-row.dim {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.run-ws-ico,
+.run-ws-mark {
+  width: 16px;
+  flex: none;
+  color: var(--text-2);
+}
+.run-ws-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-ws-meta {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.run-ws-file {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: 10px 14px;
+}
+.run-ws-file-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.run-ws-file-head .mono {
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-ws-file .ex-code {
+  overflow: auto;
+  padding: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--font-scale, 1));
+  line-height: 1.6;
+}
+.run-ws-file .ex-code .ln {
+  display: flex;
+  white-space: pre;
+}
+.run-ws-file .ex-code .no {
+  flex: 0 0 44px;
+  padding-right: 14px;
+  color: var(--text-2);
+  opacity: 0.7;
+  text-align: right;
+  user-select: none;
+}
+.run-ws-file .ex-code .tx {
+  flex: 1;
+  padding-right: 16px;
+}
+
+@media (max-width: 720px) {
+  .run-ws-backdrop {
+    padding: 0;
+  }
+  .run-ws-dialog {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .run-ws-files-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 40%) minmax(0, 1fr);
+  }
+  .run-ws-files-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .run-ws-merge,
+  .run-ws-discard {
+    min-height: 40px;
+  }
+}

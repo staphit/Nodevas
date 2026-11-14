@@ -1,6 +1,7 @@
 // The building as plain text, for a screen reader: each office and room,
-// who is in it doing what, what lies on the meeting table, the racks. The
-// drawing's buttons are the controls; this only says what is there.
+// who is in it doing what, what lies on the meeting table, the global
+// agents' office, the racks. The drawing's buttons are the controls; this
+// only says what is there.
 
 import { useMemo } from "react";
 
@@ -13,12 +14,13 @@ export function BuildingText({ building }: { building: Building }) {
   const { t } = useI18n();
   const actorsById = useMemo(() => new Map(building.actors.map((actor) => [actor.id, actor])), [building.actors]);
   const office = building.current;
-  if (!office) return null;
+  const global = building.global;
+  if (!office && !global) return null;
   const actors = (ids: string[]) => ids.map((id) => actorsById.get(id)).filter((actor): actor is Actor => Boolean(actor));
   const say = (actor: Actor) => <li key={actor.id}>{actorLabel(t, actor, placeOf(t, actor))}</li>;
   // The runners' free slots, as the office's header says: the drawing pads
   // the floor to two desks, which are not free slots.
-  const free = office.freeDesks;
+  const free = office?.freeDesks ?? 0;
   const area = (name: Area) => <h4>{areaName(t, name)}</h4>;
 
   const lounge = building.lounge.map((spot) => ({ spot, actor: spot.actorId ? actorsById.get(spot.actorId) : undefined }));
@@ -27,25 +29,48 @@ export function BuildingText({ building }: { building: Building }) {
 
   return (
     <div className="visually-hidden" data-testid="war-room-text">
-      <h3>{t("game.office.label", { name: office.label })}</h3>
-      {area("work")}
-      <ul>
-        {actors(office.work).map(say)}
-        {free > 0 && <li>{free === 1 ? t("game.warroom.freeDesksOne") : t("game.warroom.freeDesks", { count: free })}</li>}
-      </ul>
-      {area("meeting")}
-      <ul>
-        {actors(office.meeting).map(say)}
-        {office.items.map((item) => (
-          <li key={item.id}>{itemLabel(t, item)}</li>
-        ))}
-        {office.meeting.length + office.items.length === 0 && <li>{t("game.meeting.empty")}</li>}
-      </ul>
-      {area("entrance")}
-      <ul>
-        {actors(office.entrance).map(say)}
-        {office.entrance.length === 0 && <li>{t("game.entrance.empty")}</li>}
-      </ul>
+      {office && (
+        <>
+          <h3>{t("game.office.label", { name: office.label })}</h3>
+          {area("work")}
+          <ul>
+            {actors(office.work).map(say)}
+            {free > 0 && <li>{free === 1 ? t("game.warroom.freeDesksOne") : t("game.warroom.freeDesks", { count: free })}</li>}
+          </ul>
+          {area("meeting")}
+          <ul>
+            {actors(office.meeting).map(say)}
+            {office.items.map((item) => (
+              <li key={item.id}>{itemLabel(t, item)}</li>
+            ))}
+            {office.meeting.length + office.items.length === 0 && <li>{t("game.meeting.empty")}</li>}
+          </ul>
+          {area("entrance")}
+          <ul>
+            {actors(office.entrance).map(say)}
+            {office.entrance.length === 0 && <li>{t("game.entrance.empty")}</li>}
+          </ul>
+        </>
+      )}
+      {global && (
+        <>
+          <h3>{t("game.office.label", { name: t("globalAgents.office") })}</h3>
+          {area("work")}
+          <ul>{actors(global.work).map(say)}</ul>
+          {global.meeting.length > 0 && (
+            <>
+              {area("meeting")}
+              <ul>{actors(global.meeting).map(say)}</ul>
+            </>
+          )}
+          {global.entrance.length > 0 && (
+            <>
+              {area("entrance")}
+              <ul>{actors(global.entrance).map(say)}</ul>
+            </>
+          )}
+        </>
+      )}
       {others.length > 0 && (
         <>
           <h3>{t("game.building.others")}</h3>

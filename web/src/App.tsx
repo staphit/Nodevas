@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { connectWS } from "./api";
+import { connectWS, rememberGlobalRun } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
 import { reportError, useApp, usePreference } from "./store";
@@ -26,6 +26,7 @@ import { useProjectNodeSelection } from "./projectSelection";
 import { GraphPane } from "./components/GraphPane";
 import { TimelinePane } from "./components/TimelinePane";
 import { ConfirmDialogHost } from "./components/ConfirmDialog";
+import { RunWorkspaceHost } from "./runs/RunWorkspaceHost";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
@@ -38,6 +39,7 @@ import { followupArrived as copilotFollowupArrived, runnersChanged as copilotRun
 import { AgentChatRoot } from "./agents/AgentChatRoot";
 import { useAgents } from "./agents/agentStore";
 import { useThemePacks } from "./theme-pack/themePackStore";
+import { useThemeSkin } from "./theme-pack/themeSkin";
 import { useUsage } from "./usage/usageStore";
 import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
@@ -45,6 +47,7 @@ import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
 import { openSettings } from "./settings/openSettings";
 import { useBuilding } from "./station/buildingStore";
+import { useGlobalAgents } from "./station/globalAgentsStore";
 import { useStation } from "./station/stationStore";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
@@ -85,7 +88,6 @@ function MainApp() {
   const activeTab = useApp((s) => s.activeTab);
   const undoLast = useApp((s) => s.undoLast);
   const redoLast = useApp((s) => s.redoLast);
-  const theme = useApp((s) => s.theme);
   const activeProject = useApp((s) => s.activeProject);
   const paneOpen = useApp((s) => s.paneOpen);
   const togglePane = useApp((s) => s.togglePane);
@@ -109,9 +111,8 @@ function MainApp() {
   const [explorerWidth, setExplorerWidth] = useState(preferredExplorerWidth);
   useEffect(() => setExplorerWidth(preferredExplorerWidth), [preferredExplorerWidth]);
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+  // Light or dark on the root element, under the skin of a theme pack.
+  useThemeSkin();
 
   useEffect(() => {
     document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
@@ -367,6 +368,24 @@ function MainApp() {
           // page is hidden and this browser allows one.
           void useRunToasts.getState().handleRunNotify(ev.id ?? "");
           break;
+        case "global-runs-changed":
+          // The id is a global agent's run (phase 2, sent to its dispatcher
+          // and its runner's owner only): the Global agents list refetches,
+          // coalesced, and the war room's second office with it.
+          rememberGlobalRun(ev.id);
+          useGlobalAgents.getState().onChanged(ev.id);
+          useBuilding.getState().onChanged();
+          break;
+        case "global-run-events":
+          // As run-events, for a global run: its routes are its own.
+          rememberGlobalRun(ev.id);
+          useRuns.getState().onRunEvents(ev.id, ev.kind);
+          break;
+        case "global-run-notify":
+          // As run-notify: a global agent finished, or its CI or merge moved.
+          rememberGlobalRun(ev.id);
+          void useRunToasts.getState().handleRunNotify(ev.id ?? "");
+          break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
           // nothing else to reload.
@@ -392,6 +411,7 @@ function MainApp() {
           // whatever run lists and live runs are on screen.
           useRuns.getState().resync();
           useSessions.getState().resync();
+          useGlobalAgents.getState().resync();
           // A later one is the server coming back: clear what only said it
           // was unreachable, and reload what it broadcast while it was gone.
           socketGenerations += 1;
@@ -532,6 +552,9 @@ function MainApp() {
       </div>
       {/* Each floating root in its own boundary: one that crashes becomes a
           small notice, and the page and the others carry on. */}
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <RunWorkspaceHost />
+      </ViewErrorBoundary>
       <ViewErrorBoundary compact resetKey={activeProject}>
         <ConfirmDialogHost />
       </ViewErrorBoundary>

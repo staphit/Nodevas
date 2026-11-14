@@ -372,7 +372,8 @@ func (o *Orchestrator) startGoalRun(ctx context.Context, w *work, kind, role str
 			Kind: kind, Role: role, Prompt: runs.Truncate(extra, runs.MaxExtraPrompt),
 		},
 		Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName, SteppedUpAt: rec.SteppedUpAt,
-		Roles: w.graph.ResolvedAgentRoles(),
+		Origin: runnerwire.OriginAutopilot,
+		Roles:  w.graph.ResolvedAgentRoles(),
 		LoadNode: func() (runs.NodeInfo, bool, error) {
 			refs, truncated, err := o.opts.Board.References(rec.Project, rec.GoalNodeID)
 			if err != nil {

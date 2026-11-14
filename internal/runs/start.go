@@ -33,6 +33,10 @@ type StartRequest struct {
 	ActorID, ActorName string
 	// SteppedUpAt is the dispatcher's step-up (RFC3339Nano), or "".
 	SteppedUpAt string
+	// Origin is what starts it (runnerwire.OriginPerson for a person's
+	// dispatch, OriginAutopilot for the autopilot's), offered to the runner
+	// as Job.Origin; "" is unknown, which a runner treats as automatic.
+	Origin string
 	// LoadNode returns the node's title, content and type; found false means
 	// the graph has no such node. It is called once the runner checks pass.
 	LoadNode func() (NodeInfo, bool, error)
@@ -90,8 +94,12 @@ type StartError struct {
 	NodeType  string
 	AgentMode engine.AgentMode
 	// Reason is the shared error code for a role or stage refusal
-	// (ACCEPTANCE_REQUIRED).
+	// (ACCEPTANCE_REQUIRED, GLOBAL_RUNS_OFF).
 	Reason string
+	// Field names the request field a StartInvalid refusal is about, when
+	// it is about one (global runs: task, slug, base, mode, agent, model,
+	// repoId).
+	Field string
 }
 
 func (e *StartError) Error() string { return e.Msg }
@@ -107,7 +115,7 @@ func (e *StartError) Is(target error) bool {
 		return target == ErrInvalid
 	case StartNotFound:
 		return target == ErrNotFound
-	case StartPrecondition, StartBudget, StartNodeType:
+	case StartPrecondition, StartBudget, StartNodeType, StartOutdated:
 		return target == ErrPrecondition
 	}
 	return false
@@ -398,6 +406,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
 		Role: first.role, Override: body.Override, JobRoles: jobRoles,
 		NodeType: node.Type, AcceptanceCount: len(acceptance),
+		Origin: req.Origin,
 	})
 	if err != nil {
 		if pipelineID != "" {

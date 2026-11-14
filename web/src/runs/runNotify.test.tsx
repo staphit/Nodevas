@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type Run, type RunMergeRequest } from "../api";
+import { api, forgetGlobalRuns, rememberGlobalRun, type Run, type RunMergeRequest } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { resetRunNotify, runNotifyKind, useRunToasts } from "./runNotify";
 import { RunToasts } from "./RunToasts";
 import { useRuns } from "./runStore";
+import { useWorkspace } from "./workspaceStore";
 
 const systemNotify = vi.hoisted(() => ({ show: vi.fn(() => true) }));
 vi.mock("../agents/systemNotify", () => ({
@@ -250,5 +251,112 @@ describe("usage limits and the daily budget", () => {
     render(<RunToasts />);
     await notify(makeRun());
     expect(screen.queryByText("Daily budget used up")).toBeNull();
+  });
+});
+
+describe("workspace actions", () => {
+  const action = (status: string, overrides = {}) => ({
+    id: "wa1",
+    runId: "run2",
+    action: "merge_local",
+    status,
+    requestedBy: "alice",
+    createdAt: "2026-10-24T08:11:00Z",
+    finishedAt: "2026-10-24T08:11:30Z",
+    ...overrides,
+  });
+
+  it("tells once when the runner merged locally, newest step first", () => {
+    const run = makeRun({ merge: merge(), workspaceAction: action("done") });
+    expect(runNotifyKind(run, NOW)).toEqual({ kind: "workspace-merged", key: "run2:workspace:wa1" });
+    expect(runNotifyKind(makeRun({ workspaceAction: action("pending") }), NOW)?.kind).not.toMatch(/^workspace/);
+    expect(runNotifyKind(makeRun({ workspaceAction: action("done", { action: "discard" }) }), NOW)?.kind).toBe(
+      "workspace-discarded",
+    );
+    expect(runNotifyKind(makeRun({ workspaceAction: action("expired") }), NOW)?.kind).toBe("workspace-failed");
+  });
+
+  it("toasts a refused local merge in the reader's words and opens the workspace", async () => {
+    const run = makeRun({ workspaceAction: action("failed", { code: "dirty_base" }) });
+    vi.spyOn(api, "getRun").mockResolvedValue(run);
+    vi.spyOn(api, "getRunBudget").mockResolvedValue({
+      budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
+      used: { runs: 0, costUsd: 0, tokens: 0 },
+      exceeded: "",
+    });
+    const openWorkspace = vi.fn();
+    useWorkspace.setState({ openWorkspace });
+    render(<RunToasts />);
+    await useRunToasts.getState().handleRunNotify("run2");
+    const toast = await screen.findByText("Local merge for Claude opus failed");
+    expect(toast.closest("[role]") ?? toast.parentElement).toHaveTextContent(
+      "Your checkout of the base has uncommitted changes or an unfinished merge or rebase",
+    );
+    // The answer reaches the run lists at once.
+    expect(useRuns.getState().runsByNode.alpha[0].workspaceAction?.status).toBe("failed");
+    fireEvent.click(toast);
+    expect(openWorkspace).toHaveBeenCalledWith("run2", undefined);
+  });
+});
+
+describe("global agents", () => {
+  const globalRun = (overrides: Partial<Run> = {}) =>
+    makeRun({
+      id: "g1",
+      project: "",
+      nodeId: "",
+      global: true,
+      title: "Fix the login button",
+      prUrl: undefined,
+      prNumber: undefined,
+      prState: undefined,
+      ciStatus: undefined,
+      ...overrides,
+    });
+
+  afterEach(() => {
+    forgetGlobalRuns();
+    useRuns.setState({ globalById: {} });
+  });
+
+  it("fetches a global-run-notify's run from its own route and toasts its task", async () => {
+    const run = globalRun();
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.startsWith("/api/global-runs/g1")
+        ? run
+        : { budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 }, used: { runs: 0, costUsd: 0, tokens: 0 }, exceeded: "" };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const openWorkspace = vi.fn();
+    useWorkspace.setState({ openWorkspace });
+    render(<RunToasts />);
+    // As App does for global-run-notify: the id is known global first.
+    rememberGlobalRun("g1");
+    await useRunToasts.getState().handleRunNotify("g1");
+    expect(fetch.mock.calls.map(([url]) => String(url))).toContain("/api/global-runs/g1");
+    const toast = await screen.findByText("Global agent Claude opus finished: Fix the login button");
+    // Held for its workspace, outside any node's list.
+    expect(useRuns.getState().globalById.g1).toEqual(run);
+    expect(useRuns.getState().runsByNode).toEqual({});
+    fireEvent.click(toast);
+    expect(openWorkspace).toHaveBeenCalledWith("g1", undefined);
+  });
+
+  it("says a global agent failed with its error", async () => {
+    await notify(globalRun({ status: "failed", error: "tests failed" }));
+    const [toast] = useRunToasts.getState().toasts;
+    expect(toast).toMatchObject({
+      runId: "g1",
+      kind: "failed",
+      global: true,
+      title: "Global agent Claude opus failed: Fix the login button",
+      body: "tests failed",
+    });
+  });
+
+  it("names the task in a global run's merge and workspace toasts", async () => {
+    await notify(globalRun({ prUrl: "https://github.com/o/r/pull/7", prNumber: 7, prState: "merged", merge: merge({ runId: "g1" }) }));
+    expect(useRunToasts.getState().toasts[0]).toMatchObject({ kind: "merged", body: "Fix the login button" });
   });
 });

@@ -35,10 +35,11 @@ const (
 	fallbackEmail = "runner@nodevas.invalid"
 )
 
-// commitMessage is a run's commit message: the node's title as the subject,
-// the agent's summary as the body, and trailers naming the node and the run.
-// The title, not the summary's first line: agents open with "Done." as often
-// as with anything that says what changed, and the node is what the work was.
+// commitMessage is a run's commit message: the node's title (a global
+// agent's, its task's) as the subject, the agent's summary as the body, and
+// trailers naming the node, when there is one, and the run. The title, not
+// the summary's first line: agents open with "Done." as often as with
+// anything that says what changed, and the node is what the work was.
 func commitMessage(summary string, job runnerwire.Job) string {
 	summary = strings.TrimSpace(strings.ReplaceAll(redact.Output(summary), "\r\n", "\n"))
 	subject := subjectLine(oneLine(job.NodeTitle))
@@ -64,8 +65,18 @@ func commitMessage(summary string, job runnerwire.Job) string {
 		b.WriteString(body)
 		b.WriteString("\n\n")
 	}
-	fmt.Fprintf(&b, "Nodevas-Node: %s\nNodevas-Run: %s\n", oneLine(job.NodeID), oneLine(job.RunID))
+	b.WriteString(trailers(job.NodeID, job.RunID))
 	return b.String()
+}
+
+// trailers are a commit's Nodevas-Node and Nodevas-Run lines; a global
+// agent's run has no node, so no Nodevas-Node.
+func trailers(nodeID, runID string) string {
+	text := ""
+	if nodeID != "" {
+		text = "Nodevas-Node: " + oneLine(nodeID) + "\n"
+	}
+	return text + "Nodevas-Run: " + oneLine(runID) + "\n"
 }
 
 // subjectLine cuts a line to maxSubject runes, at a word when one ends late
@@ -218,7 +229,7 @@ func (j *jobs) commit(ctx context.Context, r *run, wt Worktree, message string) 
 			", which is kept: commit it yourself if it is meant, then remove the worktree: " + strings.Join(list, ", ")})
 		// Listed by `nodevas runner status`; `nodevas runner prune-kept`
 		// removes it on request once it holds nothing else.
-		dataDir, err := j.c.Config.RunDataDir()
+		dataDir, err := j.runCfg(r).RunDataDir()
 		if err == nil {
 			err = RecordKept(ctx, dataDir, r.repo.Path, wt, res.Withheld)
 		}
@@ -429,7 +440,9 @@ func (w *capWriter) Write(p []byte) (int, error) {
 // branch with a pull request is left alone, since GitHub owns it.
 func removeWorktree(ctx context.Context, repoPath string, wt Worktree, dropBranch bool) error {
 	var errs []error
-	if _, err := git(ctx, repoPath, "worktree", "remove", "--force", wt.Path); err != nil {
+	if err := unlinkTree(wt.Path); err != nil {
+		errs = append(errs, err)
+	} else if _, err := git(ctx, repoPath, "worktree", "remove", "--force", wt.Path); err != nil {
 		// A worktree git no longer knows (its repository moved) is just a
 		// directory; one already gone is fine.
 		if _, statErr := os.Stat(wt.Path); statErr == nil {
@@ -441,6 +454,44 @@ func removeWorktree(ctx context.Context, repoPath string, wt Worktree, dropBranc
 	}
 	if dropBranch && wt.Branch != "" {
 		if _, err := git(ctx, repoPath, "branch", "-D", wt.Branch); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// unlinkTree removes every link in a worktree about to be removed, and the
+// worktree itself when it is a link: a symlink, or a Windows junction an
+// agent needs no privilege to make. Removing a tree follows a junction on
+// Windows and would delete whatever it points at, the owner's home folder
+// say; with the links gone first, only the run's own files remain.
+func unlinkTree(root string) error {
+	info, err := os.Lstat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		return os.Remove(root)
+	}
+	var links []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == root {
+			return nil
+		}
+		if d.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+			links = append(links, path)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+	var errs []error
+	for _, link := range links {
+		if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}

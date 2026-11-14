@@ -156,9 +156,10 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   "ui-preference": {
     id: "ui-preference",
     titleKey: "domain.title.uiPreference",
-    sourceOfTruth: "localStorage (versioned adapter)",
+    sourceOfTruth:
+      "localStorage (versioned adapter); account choices also on the server (account_preferences), synced by preferences/sync.ts",
     diskPath: "",
-    api: [],
+    api: ["GET /api/me/preferences", "PATCH /api/me/preferences"],
     owner: "Settings / Appearance",
     readers: ["App", "Drawer", "Timeline", "Sidebar"],
     writers: ["updateUIPreference", "resetUIPreferences"],

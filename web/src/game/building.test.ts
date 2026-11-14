@@ -13,6 +13,7 @@ import {
 } from "./building";
 import { runActorId, sessionActorId } from "./office";
 import { ago, makeBudget, makeRun, makeRunner, makeSession, NOW } from "./testFixtures";
+import { GLOBAL_OFFICE } from "./world";
 
 let seq = 0;
 
@@ -211,6 +212,7 @@ describe("compactOffice", () => {
     expect(compactOffice(p, NOW).actions).toEqual([
       { kind: "project", project: "app" },
       { kind: "in-project", project: "app", then: { kind: "run", runId: run.id, nodeId: "n-run" } },
+      { kind: "in-project", project: "app", then: { kind: "run-workspace", runId: run.id, nodeId: "n-run" } },
       { kind: "in-project", project: "app", then: { kind: "ask", askId: "a1", sessionId: "s1", askKind: "approval" } },
       { kind: "in-project", project: "app", then: { kind: "autopilot", goalNodeId: "goal" } },
     ]);
@@ -323,5 +325,88 @@ describe("the server room", () => {
       inputs({ runs: [local], remote: remote(project("app", { runs: [brun({ id: "loc" }), brun({ id: "far" })] })) }),
     );
     expect(building.racks[0].busy).toBe(2);
+  });
+});
+
+describe("the global agents' office", () => {
+  const global = (over: Partial<Parameters<typeof makeRun>[0]> = {}) =>
+    makeRun({ project: "", nodeId: "", global: true, title: "Bump the deps", branch: "agent/bump-the-deps-f0000000", ...over });
+
+  it("seats the viewer's global runs in an office of their own, named by their tasks", () => {
+    const working = global({ status: "running", usage: { inputTokens: 10, outputTokens: 5 } });
+    const waiting = global({ status: "offered", title: "Write the changelog" });
+    const building = buildBuilding(inputs({ globalRuns: [working, waiting] }));
+    expect(building.global).toMatchObject({
+      project: GLOBAL_OFFICE,
+      work: [runActorId(working.id)],
+      entrance: [runActorId(waiting.id)],
+      meeting: [],
+      items: [],
+      // The runners' free slots are said once, by the project's office.
+      freeDesks: 0,
+    });
+    const actor = building.actors.find((item) => item.runId === working.id)!;
+    expect(actor).toMatchObject({ project: GLOBAL_OFFICE, nodeTitle: "Bump the deps", global: true, cannotAsk: true });
+    expect(building.actors.find((item) => item.runId === waiting.id)?.nodeTitle).toBe("Write the changelog");
+    // The project's office is still there, without them.
+    expect(building.current?.work).toEqual([]);
+  });
+
+  it("opens a global agent's workspace and its place in the tab, never a node, the drawer or another project", () => {
+    const run = global({
+      status: "succeeded",
+      finishedAt: ago(1_000),
+      commit: "abc123",
+      prUrl: "https://github.com/o/r/pull/3",
+      prState: "open",
+      ciStatus: "pending",
+    });
+    const actor = buildBuilding(inputs({ globalRuns: [run] })).actors.find((item) => item.runId === run.id)!;
+    expect(actor.target).toEqual({ kind: "run-workspace", runId: run.id, nodeId: "" });
+    expect(actor.actions).toEqual([
+      { kind: "run-workspace", runId: run.id, nodeId: "" },
+      { kind: "global-agents", runId: run.id },
+      { kind: "run-diff", runId: run.id, nodeId: "" },
+      { kind: "pr", runId: run.id, url: "https://github.com/o/r/pull/3" },
+    ]);
+    expect(actor.actions.some((target) => ["run", "node", "in-project"].includes(target.kind))).toBe(false);
+    // Ended: it has nothing left to ask about.
+    expect(actor.cannotAsk).toBe(false);
+  });
+
+  it("knows an interactive global agent can be talked to", () => {
+    const run = global({ mode: "interactive" });
+    expect(buildBuilding(inputs({ globalRuns: [run] })).actors[0].cannotAsk).toBe(false);
+  });
+
+  it("has no office while none of them is seated", () => {
+    expect(buildBuilding(inputs()).global).toBeNull();
+    const gone = global({ status: "succeeded", finishedAt: ago(60 * 60 * 1000) });
+    const discarded = global({ status: "failed", finishedAt: ago(1_000), workspace: "discarded" });
+    expect(buildBuilding(inputs({ globalRuns: [gone, discarded] })).global).toBeNull();
+  });
+
+  it("keeps an older global run that still needs someone beside a newer one: no node replaces it", () => {
+    const failed = global({ status: "failed", finishedAt: ago(5_000), createdAt: ago(600_000) });
+    const newer = global({ status: "running", createdAt: ago(1_000) });
+    const building = buildBuilding(inputs({ globalRuns: [failed, newer] }));
+    expect(building.actors.map((actor) => actor.runId).sort()).toEqual([failed.id, newer.id].sort());
+  });
+
+  it("counts global runs on the racks, and in the project office's free desks", () => {
+    const runner = makeRunner();
+    const roomy = { ...runner, info: { ...runner.info!, maxConcurrent: 3 } };
+    const building = buildBuilding(
+      inputs({ runners: [roomy], runs: [makeRun({ id: "proj" })], globalRuns: [global({ id: "glob" })] }),
+    );
+    expect(building.racks[0].busy).toBe(2);
+    expect(building.current?.freeDesks).toBe(1);
+  });
+
+  it("draws the global office with no project open", () => {
+    const run = global();
+    const building = buildBuilding(inputs({ activeProject: "", globalRuns: [run] }));
+    expect(building.current).toBeNull();
+    expect(building.global?.work).toEqual([runActorId(run.id)]);
   });
 });

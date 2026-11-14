@@ -338,15 +338,7 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 	if cfg != nil {
 		policy := cfg.AutoAcceptPolicy()
 		autoAccept = &policy
-		repos = append(repos, cfg.Repos...)
-		if len(repos) > runnerwire.MaxRepos {
-			repos = repos[:runnerwire.MaxRepos]
-		}
-		// Whether a repo has a test command, never the command itself.
-		for i := range repos {
-			command, _ := cfg.RepoTestCommand(repos[i].ID)
-			repos[i].Verify = len(command) > 0
-		}
+		repos = helloRepos(cfg)
 		maxConcurrent = cfg.MaxConcurrentRuns()
 	}
 	llm := copilotInfo(ctx, cfg)
@@ -354,7 +346,7 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 	if llm != nil && llm.Auto {
 		caps = append(caps, runnerwire.CapLLM)
 	}
-	return runnerwire.Info{
+	info := runnerwire.Info{
 		Version:       Version(),
 		Hostname:      host,
 		OS:            runtime.GOOS,
@@ -369,6 +361,33 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		// A nil cfg reports false.
 		PermissionRelay: cfg != nil && cfg.PermissionRelay,
 	}
+	// How high the hub may set maxConcurrent (settings.go), only while the
+	// owner lets it.
+	if cfg.RemoteSettingsOn() {
+		info.MaxConcurrentCeiling = cfg.MaxConcurrentCeilingOrDefault()
+	}
+	return info
+}
+
+// helloRepos is the hello's repos: whether a repo has a test command, never
+// the command itself.
+func helloRepos(cfg *Config) []runnerwire.Repo {
+	repos := append([]runnerwire.Repo{}, cfg.Repos...)
+	if len(repos) > runnerwire.MaxRepos {
+		repos = repos[:runnerwire.MaxRepos]
+	}
+	for i := range repos {
+		command, _ := cfg.RepoTestCommand(repos[i].ID)
+		repos[i].Verify = len(command) > 0
+	}
+	return repos
+}
+
+// buildInfo is BuildInfo with the settings in effect now (refreshInfo): the
+// limit a change from the hub (settings.go) may have moved off the config's,
+// and the built-in runner's own (localsettings.go).
+func (c *Client) buildInfo(ctx context.Context) runnerwire.Info {
+	return c.refreshInfo(BuildInfo(ctx, c.Commands, c.cfg()))
 }
 
 // advisorInfo is what the hello says about the autopilot advisor's model

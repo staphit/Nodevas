@@ -16,6 +16,7 @@ import { lazyWithRetry } from "../lazyWithRetry";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
 import { autopilotIndex, autopilotOf, controlRows, liveAutopilots, type ControlRow } from "./control";
+import { useGlobalAgents } from "./globalAgentsStore";
 import { useControlLoads, useNoRunner, useTitleOf } from "./StationControl";
 import { useStation } from "./stationStore";
 import { WarRoomExtras } from "./WarRoomExtras";
@@ -24,20 +25,28 @@ const WarRoom = lazyWithRetry(() => import("../game/warroom/WarRoom"));
 
 /** Each run in view, with the autopilot it is a step of: what a
  * character's menu acts on. Stable until a run or an autopilot changes, so
- * the room's memoised characters stay put between heartbeats. */
+ * the room's memoised characters stay put between heartbeats. The global
+ * agents' runs are in view too (their own office), freshest copy last. */
 function useRowOf(): (runId: string) => ControlRow | undefined {
   const active = useRuns((s) => s.activeRuns);
   const latestByNode = useRuns((s) => s.latestByNode);
   const runsByNode = useRuns((s) => s.runsByNode);
+  const globalById = useRuns((s) => s.globalById);
+  const listedGlobal = useGlobalAgents((s) => s.runs);
   const recent = useStation((s) => s.runs);
   const views = useAutopilot((s) => s.views);
   return useMemo(() => {
     const index = autopilotIndex(views);
-    const runs: Run[] = [...recent, ...mergeRuns(active, latestByNode, runsByNode)];
+    const runs: Run[] = [
+      ...recent,
+      ...mergeRuns(active, latestByNode, runsByNode),
+      ...listedGlobal,
+      ...Object.values(globalById),
+    ];
     const rows = new Map<string, ControlRow>();
-    for (const run of runs) rows.set(run.id, { run, autopilot: autopilotOf(index, run) });
+    for (const run of runs) rows.set(run.id, { run, autopilot: run.global ? undefined : autopilotOf(index, run) });
     return (runId: string) => rows.get(runId);
-  }, [active, latestByNode, runsByNode, recent, views]);
+  }, [active, latestByNode, runsByNode, listedGlobal, globalById, recent, views]);
 }
 
 export function StationWarRoom({ world }: { world: World }) {

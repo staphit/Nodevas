@@ -44,6 +44,11 @@ func (d *Dispatcher) afterEnd(ctx context.Context, r Record, notified bool) {
 	if !runnerwire.RunFinal(r.Status) {
 		return
 	}
+	// A global agent has no fallback chain, no wait for a usage limit and no
+	// pipeline: it just ends, its partial work on its branch (global.go).
+	if r.Global {
+		return
+	}
 	if r.PipelineID != "" {
 		unlock := lockPipeline(r.PipelineID)
 		defer unlock()
@@ -96,6 +101,12 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 		}
 		// The next model continues from the partial work, if any was kept.
 		branch, handoffNote := handoffOf(r)
+		// Nobody clicks for a fallback: it is a pipeline's step, or with
+		// partial work to continue (on the agent's own note) a handoff.
+		origin := runnerwire.OriginPipeline
+		if branch != "" {
+			origin = runnerwire.OriginHandoff
+		}
 		next, err := d.store.Create(ctx, New{
 			Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
 			RunnerID: r.RunnerID, RunnerName: runner.Name, OwnerID: r.OwnerID,
@@ -105,7 +116,7 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			RetryOf: r.ID, PipelineID: r.PipelineID, Fallbacks: chain,
 			SteppedUpAt:      r.SteppedUpAt,
 			JobHandoffBranch: branch, JobHandoffNote: handoffNote, LimitWaits: r.LimitWaits,
-			Role: r.Role, JobRoles: r.JobRoles,
+			Role: r.Role, JobRoles: r.JobRoles, Origin: origin,
 		})
 		if err != nil {
 			d.note(ctx, r, "not falling back: "+err.Error())
@@ -289,7 +300,7 @@ func (d *Dispatcher) retryReview(ctx context.Context, r Record) bool {
 		Kind: r.Kind, JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
 		RetryOf: r.ID, PipelineID: r.PipelineID,
 		SteppedUpAt: r.SteppedUpAt,
-		Role:        r.Role, JobRoles: r.JobRoles,
+		Role:        r.Role, JobRoles: r.JobRoles, Origin: runnerwire.OriginPipeline,
 	})
 	if err != nil {
 		d.note(ctx, r, "not retrying the review: "+err.Error())
@@ -580,7 +591,7 @@ func (d *Dispatcher) prepareStep(ctx context.Context, p PipelineRecord, from Rec
 		Kind: kind, JobBranch: p.Branch, JobPRURL: p.PRURL, Review: review,
 		PipelineID: p.ID, Fallbacks: fallbacks,
 		SteppedUpAt: from.SteppedUpAt,
-		Role:        role, JobRoles: jobRoles,
+		Role:        role, JobRoles: jobRoles, Origin: runnerwire.OriginPipeline,
 	})
 	if err != nil {
 		fail("cannot start the next step: " + err.Error())

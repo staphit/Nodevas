@@ -8,7 +8,7 @@
   "releaseLabel": "testflight v1.0",
   "signedUpdates": false,
   "scripts": {
-    "check": "node --check main.cjs",
+    "check": "node --check main.cjs && node --check port.cjs",
     "test": "node --test \"scripts/*.test.mjs\"",
     "pack:mac": "node scripts/pack.mjs --mac --universal",
     "pack:win": "node scripts/pack.mjs --win"
@@ -40,6 +40,7 @@
     },
     "files": [
       "main.cjs",
+      "port.cjs",
       "package.json"
     ],
     "extraResources": [

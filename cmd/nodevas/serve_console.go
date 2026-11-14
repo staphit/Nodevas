@@ -15,6 +15,7 @@ import (
 
 	"nodevas/internal/logging"
 	"nodevas/internal/project"
+	"nodevas/internal/runnerwire"
 )
 
 // serveLogMaxBytes is the size at which serve.log moves aside to serve.log.1.
@@ -184,6 +185,26 @@ func watchStopSignals(ctx context.Context, signals <-chan os.Signal, confirm boo
 // Ctrl+C on the terminal they share, and stops the runner itself.
 const localRunnerUnderServeEnv = "NODEVAS_RUNNER_UNDER_SERVE"
 
+// localRunnerEditionEnv tells the runner serve starts for a standalone hub
+// that it is the single-user edition's runner (runnerwire.EditionSingle):
+// it may act as that hub's built-in runner, which starts runs without
+// asking, once its own checks and the hub's welcome agree
+// (internal/runner/builtin.go).
+const localRunnerEditionEnv = "NODEVAS_RUNNER_EDITION"
+
+// takeRunnerEdition reads the edition serve set, once, and removes it, so
+// neither the agents this runner starts nor a runner one of them starts
+// takes itself for serve's built-in runner. Anything but EditionSingle is
+// "".
+func takeRunnerEdition() string {
+	edition := os.Getenv(localRunnerEditionEnv)
+	_ = os.Unsetenv(localRunnerEditionEnv)
+	if edition != runnerwire.EditionSingle {
+		return ""
+	}
+	return edition
+}
+
 // runnerStopContext is the runner's lifetime: SIGTERM, and Ctrl+C unless
 // serve started it. Under serve, a Ctrl+C reaches every process on the
 // terminal, and the runner must not end on the first one serve asks to
@@ -196,6 +217,7 @@ const localRunnerUnderServeEnv = "NODEVAS_RUNNER_UNDER_SERVE"
 func runnerStopContext() (context.Context, context.CancelFunc) {
 	underServe := os.Getenv(localRunnerUnderServeEnv) == "1"
 	_ = os.Unsetenv(localRunnerUnderServeEnv)
+	_ = os.Unsetenv(localRunnerEditionEnv)
 	if underServe {
 		interrupts := make(chan os.Signal, 1)
 		signal.Notify(interrupts, os.Interrupt)

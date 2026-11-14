@@ -204,6 +204,20 @@ func (g *ghCLI) view(ctx context.Context, dir, prURL string) (runnerwire.PRInfo,
 	return parsePRView(prURL, out)
 }
 
+// closePR closes a PR, and with deleteBranch its branch on GitHub too. dir
+// is outside any checkout (the data directory), so gh touches only GitHub,
+// never a local branch.
+func (g *ghCLI) closePR(ctx context.Context, dir, prURL string, deleteBranch bool) error {
+	args := []string{"pr", "close", prURL}
+	if deleteBranch {
+		args = append(args, "--delete-branch")
+	}
+	if _, err := g.call(ctx, dir, "", args...); err != nil {
+		return ghError("gh pr close", err)
+	}
+	return nil
+}
+
 func parsePRView(prURL, out string) (runnerwire.PRInfo, error) {
 	var v ghPRView
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &v); err != nil {
@@ -324,17 +338,22 @@ func prBody(p prInfo) string {
 	}
 	b.WriteString("\n\n---\n\n")
 	job := p.job
-	node := fmt.Sprintf("%s (`%s`)", oneLine(job.NodeTitle), job.NodeID)
-	if link := nodeLink(p.hub, job); link != "" {
-		node += " · [open in Nodevas](" + link + ")"
-	}
 	model := job.Model
 	if model == "" {
 		model = "default"
 	}
-	fmt.Fprintf(&b, "- **Node:** %s\n", node)
-	if job.Project != "" {
-		fmt.Fprintf(&b, "- **Project:** %s\n", oneLine(job.Project))
+	if job.Global {
+		// A global agent's task: no node to link to, no project.
+		fmt.Fprintf(&b, "- **Task:** %s (global agent)\n", oneLine(job.NodeTitle))
+	} else {
+		node := fmt.Sprintf("%s (`%s`)", oneLine(job.NodeTitle), job.NodeID)
+		if link := nodeLink(p.hub, job); link != "" {
+			node += " · [open in Nodevas](" + link + ")"
+		}
+		fmt.Fprintf(&b, "- **Node:** %s\n", node)
+		if job.Project != "" {
+			fmt.Fprintf(&b, "- **Project:** %s\n", oneLine(job.Project))
+		}
 	}
 	fmt.Fprintf(&b, "- **Agent:** %s · model `%s`\n", job.Agent, model)
 	if p.runnerName != "" {
@@ -348,7 +367,7 @@ func prBody(p prInfo) string {
 	if u := p.result.Usage; u != nil {
 		fmt.Fprintf(&b, "- **Usage:** %s\n", usageText(u))
 	}
-	fmt.Fprintf(&b, "\nNodevas-Node: %s\nNodevas-Run: %s\n", job.NodeID, job.RunID)
+	b.WriteString("\n" + trailers(job.NodeID, job.RunID))
 	return b.String()
 }
 

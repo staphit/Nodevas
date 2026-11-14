@@ -205,6 +205,7 @@ func (d *Dispatcher) stagedRun(ctx context.Context, p PipelineRecord, from Recor
 		Kind: step.kind, JobBranch: branch, JobPRURL: prURL, Review: step.review,
 		PipelineID: p.ID, Fallbacks: fallbacks, SteppedUpAt: from.SteppedUpAt,
 		Mode: runnerwire.ModeHeadless, Role: step.role, JobRoles: jobRoles,
+		Origin: runnerwire.OriginPipeline,
 	})
 	if err != nil {
 		fail("cannot start the next step: " + err.Error())

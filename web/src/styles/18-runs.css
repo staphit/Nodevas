@@ -47,9 +47,14 @@
   max-height: calc(100dvh - 48px);
   flex-direction: column;
 }
+/* Not ready yet: a quiet button that still reads, not a faded one. Half
+   opacity over a dark or tinted skin turned the label into mud. */
 .run-dispatch-dialog footer button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  border-color: var(--border-strong, var(--border));
+  color: var(--text-2);
+  background: var(--surface-2);
+  opacity: 1;
 }
 .run-dispatch-body {
   display: flex;

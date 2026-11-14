@@ -82,7 +82,13 @@ export type WSEvent = {
     | "copilot-followup"
     // Something changed in a project this viewer may read, any of them:
     // Station's building refetches. No id.
-    | "building-changed";
+    | "building-changed"
+    // Global agents (phase 2), to the run's dispatcher and its runner's
+    // owner only; the id is the run's. Their lists changed, a run's events
+    // grew, and a run finished (or its CI or merge moved), as run-notify.
+    | "global-runs-changed"
+    | "global-run-events"
+    | "global-run-notify";
   id?: string;
   project?: string;
   /** run-events: "ask" when one of the run's asks started waiting or ended

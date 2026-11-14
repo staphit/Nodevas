@@ -136,6 +136,41 @@ type Config struct {
 	MergeMethod string `json:"mergeMethod,omitempty"`
 	// DeleteBranchOnMerge deletes the PR's branch on GitHub once merged.
 	DeleteBranchOnMerge bool `json:"deleteBranchOnMerge,omitempty"`
+	// WorkspaceActions lets the owner, from the hub's agent workspace, merge
+	// a run's branch into its base here or discard the run's worktree and
+	// branch (workspace_actions.go); nil means the default, on. Not tied to
+	// remoteMerge, which guards approvals by anyone who can see a run: these
+	// are the owner's own, and the runner refuses anyone else.
+	WorkspaceActions *bool `json:"workspaceActions,omitempty"`
+
+	// Global agents and settings from the hub (agent workspace, phase 2).
+
+	// GlobalRuns takes global agents (global.go): runs the owner starts from
+	// the hub in one of the repos here, for no project and no node, with no
+	// board. nil means the default, on; false declines every global offer.
+	GlobalRuns *bool `json:"globalRuns,omitempty"`
+	// RemoteSettings lets the owner change maxConcurrent from the hub
+	// (settings.go); nil means the default, on. The runner refuses anyone
+	// but its owner, and anything past MaxConcurrentCeiling.
+	RemoteSettings *bool `json:"remoteSettings,omitempty"`
+	// MaxConcurrentCeiling is how high the hub may set maxConcurrent; 0 means
+	// the default, the larger of runnerwire.DefaultMaxConcurrentCeiling and
+	// maxConcurrent. It is changed only here, never from the hub.
+	MaxConcurrentCeiling int `json:"maxConcurrentCeiling,omitempty"`
+
+	// The built-in runner of a single-user hub (builtin.go), which starts
+	// runs without asking. Neither is consulted by any other runner.
+
+	// AskEveryRun asks in the app (and at serve's terminal) before every run
+	// starts. Off by default.
+	AskEveryRun bool `json:"askEveryRun,omitempty"`
+	// ShellWithoutAsking lists the agent kinds whose automatic runs (Autopilot,
+	// review rounds, continuations) start without asking although the agent
+	// may run any command here. A run someone started by hand never asks.
+	ShellWithoutAsking []string `json:"shellWithoutAsking,omitempty"`
+	// BuiltInMigrated: the first start as the built-in runner has carried an
+	// existing autoAccept.allowShell over to ShellWithoutAsking (once).
+	BuiltInMigrated bool `json:"builtInMigrated,omitempty"`
 
 	// The copilot's model calls (llm.go): this runner makes them for its
 	// owner with a key that stays on this machine.
@@ -183,6 +218,31 @@ var MergeMethods = []string{"squash", "merge", "rebase"}
 
 // RemoteMergeOn is RemoteMerge with its default (off) applied.
 func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge != nil && *c.RemoteMerge }
+
+// WorkspaceActionsOn is WorkspaceActions with its default (on) applied.
+func (c *Config) WorkspaceActionsOn() bool {
+	return c == nil || c.WorkspaceActions == nil || *c.WorkspaceActions
+}
+
+// GlobalRunsOn is GlobalRuns with its default (on) applied.
+func (c *Config) GlobalRunsOn() bool { return c == nil || c.GlobalRuns == nil || *c.GlobalRuns }
+
+// RemoteSettingsOn is RemoteSettings with its default (on) applied.
+func (c *Config) RemoteSettingsOn() bool {
+	return c == nil || c.RemoteSettings == nil || *c.RemoteSettings
+}
+
+// MaxConcurrentCeilingOrDefault is MaxConcurrentCeiling with its default and
+// bounds applied: how high the hub may set maxConcurrent.
+func (c *Config) MaxConcurrentCeilingOrDefault() int {
+	if c == nil {
+		return runnerwire.DefaultMaxConcurrentCeiling
+	}
+	if c.MaxConcurrentCeiling <= 0 {
+		return max(runnerwire.DefaultMaxConcurrentCeiling, c.MaxConcurrentRuns())
+	}
+	return min(c.MaxConcurrentCeiling, MaxMaxConcurrent)
+}
 
 // MergeMethodOrDefault is MergeMethod with its default applied; anything
 // unknown (a hand-edited file) falls back to squash.
@@ -361,6 +421,8 @@ var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutM
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
 	"permissionRelay", "autoAccept", "interactive", "repoBrowse", "httpLoopbackHub",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
+	"workspaceActions", "globalRuns", "remoteSettings", "maxConcurrentCeiling",
+	"askEveryRun", "shellWithoutAsking",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
 
@@ -382,7 +444,7 @@ func (c *Config) Set(key string, values []string) error {
 	if len(values) == 0 {
 		return fmt.Errorf("%s needs a value", canonical)
 	}
-	if canonical != "allowedTools" && canonical != "prLabels" && len(values) != 1 {
+	if canonical != "allowedTools" && canonical != "prLabels" && canonical != "shellWithoutAsking" && len(values) != 1 {
 		return fmt.Errorf("%s takes one value", canonical)
 	}
 	value := strings.TrimSpace(values[0])
@@ -643,6 +705,40 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("remoteMerge must be true or false")
 		}
 		c.RemoteMerge = &on
+	case "workspaceActions":
+		if reset {
+			c.WorkspaceActions = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("workspaceActions must be true or false")
+		}
+		c.WorkspaceActions = &on
+	case "globalRuns", "remoteSettings":
+		field := &c.GlobalRuns
+		if canonical == "remoteSettings" {
+			field = &c.RemoteSettings
+		}
+		if reset {
+			*field = nil
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return fmt.Errorf("%s must be on or off", canonical)
+		}
+		*field = &on
+	case "maxConcurrentCeiling":
+		if reset {
+			c.MaxConcurrentCeiling = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxMaxConcurrent {
+			return fmt.Errorf("maxConcurrentCeiling must be a number from 1 to %d", MaxMaxConcurrent)
+		}
+		c.MaxConcurrentCeiling = n
 	case "mergeMethod":
 		if reset {
 			c.MergeMethod = ""
@@ -663,6 +759,40 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("deleteBranchOnMerge must be true or false")
 		}
 		c.DeleteBranchOnMerge = on
+	case "askEveryRun":
+		if reset {
+			c.AskEveryRun = false
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("askEveryRun must be on or off")
+		}
+		c.AskEveryRun = on
+	case "shellWithoutAsking":
+		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
+			c.ShellWithoutAsking = nil
+			return nil
+		}
+		var kinds []string
+		for _, v := range values {
+			for _, kind := range strings.Split(v, ",") {
+				if kind = strings.TrimSpace(kind); kind == "" {
+					continue
+				}
+				kind, err := oneOf("shellWithoutAsking", kind, Kinds)
+				if err != nil {
+					return err
+				}
+				if !slices.Contains(kinds, kind) {
+					kinds = append(kinds, kind)
+				}
+			}
+		}
+		if len(kinds) == 0 {
+			return errors.New("shellWithoutAsking: no agent kinds given")
+		}
+		c.ShellWithoutAsking = kinds
 	}
 	return nil
 }
@@ -732,6 +862,48 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &cfg, nil
+}
+
+// Clone is a deep copy: a change from the app is made on a clone, which then
+// replaces the runner's config whole (Client.cfg), so a run that took the
+// old one keeps it unchanged.
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.Repos = slices.Clone(c.Repos)
+	if c.repoTests != nil {
+		out.repoTests = make(map[string]repoTest, len(c.repoTests))
+		for id, t := range c.repoTests {
+			t.Command = slices.Clone(t.Command)
+			out.repoTests[id] = t
+		}
+	}
+	if c.Models != nil {
+		out.Models = make(map[string][]runnerwire.Model, len(c.Models))
+		for kind, models := range c.Models {
+			out.Models[kind] = slices.Clone(models)
+		}
+	}
+	out.AllowedTools = slices.Clone(c.AllowedTools)
+	out.ShellWithoutAsking = slices.Clone(c.ShellWithoutAsking)
+	if c.AutoAccept != nil {
+		policy := c.AutoAcceptPolicy()
+		out.AutoAccept = &policy
+	}
+	if c.PRLabels != nil {
+		labels := slices.Clone(*c.PRLabels)
+		out.PRLabels = &labels
+	}
+	for _, p := range []**bool{&out.Interactive, &out.RepoBrowse, &out.AutoPR, &out.RemoteMerge,
+		&out.WorkspaceActions, &out.GlobalRuns, &out.RemoteSettings} {
+		if *p != nil {
+			v := **p
+			*p = &v
+		}
+	}
+	return &out
 }
 
 // SaveConfig writes the settings file owner-only (0600; on Windows the mode is

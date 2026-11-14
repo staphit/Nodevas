@@ -27,7 +27,7 @@ import { CELL, PLANT, SOFA } from "../pixel/sprites";
 import type { Actor, Building, LoungeSpot } from "../world";
 import { SEAT_W, sofaScene } from "./deskArt";
 import { lone } from "./OfficeRoom";
-import { AgentDesk, menuItem } from "./PixelDesk";
+import { AgentDesk, menuItem, type AgentFace } from "./PixelDesk";
 
 /** Whether an actor in the lounge is drawn: an offline one only while it
  * holds something for the viewer. */
@@ -99,6 +99,14 @@ export function Lounge({
     const actor = spot.actorId ? actorsById.get(spot.actorId) : undefined;
     return Boolean(actor && drawnInLounge(actor));
   });
+
+  const faceOf = (actor: Actor): AgentFace => ({
+    actor,
+    label: actorLabel(t, actor, placeOf(t, actor)),
+    row: actor.runId ? rowOf(actor.runId) : undefined,
+    titleOf,
+  });
+
   const sofas: LoungeSpot[][] = [];
   for (let i = 0; i < Math.max(spots.length, 1); i += 2) sofas.push(spots.slice(i, i + 2));
 
@@ -106,17 +114,7 @@ export function Lounge({
     if (spot.visitor) return <VisitorSpot key={spot.id} visitor={spot.visitor} labelOf={labelOf} />;
     const actor = spot.actorId ? actorsById.get(spot.actorId) : undefined;
     if (!actor) return null;
-    return (
-      <AgentDesk
-        key={spot.id}
-        actor={actor}
-        scene="sofa"
-        style={style}
-        label={actorLabel(t, actor, placeOf(t, actor))}
-        row={actor.runId ? rowOf(actor.runId) : undefined}
-        titleOf={titleOf}
-      />
-    );
+    return <AgentDesk key={spot.id} scene="sofa" style={style} {...faceOf(actor)} />;
   };
 
   return (

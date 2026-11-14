@@ -192,7 +192,7 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 	if (job.Kind != runnerwire.JobImplement && job.Kind != runnerwire.JobTest) || job.Mode == runnerwire.ModeInteractive {
 		return "a handoff is only continued by a headless implement or test run"
 	}
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	if err != nil {
 		return "cannot read the handoff record: " + err.Error()
 	}
@@ -243,7 +243,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 		return &changes
 	}
 	note := j.handoffNote(ctx, r, wt, committed, changes, *result)
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	if err == nil {
 		err = registerHandoff(ctx, dataDir, handoffEntry{
 			Branch: branch, RepoID: r.repo.ID, RepoPath: r.repo.Path, NodeID: job.NodeID, Commit: changes.Commit,

@@ -379,10 +379,13 @@ func addStatus(s *runnerwire.RepoGitStatus, path, mark string) {
 // readCapped reads at most limit+1 bytes of path: enough to know it is
 // over limit, never a whole huge file.
 func readCapped(path string, limit int) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := openNoBlock(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a file")
+	}
 	return io.ReadAll(io.LimitReader(f, int64(max(limit, 0))+1))
 }

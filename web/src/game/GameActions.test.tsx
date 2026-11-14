@@ -4,7 +4,13 @@ import { useAgents } from "../agents/agentStore";
 import type { AgentAsk } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
+import { useWorkspace } from "../runs/workspaceStore";
+import { api } from "../api";
+import { useRuns } from "../runs/runStore";
+import { useGlobalAgents } from "../station/globalAgentsStore";
+import { useStation } from "../station/stationStore";
 import { GameActionsProvider, useGameActions } from "./GameActions";
+import type { ClickTarget } from "./world";
 
 function Trigger({ askId }: { askId: string }) {
   const { dispatch } = useGameActions();
@@ -204,5 +210,111 @@ describe("Station ask dialog answering", () => {
     });
     open("ask-perm");
     expect(screen.getByRole("button", { name: /Deny/ })).toBeInTheDocument();
+  });
+});
+
+describe("run-workspace", () => {
+  function Dispatch({ target }: { target: ClickTarget }) {
+    const { dispatch } = useGameActions();
+    return (
+      <button type="button" onClick={() => dispatch(target)}>
+        Go
+      </button>
+    );
+  }
+
+  it("opens the run's workspace through the app's one host, not a dialog of its own", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    const openWorkspace = vi.fn();
+    useWorkspace.setState({ openWorkspace });
+    render(
+      <GameActionsProvider>
+        <Dispatch target={{ kind: "run-workspace", runId: "run7", nodeId: "alpha" }} />
+      </GameActionsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    expect(openWorkspace).toHaveBeenCalledWith("run7", undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("global agents", () => {
+  function Dispatch({ target }: { target: ClickTarget }) {
+    const { dispatch } = useGameActions();
+    return (
+      <button type="button" onClick={() => dispatch(target)}>
+        Go
+      </button>
+    );
+  }
+
+  beforeEach(() => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en", projectMode: "info" }, activeProject: "p" });
+    useStation.setState({ tab: "project" });
+    useGlobalAgents.setState({ focus: null });
+  });
+
+  it("opens Station on its Global agents tab with the run highlighted", () => {
+    render(
+      <GameActionsProvider>
+        <Dispatch target={{ kind: "global-agents", runId: "g1" }} />
+      </GameActionsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    expect(useApp.getState().preferences.projectMode).toBe("station");
+    expect(useStation.getState().tab).toBe("global");
+    expect(useGlobalAgents.getState().focus).toBe("g1");
+  });
+
+  it("opens a global run's workspace without switching the board's project", () => {
+    const openWorkspace = vi.fn();
+    const switchProject = vi.fn(async () => undefined);
+    useWorkspace.setState({ openWorkspace });
+    useApp.setState({ switchProject } as never);
+    render(
+      <GameActionsProvider>
+        <Dispatch target={{ kind: "run-workspace", runId: "g1", nodeId: "" }} />
+      </GameActionsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    expect(openWorkspace).toHaveBeenCalledWith("g1", undefined);
+    expect(switchProject).not.toHaveBeenCalled();
+    expect(useApp.getState().activeProject).toBe("p");
+  });
+
+  it("finds a global run's diff in the run store", async () => {
+    const run = {
+      id: "g2",
+      project: "",
+      nodeId: "",
+      global: true,
+      title: "Bump the deps",
+      runnerId: "r1",
+      runnerName: "desktop",
+      agent: "claude",
+      model: "opus",
+      repoId: "repo1",
+      repoName: "nodevas",
+      base: "main",
+      branch: "agent/bump-the-deps-g2",
+      prompt: "",
+      status: "succeeded",
+      exitCode: 0,
+      commit: "abc",
+      createdBy: "u1",
+      createdByName: "alice",
+      createdAt: "2026-11-12T08:00:00Z",
+    };
+    useRuns.setState({ globalById: { g2: run } });
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({ changes: null });
+    render(
+      <GameActionsProvider>
+        <Dispatch target={{ kind: "run-diff", runId: "g2", nodeId: "" }} />
+      </GameActionsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    await waitFor(() => expect(api.getRunChanges).toHaveBeenCalledWith("g2"));
+    expect(screen.queryByText("This run is no longer loaded.")).not.toBeInTheDocument();
+    useRuns.setState({ globalById: {} });
   });
 });

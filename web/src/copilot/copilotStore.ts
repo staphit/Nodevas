@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand";
+import { readPreference, subscribePreferences, writePreference } from "../preferences";
 import type {
   CopilotConversation,
   CopilotEntry,
@@ -145,29 +146,12 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   markDecisionSubmitting: (requestId: string, submitting: boolean) => void;
 }
 
-const PREFS_KEY = "nodevas.copilot.prefs";
-
+/** The panel's choices: preferences that follow the account. */
 export function readCopilotPrefs(): CopilotPrefs {
-  const defaults: CopilotPrefs = { speakReplies: false, defaultMode: "default" };
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return defaults;
-    const value = JSON.parse(raw) as Partial<CopilotPrefs>;
-    return {
-      speakReplies: typeof value.speakReplies === "boolean" ? value.speakReplies : false,
-      defaultMode: isMode(value.defaultMode) ? value.defaultMode : "default",
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-function writeCopilotPrefs(prefs: CopilotPrefs): void {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    /* private mode or blocked storage: the preference lasts this session */
-  }
+  return {
+    speakReplies: readPreference("copilotSpeakReplies"),
+    defaultMode: readPreference("copilotDefaultMode"),
+  };
 }
 
 export function isMode(value: unknown): value is CopilotMode {
@@ -477,12 +461,11 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       ),
     })),
   setMode: (mode) => {
-    const prefs = { speakReplies: get().speakReplies, defaultMode: mode };
-    writeCopilotPrefs(prefs);
+    writePreference("copilotDefaultMode", mode);
     set({ mode, defaultMode: mode });
   },
   setSpeakReplies: (speakReplies) => {
-    writeCopilotPrefs({ speakReplies, defaultMode: get().defaultMode });
+    writePreference("copilotSpeakReplies", speakReplies);
     set({ speakReplies });
   },
   setNotice: (notice) => set({ notice }),
@@ -519,3 +502,16 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       ),
     })),
 }));
+
+// The choices follow the account: one made in another tab, browser or device
+// (preferences/sync.ts) shows here too. The open conversation keeps its mode.
+subscribePreferences((key) => {
+  if (key !== "copilotSpeakReplies" && key !== "copilotDefaultMode") return;
+  const prefs = readCopilotPrefs();
+  const state = useCopilot.getState();
+  if (state.speakReplies === prefs.speakReplies && state.defaultMode === prefs.defaultMode) return;
+  useCopilot.setState({
+    ...prefs,
+    ...(state.activeId === null && state.items.length === 0 ? { mode: prefs.defaultMode } : {}),
+  });
+});

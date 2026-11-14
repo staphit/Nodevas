@@ -26,6 +26,27 @@ const (
 	RepoOpDiff   = "git_diff"
 )
 
+// Run-scoped ops (agent workspace): the same answers as list, read and
+// git_status, rooted at one run's worktree (<dataDir>/worktrees/<runId>)
+// instead of the repo, and run_info, the worktree and branch as the runner
+// sees them. Their own names, so a runner from before them refuses ("unknown
+// repo operation") instead of browsing the repo root.
+const (
+	RepoOpRunList   = "run_list"   // -> Listing
+	RepoOpRunRead   = "run_read"   // -> File
+	RepoOpRunStatus = "run_status" // -> Status (uncommitted, worktree vs HEAD)
+	RepoOpRunInfo   = "run_info"   // -> RunInfo
+)
+
+// RunRepoOp reports whether op is run-scoped (RunID required).
+func RunRepoOp(op string) bool {
+	switch op {
+	case RepoOpRunList, RepoOpRunRead, RepoOpRunStatus, RepoOpRunInfo:
+		return true
+	}
+	return false
+}
+
 // Limits on repo browsing.
 const (
 	MaxRepoEntries        = 1000
@@ -47,6 +68,8 @@ const (
 	RepoErrRefused  = "refused"
 	RepoErrGit      = "git"
 	RepoErrBusy     = "busy"
+	// RepoErrNoWorktree: the run's worktree is gone (or never existed).
+	RepoErrNoWorktree = "no_worktree"
 )
 
 // RepoRequest is one browse call. AccountID is who asks; the runner refuses
@@ -59,12 +82,22 @@ type RepoRequest struct {
 	Path      string `json:"path,omitempty"`
 	Ref       string `json:"ref,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
+	// Run-scoped ops only: the run, its node or, for a global run, its
+	// branch slug (to name the run's own branch), the branch the hub
+	// recorded and where a local merge would go.
+	RunID  string `json:"runId,omitempty"`
+	NodeID string `json:"nodeId,omitempty"`
+	Slug   string `json:"slug,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	Base   string `json:"base,omitempty"`
 }
 
 // RepoEntry is one directory entry. Type is file, dir or symlink; Escape
 // marks a symlink that points outside the repo (never traversed or read).
 type RepoEntry struct {
-	Name   string `json:"name"`
+	Name string `json:"name"`
+	// Type is file, dir, symlink, or other (a FIFO, socket or device: never
+	// read).
 	Type   string `json:"type"`
 	Size   int64  `json:"size"`
 	Escape bool   `json:"escape,omitempty"`
@@ -120,14 +153,55 @@ type RepoDiff struct {
 
 // RepoDone answers a RepoRequest: one of the results, or Code and Error.
 type RepoDone struct {
-	ID      string         `json:"id"`
-	Error   string         `json:"error,omitempty"`
-	Code    string         `json:"code,omitempty"`
-	Listing *RepoListing   `json:"listing,omitempty"`
-	File    *RepoFile      `json:"file,omitempty"`
-	Status  *RepoGitStatus `json:"status,omitempty"`
-	Log     []RepoCommit   `json:"log,omitempty"`
-	Diff    *RepoDiff      `json:"diff,omitempty"`
+	ID      string            `json:"id"`
+	Error   string            `json:"error,omitempty"`
+	Code    string            `json:"code,omitempty"`
+	Listing *RepoListing      `json:"listing,omitempty"`
+	File    *RepoFile         `json:"file,omitempty"`
+	Status  *RepoGitStatus    `json:"status,omitempty"`
+	Log     []RepoCommit      `json:"log,omitempty"`
+	Diff    *RepoDiff         `json:"diff,omitempty"`
+	RunInfo *RunWorkspaceInfo `json:"runInfo,omitempty"`
+}
+
+// Where a local merge into a run's base would happen
+// (RunWorkspaceInfo.BaseCheckout).
+const (
+	BaseCheckoutRepo      = "repo"      // checked out in the registered repo; see BaseClean
+	BaseCheckoutElsewhere = "elsewhere" // checked out in another worktree: refused
+	BaseCheckoutNone      = "none"      // checked out nowhere: a temporary worktree
+	BaseCheckoutMissing   = "missing"   // no local branch
+)
+
+// UncommittedUnknown is RunWorkspaceInfo.Uncommitted for a worktree whose
+// status the runner could not read (git failed or took too long).
+const UncommittedUnknown = -1
+
+// RunWorkspaceInfo is a run's worktree and branch as its runner sees them now.
+type RunWorkspaceInfo struct {
+	// Exists: the worktree directory is there and is the run's own.
+	Exists bool `json:"exists"`
+	// Path is the owner's machine path, for orientation only.
+	Path string `json:"path,omitempty"`
+	// Branch is the worktree's HEAD branch, "" when detached or gone.
+	Branch string `json:"branch"`
+	Head   string `json:"head,omitempty"`
+	// OwnBranch: Branch is the branch this run made (agent/<node>-<run8>).
+	OwnBranch bool `json:"ownBranch"`
+	// BranchExists: refs/heads/<branch> is in the repo.
+	BranchExists bool   `json:"branchExists"`
+	BranchHead   string `json:"branchHead,omitempty"`
+	// Uncommitted counts tracked and untracked changes in the worktree;
+	// UncommittedUnknown when the runner could not read them.
+	Uncommitted int `json:"uncommitted"`
+	// Running: the runner still holds the run.
+	Running bool `json:"running"`
+	// Kept: listed in kept-worktrees.json.
+	Kept         bool   `json:"kept"`
+	BaseCheckout string `json:"baseCheckout"`
+	BaseClean    bool   `json:"baseClean"`
+	// WatchedPR is the PR URL the runner watches for the run.
+	WatchedPR string `json:"watchedPr,omitempty"`
 }
 
 // ValidRepoRef reports whether ref may be a git_diff ref: "" (the worktree

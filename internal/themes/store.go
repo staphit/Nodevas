@@ -491,7 +491,7 @@ func (s *Store) Delete(ctx context.Context, actor identity.Actor, id string) err
 	return nil
 }
 
-// Open opens a pack's image, or its manifest by ManifestFile, without ever
+// Open opens a pack's image or clip, or its manifest by ManifestFile, without ever
 // leaving the pack's directory or following a link. The caller closes it.
 // Whatever cannot be opened that way is ErrNotFound; a directory with no row
 // is not a pack.

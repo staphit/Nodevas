@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
+	"nodevas/internal/prefs"
 )
 
 // Passwords are hashed with argon2id. The parameters follow the OWASP
@@ -416,6 +417,10 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 		// not delete the record of what it did.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE id = ?`, id); err != nil {
 			return locale.Errorf("delete account: %w", "刪除帳號：%w", err)
+		}
+		// Its app preferences go too: they were that person's alone.
+		if err := prefs.DeleteAccount(ctx, tx, id); err != nil {
+			return err
 		}
 		// Its authenticator goes with it, so an account created later can
 		// never inherit a factor somebody else enrolled.

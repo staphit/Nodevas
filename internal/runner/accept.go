@@ -3,6 +3,7 @@ package runner
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -123,7 +124,11 @@ func (t *TerminalAccepter) Accept(ctx context.Context, offer Offer) (bool, strin
 		fmt.Fprintf(t.Out, "\nno answer in %s; declined.\n", timeout.Round(time.Second))
 		return false, ReasonTimedOut
 	case <-ctx.Done():
-		fmt.Fprintln(t.Out, "\nthe hub cancelled this run; never mind.")
+		if errors.Is(context.Cause(ctx), errAnsweredInApp) {
+			fmt.Fprintln(t.Out, "\nanswered in Nodevas; never mind.")
+		} else {
+			fmt.Fprintln(t.Out, "\nthe hub cancelled this run; never mind.")
+		}
 		return false, ReasonCancelled
 	}
 }
@@ -190,8 +195,13 @@ func describeOffer(o Offer) string {
 		b.WriteString("\n=== Run offered by the hub ===\n")
 	}
 	fmt.Fprintf(&b, "  requested by: %s\n", orDash(terminalText(job.RequestedBy)))
-	fmt.Fprintf(&b, "  project:      %s\n", orDash(terminalText(job.Project)))
-	fmt.Fprintf(&b, "  node:         %s  %s\n", terminalText(job.NodeID), terminalText(job.NodeTitle))
+	if job.Global {
+		// No project, no node, no board (global.go).
+		fmt.Fprintf(&b, "  global agent: %s\n", terminalText(job.NodeTitle))
+	} else {
+		fmt.Fprintf(&b, "  project:      %s\n", orDash(terminalText(job.Project)))
+		fmt.Fprintf(&b, "  node:         %s  %s\n", terminalText(job.NodeID), terminalText(job.NodeTitle))
+	}
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", terminalText(o.Repo.Name), terminalText(o.Repo.Path))
 	if job.Kind == runnerwire.JobVerify {
 		b.WriteString("  agent:        none: runs this repository's test command (runner.json), no model\n")
@@ -237,6 +247,12 @@ func describeOffer(o Offer) string {
 		}
 	default:
 		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
+		if job.Global {
+			fmt.Fprintf(&b, "  branch:       %s\n", terminalText(BranchName(branchKey(job.NodeID, job.Slug), job.RunID)))
+			if job.NoPR {
+				b.WriteString("  pull request: no (kept on this machine)\n")
+			}
+		}
 	}
 	fmt.Fprintf(&b, "  run:          %s\n", terminalText(job.RunID))
 	b.WriteString("  task:\n")

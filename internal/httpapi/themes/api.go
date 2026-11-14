@@ -3,7 +3,7 @@
 //	GET    /api/themes                  → {packs, default}
 //	POST   /api/themes                  multipart "file" → 201 and the pack
 //	GET    /api/themes/:id              → the stored theme.json
-//	GET    /api/themes/:id/files/*path  → an image's bytes
+//	GET    /api/themes/:id/files/*path  → an image's or a clip's bytes, in ranges if asked
 //	DELETE /api/themes/:id              → 204 (the owner or an administrator)
 //	PUT    /api/themes/default {id}     → {default} (administrators)
 //
@@ -35,10 +35,11 @@ const (
 	// largest zip takes longer than that on an ordinary line. Only a signed-in
 	// person's upload gets here.
 	uploadWindow = 5 * time.Minute
-	// responsePolicy keeps a pack's file from doing anything but be a picture,
-	// should it ever be opened as a page.
+	// responsePolicy keeps a pack's file from doing anything but be a picture
+	// or a clip, should it ever be opened as a page. It binds only such a page:
+	// the war room's <img> and <video> answer to the site's own policy.
 	responsePolicy = "sandbox; default-src 'none'"
-	// imageCache is the longest a replaced pack's image may keep showing.
+	// imageCache is the longest a replaced pack's image or clip may keep showing.
 	imageCache = "private, max-age=3600"
 
 	maxDefaultBody = 4 << 10

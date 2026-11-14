@@ -92,7 +92,7 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	args := []string{
 		"--output-format", "stream-json",
 		"--approval-mode", mode,
-		"--allowed-mcp-server-names", "nodevas",
+		"--allowed-mcp-server-names", geminiAllowedServer(env),
 	}
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)
@@ -107,23 +107,39 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
+// geminiNoServer is the --allowed-mcp-server-names of a run with no board
+// (RunEnv.NoBoard): a name no server has, so the CLI loads none, the
+// owner's own "nodevas" entry included.
+const geminiNoServer = "nodevas-none"
+
+// geminiAllowedServer is the one MCP server a run may load.
+func geminiAllowedServer(env RunEnv) string {
+	if env.NoBoard {
+		return geminiNoServer
+	}
+	return "nodevas"
+}
+
 // writeGeminiSettings writes the system settings override that defines the
-// nodevas MCP server into the run's temp dir and returns its path; for a
-// read-only run, the same settings into the worktree's .gemini/settings.json.
+// nodevas MCP server (none for a run with no board) into the run's temp dir
+// and returns its path; for a read-only run, the same settings into the
+// worktree's .gemini/settings.json.
 func writeGeminiSettings(job runnerwire.Job, env RunEnv) (string, error) {
-	settings, err := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]any{
-			"nodevas": map[string]any{
-				"command": env.MCP.Command,
-				"args":    env.MCP.Args,
-				// trust skips the CLI's confirmation for this server's tools:
-				// the preamble has the agent claim its node, nobody can say
-				// yes headless, and the hub limits these tools anyway.
-				"trust":   true,
-				"timeout": geminiToolTimeoutMs,
-			},
+	servers := map[string]any{
+		"nodevas": map[string]any{
+			"command": env.MCP.Command,
+			"args":    env.MCP.Args,
+			// trust skips the CLI's confirmation for this server's tools:
+			// the preamble has the agent claim its node, nobody can say
+			// yes headless, and the hub limits these tools anyway.
+			"trust":   true,
+			"timeout": geminiToolTimeoutMs,
 		},
-	}, "", "  ")
+	}
+	if env.NoBoard {
+		servers = map[string]any{}
+	}
+	settings, err := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
 	if err != nil {
 		return "", err
 	}

@@ -56,3 +56,44 @@ describe("actorLabel with asks", () => {
     expect(actionLabel(tZh, { kind: "ask", askId: "1", askKind: "question" }, noTitle)).toBe("回答問題");
   });
 });
+
+describe("actionLabel for a run's workspace", () => {
+  it("says Open workspace in both languages", async () => {
+    const { actionLabel } = await import("./labels");
+    const target = { kind: "run-workspace" as const, runId: "r", nodeId: "n" };
+    expect(actionLabel(tEn, target, () => "")).toBe("Open workspace");
+    expect(actionLabel(tZh, target, () => "")).toBe("開啟工作區");
+  });
+});
+
+describe("global agents in labels", () => {
+  it("names the way to Station's Global agents tab in both languages", async () => {
+    const { actionLabel } = await import("./labels");
+    const target = { kind: "global-agents" as const, runId: "r" };
+    expect(actionLabel(tEn, target, () => "")).toBe("Show in Global agents");
+    expect(actionLabel(tZh, target, () => "")).toBe("在全域 agent 中顯示");
+  });
+
+  it("says a headless global agent cannot ask", () => {
+    const actor = {
+      id: "run:r",
+      kind: "run" as const,
+      agent: "claude",
+      model: "opus",
+      project: "",
+      area: "work" as const,
+      pose: "working" as const,
+      nodeTitle: "Bump the deps",
+      runnerOnline: true,
+      ownerName: "bea",
+      heldMail: [],
+      global: true,
+      cannotAsk: true,
+      target: { kind: "run-workspace" as const, runId: "r", nodeId: "" },
+      actions: [],
+    } satisfies Actor;
+    expect(actorLabel(tEn, actor, "mac-mini")).toContain("it cannot ask you anything");
+    expect(actorLabel(tZh, actor, "mac-mini")).toContain("無法向你提問");
+    expect(actorLabel(tEn, { ...actor, cannotAsk: false }, "mac-mini")).not.toContain("cannot ask");
+  });
+});

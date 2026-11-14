@@ -38,6 +38,10 @@ type jobs struct {
 	seenOrder []string
 	declines  []runnerwire.Envelope
 	agents    []runnerwire.Agent
+	// asks are the offers waiting for a person (offerask.go), by run, and
+	// askOrder the ones the hub has not been told about yet, oldest first.
+	asks     map[string]runnerwire.OfferAsk
+	askOrder []string
 	// hubName is what the hub calls this runner, from its welcome.
 	hubName string
 
@@ -57,6 +61,13 @@ type jobs struct {
 	mergeResults  []runnerwire.Envelope
 	mergeMu       sync.Mutex
 
+	// Workspace actions (see workspace_actions.go), kept like merges: answers
+	// to dedupe re-sent requests, requests being worked on, answers not yet
+	// written. They take mergeMu too: one action or merge at a time.
+	workspaceRecords  map[string]workspaceRecord
+	workspaceInFlight map[string]bool
+	workspaceResults  []runnerwire.Envelope
+
 	proxy    *Proxy
 	proxyErr error
 
@@ -72,6 +83,9 @@ type run struct {
 	job    runnerwire.Job
 	repo   runnerwire.Repo
 	cancel context.CancelCauseFunc
+	// cfg is the runner's config when the run was offered: the run uses
+	// these settings to the end, whatever the app changes meanwhile.
+	cfg *Config
 	// accepted: someone said yes and the worktree exists. From here until the
 	// finish is delivered, the run is listed as active in every hello.
 	accepted bool
@@ -132,6 +146,7 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 		notify: make(chan struct{}, 1),
 		runs:   map[string]*run{},
 		seen:   map[string]bool{},
+		asks:   map[string]runnerwire.OfferAsk{},
 
 		watched:   map[string]*watchedPR{},
 		watchErrs: map[string]string{},
@@ -139,6 +154,9 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 
 		merges:        map[string]mergeRecord{},
 		mergeInFlight: map[string]bool{},
+
+		workspaceRecords:  map[string]workspaceRecord{},
+		workspaceInFlight: map[string]bool{},
 	}
 }
 
@@ -199,14 +217,21 @@ func (j *jobs) agentVersion(kind string) string {
 }
 
 // active is the hello's Active list: accepted runs whose finish the hub has
-// not had yet. A finished run is listed until its finish goes out, or the hub
-// would fail it for being missing a moment before hearing it succeeded.
+// not had yet, and offers still waiting for a person (offer_ask). A finished
+// run is listed until its finish goes out, or the hub would fail it for being
+// missing a moment before hearing it succeeded; an offer that is asked about
+// is listed so a reconnect keeps it offered, and the ask said again after the
+// welcome is about a run the hub still holds as offered.
 func (j *jobs) active() []string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	var ids []string
 	for _, id := range j.order {
-		if r := j.runs[id]; r != nil && r.accepted {
+		r := j.runs[id]
+		if r == nil {
+			continue
+		}
+		if _, asking := j.asks[id]; r.accepted || asking {
 			ids = append(ids, id)
 		}
 	}
@@ -232,39 +257,49 @@ func (j *jobs) offer(job *runnerwire.Job) {
 		// our finish arrived and refused that finish. A decline ends it
 		// instead of leaving it offered to a runner that will never answer.
 		j.declines = append(j.declines, runnerwire.Envelope{Type: runnerwire.TypeDecline, RunID: job.RunID,
-			Reason: "this runner already ran or refused this run"})
+			Reason: "this runner already ran or refused this run", Code: runnerwire.DeclineOther})
 		j.mu.Unlock()
 		j.wake()
 		j.c.logf("run %s: offered again after it ended; declined", job.RunID)
 		return
 	}
-	repo, reason := j.checkLocked(job)
+	// The settings now are the run's to the end.
+	cfg := j.c.cfg()
+	repo, code, reason := j.checkLocked(job, cfg)
 	if reason != "" {
 		j.rememberLocked(job.RunID)
-		j.declines = append(j.declines, runnerwire.Envelope{Type: runnerwire.TypeDecline, RunID: job.RunID, Reason: reason})
+		j.declines = append(j.declines, runnerwire.Envelope{Type: runnerwire.TypeDecline, RunID: job.RunID, Reason: reason, Code: code})
 		j.mu.Unlock()
 		j.wake()
 		j.c.logf("run %s: declined: %s", job.RunID, reason)
 		return
 	}
 	ctx, cancel := context.WithCancelCause(j.ctx)
-	r := &run{job: *job, repo: repo, cancel: cancel}
+	r := &run{job: *job, repo: repo, cancel: cancel, cfg: cfg}
 	j.runs[job.RunID] = r
 	j.order = append(j.order, job.RunID)
 	j.wg.Add(1)
 	j.mu.Unlock()
-	j.c.logf("run %s: offered by %s: node %s %q in %s with %s/%s",
-		job.RunID, orDash(job.RequestedBy), job.NodeID, job.NodeTitle, repo.Name, job.Agent, orDash(job.Model))
+	j.c.logf("run %s: offered by %s: %s in %s with %s/%s",
+		job.RunID, orDash(job.RequestedBy), offerText(job), repo.Name, job.Agent, orDash(job.Model))
 	go j.execute(ctx, r)
 }
 
-// checkLocked vets an offer against this runner's own settings. Everything
-// the hub sends is a request; the allowlist, the agents and the limits here
-// are what decide.
-func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
-	cfg := j.c.Config
+// checkLocked vets an offer against cfg, this runner's own settings.
+// Everything the hub sends is a request; the allowlist, the agents and the
+// limits here are what decide. A refusal comes with its decline code
+// (runnerwire.Decline*) and reason.
+func (j *jobs) checkLocked(job *runnerwire.Job, cfg *Config) (runnerwire.Repo, string, string) {
+	other := runnerwire.DeclineOther
 	if !validRunID.MatchString(job.RunID) {
-		return runnerwire.Repo{}, "run id is not usable on this runner"
+		return runnerwire.Repo{}, other, "run id is not usable on this runner"
+	}
+	// A run for no node is a global agent's, with no board (global.go).
+	if reason := checkGlobal(job, cfg); reason != "" {
+		if job.Global && !cfg.GlobalRunsOn() {
+			return runnerwire.Repo{}, runnerwire.DeclineGlobalOff, reason
+		}
+		return runnerwire.Repo{}, other, reason
 	}
 	var repo runnerwire.Repo
 	found := false
@@ -275,33 +310,42 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 		}
 	}
 	if !found {
-		return repo, fmt.Sprintf("repository %q is not on this runner's allowlist", job.RepoID)
+		return repo, runnerwire.DeclineRepoNotAdded, fmt.Sprintf("repository %q is not on this runner's allowlist", job.RepoID)
+	}
+	busy := func() string {
+		n := 0
+		for _, r := range j.runs {
+			if r.finish == nil {
+				n++
+			}
+		}
+		if limit := j.c.MaxConcurrentRuns(); n >= limit {
+			return fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
+		}
+		return ""
 	}
 	// A verify job runs no agent: the repo's own test command (verify.go).
 	if job.Kind == runnerwire.JobVerify {
 		if job.Mode != runnerwire.ModeHeadless {
-			return repo, "a verify job is headless"
+			return repo, other, "a verify job is headless"
 		}
 		if reason := checkKind(job, cfg); reason != "" {
-			return repo, reason
+			return repo, other, reason
 		}
-		busy := 0
-		for _, r := range j.runs {
-			if r.finish == nil {
-				busy++
-			}
+		if reason := busy(); reason != "" {
+			return repo, runnerwire.DeclineBusy, reason
 		}
-		if limit := cfg.MaxConcurrentRuns(); busy >= limit {
-			return repo, fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
-		}
-		return repo, ""
+		return repo, "", ""
 	}
-	if j.c.adapterFor(job.Agent) == nil {
-		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
+	if j.c.adapterUnder(cfg, job.Agent) == nil {
+		return repo, runnerwire.DeclineAgentMissing, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
 	// W2.5: interactive runs (interactive.go).
-	if reason := j.checkMode(job); reason != "" {
-		return repo, reason
+	if reason := j.checkMode(job, cfg); reason != "" {
+		if job.Mode == runnerwire.ModeInteractive && !cfg.InteractiveOn() {
+			return repo, runnerwire.DeclineInteractiveOff, reason
+		}
+		return repo, other, reason
 	}
 	var agent *runnerwire.Agent
 	for i := range j.agents {
@@ -310,7 +354,7 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 		}
 	}
 	if agent == nil || !agent.Installed {
-		return repo, fmt.Sprintf("agent %q is not installed on this runner", job.Agent)
+		return repo, runnerwire.DeclineAgentMissing, fmt.Sprintf("agent %q is not installed on this runner", job.Agent)
 	}
 	model := job.Model
 	if model == "" {
@@ -321,34 +365,28 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 		listed = listed || m.ID == model
 	}
 	if !listed {
-		return repo, fmt.Sprintf("model %q is not one this runner offers for %s", model, job.Agent)
+		return repo, other, fmt.Sprintf("model %q is not one this runner offers for %s", model, job.Agent)
 	}
 	if job.Base != "" {
 		if err := checkBase(job.Base); err != nil {
-			return repo, err.Error()
+			return repo, other, err.Error()
 		}
 	}
 	if len(job.Prompt) > runnerwire.MaxPromptBytes {
-		return repo, "prompt is too long"
+		return repo, other, "prompt is too long"
 	}
 	if reason := checkKind(job, cfg); reason != "" {
-		return repo, reason
+		return repo, other, reason
 	}
 	if job.Kind == runnerwire.JobRevise {
 		if reason := j.ownBranchLocked(job, repo); reason != "" {
-			return repo, reason
+			return repo, other, reason
 		}
 	}
-	busy := 0
-	for _, r := range j.runs {
-		if r.finish == nil {
-			busy++
-		}
+	if reason := busy(); reason != "" {
+		return repo, runnerwire.DeclineBusy, reason
 	}
-	if limit := cfg.MaxConcurrentRuns(); busy >= limit {
-		return repo, fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
-	}
-	return repo, ""
+	return repo, "", ""
 }
 
 // cancelRun handles a TypeCancel.
@@ -391,7 +429,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 			return
 		}
 		if reason != "" {
-			j.decline(r, reason)
+			j.decline(r, runnerwire.DeclineOther, reason)
 			return
 		}
 	}
@@ -399,18 +437,18 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	// A job continuing another run's partial work names a handoff branch:
 	// it must be one this runner made, for this repository (handoff.go).
 	if reason := j.prepareHandoff(ctx, r); reason != "" {
-		j.decline(r, reason)
+		j.decline(r, runnerwire.DeclineOther, reason)
 		return
 	}
 	job = r.job
 
-	ok, reason := j.ask(ctx, r)
+	ok, code, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
 		j.finish(r, cancelled(ctx))
 		return
 	}
 	if !ok {
-		j.decline(r, reason)
+		j.decline(r, code, reason)
 		return
 	}
 	switch job.Kind {
@@ -431,10 +469,10 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	}
 
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	var wt Worktree
 	if err == nil {
-		wt, err = CreateWorktreeFrom(ctx, r.repo.Path, dataDir, job.RunID, job.NodeID, job.Base, job.HandoffBranch)
+		wt, err = CreateWorktreeFrom(ctx, r.repo.Path, dataDir, job.RunID, branchKey(job.NodeID, job.Slug), job.Base, job.HandoffBranch)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -444,6 +482,18 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
 			Error: adapter.Truncate("could not create the worktree: "+err.Error(), runnerwire.MaxSummaryBytes)})
 		return
+	}
+	// A global agent has no board: its worktree says so while it runs, for a
+	// `nodevas mcp` the owner's config starts there (noboard.go). No mark, no
+	// run: Codex would start that one with nothing else to stop it.
+	unmark := func() {}
+	if job.Global {
+		if unmark, err = markNoBoard(wt, job.RunID); err != nil {
+			j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
+				Error: adapter.Truncate("could not mark the worktree as a global agent's (no board): "+err.Error(),
+					runnerwire.MaxSummaryBytes)})
+			return
+		}
 	}
 	j.mu.Lock()
 	r.accepted = true
@@ -460,6 +510,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, from)})
 
 	result, _ := j.runAgent(ctx, r, wt, job)
+	unmark()
 	if result.Status == runnerwire.RunCancelled {
 		// Stopped on purpose: nothing is committed or pushed, and the
 		// worktree stays as the agent left it.
@@ -473,9 +524,10 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	r.publishing = true
 	j.mu.Unlock()
 	// Stopped at a usage limit: keep the partial work for the next run
-	// instead of publishing it (handoff.go). Nothing is pushed.
+	// instead of publishing it (handoff.go). Nothing is pushed. A global
+	// agent's has no next run: it is committed on its own branch below.
 	if result.Status == runnerwire.RunFailed && runnerwire.HandoffWorthy(result.FailureKind) &&
-		job.Mode != runnerwire.ModeInteractive {
+		job.Mode != runnerwire.ModeInteractive && !job.Global {
 		changes := j.handOff(r, wt, &result)
 		j.finishWith(r, result, changes, nil)
 		return
@@ -484,13 +536,19 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.finishWith(r, result, changes, pr)
 }
 
-// ask decides an offer: auto-accepted when the owner's policy covers it,
-// else asked at the terminal. With nobody there, the decline says what kept
-// auto-accept from applying.
-func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
-	offer := Offer{Job: r.job, Repo: r.repo, Shell: j.c.Config.ShellAccess(r.job)}
-	policy := j.c.Config.AutoAcceptPolicy()
-	auto, why := AutoAcceptDecision(policy, offer)
+// ask decides an offer. The built-in runner of a single-user hub starts it
+// right away or asks in the app (askBuiltIn). Any other runner auto-accepts
+// it when the owner's policy covers it, else asks at the terminal, telling
+// the hub why it waits (offer_ask, where "runner"); with nobody there, the
+// decline says what kept auto-accept from applying. A no comes with its
+// decline code (runnerwire.Decline*).
+func (j *jobs) ask(ctx context.Context, r *run) (bool, string, string) {
+	offer := Offer{Job: r.job, Repo: r.repo, Shell: j.runCfg(r).ShellAccess(r.job)}
+	if j.c.BuiltIn() {
+		return j.askBuiltIn(ctx, r, offer)
+	}
+	policy := j.runCfg(r).AutoAcceptPolicy()
+	auto, why, reasons := AutoAcceptAsk(policy, offer)
 	interactive := r.job.Mode == runnerwire.ModeInteractive
 	if auto {
 		j.c.logf("run %s: auto-accepted: %s", r.job.RunID, why)
@@ -504,11 +562,17 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 			r.noRelay = true
 			j.mu.Unlock()
 		}
-		return true, ""
+		return true, "", ""
 	}
 	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
 	ok, reason := false, ReasonNoTerminal
 	if j.c.Accepter != nil {
+		if person, timeout := personAt(j.c.Accepter); person {
+			// The hub says the run waits for a person here, and why.
+			j.queueAsk(runnerwire.OfferAsk{RunID: r.job.RunID, Where: runnerwire.AskOnRunner, Reasons: reasons,
+				ExpiresAt: time.Now().Add(timeout).UTC().Format(time.RFC3339), Machine: machineName()})
+			defer j.dropAsk(r.job.RunID)
+		}
 		ok, reason = j.c.Accepter.Accept(ctx, offer)
 	}
 	if ok && interactive {
@@ -518,20 +582,73 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 		}
 		j.setRemoteTyping(r, typing)
 	}
-	if !ok && reason == ReasonNoTerminal && why != ReasonAutoAcceptOff {
+	if ok {
+		return true, "", ""
+	}
+	code := runnerwire.DeclineOther
+	switch reason {
+	case ReasonDeclined:
+		code = runnerwire.DeclineOnRunner
+	case ReasonTimedOut:
+		code = runnerwire.DeclineTimedOut
+	case ReasonNoTerminal, ReasonInputGone:
+		code = runnerwire.DeclineNoOneThere
+	}
+	if reason == ReasonNoTerminal && why != ReasonAutoAcceptOff {
 		reason = why + " (and nobody is at the runner's terminal to accept)"
 	}
-	return ok, reason
+	return false, code, reason
 }
 
-// disabledMCP is, for an OpenCode run, every MCP server but the run's own,
-// to switch off. When OpenCode cannot say which it loads, the run goes on
-// with them and says so.
+// askBuiltIn decides an offer to the built-in runner: it starts right away
+// unless BuiltInDecision says the owner is asked first, in the app (and at
+// serve's terminal too, when they asked to confirm every run). An
+// interactive run is the owner's own terminal in their own app: typing is
+// allowed.
+func (j *jobs) askBuiltIn(ctx context.Context, r *run, offer Offer) (bool, string, string) {
+	job := r.job
+	interactive := job.Mode == runnerwire.ModeInteractive
+	start, reasons := BuiltInDecision(j.runCfg(r), offer)
+	if !start {
+		app := j.c.app()
+		answers := app.open(job.RunID)
+		defer app.closeAsk(job.RunID)
+		deadline := time.Now().Add(app.timeout())
+		j.queueAsk(runnerwire.OfferAsk{RunID: job.RunID, Where: runnerwire.AskInApp, Reasons: reasons,
+			ExpiresAt: deadline.UTC().Format(time.RFC3339), Machine: machineName()})
+		defer j.dropAsk(job.RunID)
+		j.c.logf("run %s: waiting for your OK in Nodevas: %s", job.RunID, askText(reasons))
+		decision := app.wait(ctx, offer, answers, deadline, j.runCfg(r).AskEveryRun)
+		if !decision.start {
+			return false, decision.code, decision.reason
+		}
+		if decision.alwaysAllowShell && slices.ContainsFunc(reasons, func(reason runnerwire.AskReason) bool {
+			return reason.Code == runnerwire.AskShellAgent
+		}) {
+			j.c.allowShellWithoutAsking(job.Agent)
+		}
+	}
+	j.c.logf("run %s started (%s)", job.RunID, startedBy(job.Origin))
+	if interactive {
+		j.setRemoteTyping(r, true)
+	}
+	return true, "", ""
+}
+
+// disabledMCP is, for an OpenCode run, every MCP server but the run's own
+// (every one at all for a global agent's run, which has none), to switch
+// off. When OpenCode cannot say which it loads, the run goes on with them
+// and says so.
 func (j *jobs) disabledMCP(ctx context.Context, r *run, bin, dir string) []string {
 	if r.job.Agent != "opencode" {
 		return nil
 	}
-	names, err := adapter.OpenCodeMCPServers(ctx, bin, dir, adapter.ReadOnly(r.job))
+	list := adapter.OpenCodeMCPServers
+	if r.job.Global {
+		// No server of its own takes the owner's nodevas's place.
+		list = adapter.OpenCodeEveryMCPServer
+	}
+	names, err := list(ctx, bin, dir, adapter.ReadOnly(r.job))
 	if err != nil {
 		j.c.logf("run %s: cannot list OpenCode's MCP servers to switch them off: %v", r.job.RunID, err)
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
@@ -572,7 +689,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
 	}
 	version := j.agentVersion(job.Agent)
-	ad, note := withoutOpenCode2ACP(j.c.adapterFor(job.Agent), version)
+	ad, note := withoutOpenCode2ACP(j.c.adapterUnder(j.runCfg(r), job.Agent), version)
 	if note != "" {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: note})
 	}
@@ -580,12 +697,16 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	if err != nil {
 		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", adapter.Binary(job.Agent))
 	}
-	proxy, err := j.proxyFor()
-	if err != nil {
-		return fail(runnerwire.FailureTask, "could not start the MCP proxy: %v", err)
+	// A global agent has no board: no door through the proxy, no MCP server.
+	var proxy *Proxy
+	var secret string
+	if !job.Global {
+		if proxy, err = j.proxyFor(); err != nil {
+			return fail(runnerwire.FailureTask, "could not start the MCP proxy: %v", err)
+		}
+		secret = proxy.Register(job.RunID)
+		defer proxy.Revoke(secret)
 	}
-	secret := proxy.Register(job.RunID)
-	defer proxy.Revoke(secret)
 	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
@@ -596,9 +717,9 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		return fail(runnerwire.FailureTask, "cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
-	cfg := j.c.Config
+	cfg := j.runCfg(r)
 	j.mu.Lock()
-	relay := cfg.PermissionRelay && !r.noRelay
+	relay := cfg.PermissionRelay && !r.noRelay && !job.Global
 	j.mu.Unlock()
 	mode, modeText := runPermission(cfg, job, note == "")
 	runEnv := adapter.RunEnv{
@@ -607,6 +728,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Branch:         wt.Branch,
 		TempDir:        tmp,
 		MCP:            adapter.MCPServer{Command: exe},
+		NoBoard:        job.Global,
 		PermissionMode: mode,
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
@@ -615,21 +737,32 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Version:          version,
 		PermissionRelay:  relay,
 	}
-	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
-	if err != nil {
-		return fail(runnerwire.FailureTask, "could not write the MCP server's address: %v", err)
+	if !job.Global {
+		serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+		if err != nil {
+			return fail(runnerwire.FailureTask, "could not write the MCP server's address: %v", err)
+		}
+		runEnv.MCP.Args = mcpArgs(serverFile, job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	}
-	runEnv.MCP.Args = mcpArgs(serverFile, job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
 	}
-	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && !relay {
-		modeText = claimed + autoAcceptedNotRelayedText
-	} else if ok && relayOff {
-		// The adapter could not set the relay up (agy: no session settings,
-		// no hook that runs nodevas): the log says what the run really does.
-		modeText = claimed + notRelayedText
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok {
+		switch {
+		case job.Global:
+			modeText = claimed + noBoardNotRelayedText
+		case !relay:
+			modeText = claimed + autoAcceptedNotRelayedText
+		case relayOff:
+			// The adapter could not set the relay up (agy: no session
+			// settings, no hook that runs nodevas): the log says what the
+			// run really does.
+			modeText = claimed + notRelayedText
+		}
+	}
+	if job.Global {
+		modeText += "; no board (a global agent)"
 	}
 	parser := ad.NewParser()
 	// An ACP agent is spoken to while it runs (adapter/acp.go).
@@ -666,7 +799,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timeout := j.c.runTimeout(job.Kind)
+	timeout := j.c.runTimeout(j.runCfg(r), job.Kind)
 	expired, stopTimer := j.c.startRunTimer(timeout)
 	defer stopTimer()
 	var waitErr error
@@ -802,6 +935,9 @@ const (
 	// autoAcceptedNotRelayedText ends that of a run auto-accepted without
 	// allow-shell (run.noRelay).
 	autoAcceptedNotRelayedText = ", permission prompts not relayed: auto-accepted without allow-shell (denied headless)"
+	// noBoardNotRelayedText ends that of a global agent's run, which has no
+	// board to ask through.
+	noBoardNotRelayedText = ", permission prompts not relayed: a global agent has no board (denied headless)"
 )
 
 // permissionText says how freely the agent may act, for the run's log.
@@ -881,7 +1017,7 @@ func writeMCPServerFile(tmp, url string) (string, error) {
 // dir, owner-only, never the system's temp dir, which a Codex run's default
 // sandbox may write. The caller removes it when the run ends.
 func (j *jobs) runTempDir() (string, error) {
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.c.cfg().RunDataDir()
 	if err != nil {
 		return "", err
 	}
@@ -896,7 +1032,7 @@ func (j *jobs) proxyFor() (*Proxy, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.proxy == nil && j.proxyErr == nil {
-		j.proxy, j.proxyErr = StartProxy(j.c.Config, j.c.HTTPClient)
+		j.proxy, j.proxyErr = StartProxy(j.c.cfg(), j.c.HTTPClient)
 	}
 	return j.proxy, j.proxyErr
 }
@@ -1009,10 +1145,12 @@ func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwi
 	j.c.logf("%s", line)
 }
 
-func (j *jobs) decline(r *run, reason string) {
+// decline tells the hub the runner will not take r: code is its
+// runnerwire.Decline* code, reason the English words beside it.
+func (j *jobs) decline(r *run, code, reason string) {
 	j.mu.Lock()
 	j.forgetLocked(r.job.RunID)
-	j.declines = append(j.declines, runnerwire.Envelope{Type: runnerwire.TypeDecline, RunID: r.job.RunID, Reason: reason})
+	j.declines = append(j.declines, runnerwire.Envelope{Type: runnerwire.TypeDecline, RunID: r.job.RunID, Reason: reason, Code: code})
 	j.mu.Unlock()
 	j.wake()
 	j.c.logf("run %s: declined: %s", r.job.RunID, reason)
@@ -1068,9 +1206,27 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 	if len(j.declines) > 0 {
 		return j.declines[0], func() { j.declines = j.declines[1:] }
 	}
+	// Why an offer waits; its accept or decline comes only once it is over.
+	if len(j.askOrder) > 0 {
+		id := j.askOrder[0]
+		ask, ok := j.asks[id]
+		if !ok {
+			return runnerwire.Envelope{}, nil // never: dropAsk takes it off askOrder too
+		}
+		ask.Reasons = slices.Clone(ask.Reasons)
+		return runnerwire.Envelope{Type: runnerwire.TypeOfferAsk, RunID: id, OfferAsk: &ask}, func() {
+			if len(j.askOrder) > 0 && j.askOrder[0] == id {
+				j.askOrder = j.askOrder[1:]
+			}
+		}
+	}
 	// A merge's answer goes before the PR update that shows it merged.
 	if len(j.mergeResults) > 0 {
 		return j.mergeResults[0], func() { j.mergeResults = j.mergeResults[1:] }
+	}
+	// A discard's answer goes before the PR update that shows its PR closed.
+	if len(j.workspaceResults) > 0 {
+		return j.workspaceResults[0], func() { j.workspaceResults = j.workspaceResults[1:] }
 	}
 	for _, id := range j.order {
 		r := j.runs[id]
@@ -1120,6 +1276,47 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 		}
 	}
 	return runnerwire.Envelope{}, nil
+}
+
+// queueAsk records that an offer waits for a person, and tells the hub why
+// (offer_ask) at the next flush.
+func (j *jobs) queueAsk(ask runnerwire.OfferAsk) {
+	j.mu.Lock()
+	if j.asks == nil {
+		j.asks = map[string]runnerwire.OfferAsk{}
+	}
+	j.asks[ask.RunID] = ask
+	j.askOrder = append(slices.DeleteFunc(j.askOrder, func(id string) bool { return id == ask.RunID }), ask.RunID)
+	j.mu.Unlock()
+	j.wake()
+}
+
+// dropAsk forgets an ask that is over. The hub clears its own copy on the
+// run's accept, decline or finish.
+func (j *jobs) dropAsk(runID string) {
+	j.mu.Lock()
+	delete(j.asks, runID)
+	j.askOrder = slices.DeleteFunc(j.askOrder, func(id string) bool { return id == runID })
+	j.mu.Unlock()
+}
+
+// resendAsks queues every pending ask again, for a new connection: the hub
+// keeps asks in memory only.
+func (j *jobs) resendAsks() {
+	j.mu.Lock()
+	j.askOrder = j.askOrder[:0]
+	for _, id := range j.order {
+		if _, ok := j.asks[id]; ok {
+			j.askOrder = append(j.askOrder, id)
+		}
+	}
+	j.mu.Unlock()
+}
+
+// machineName is this machine's name, for "waiting on <PC>".
+func machineName() string {
+	host, _ := os.Hostname()
+	return truncate(host, runnerwire.MaxAskFieldBytes)
 }
 
 // takeBatch copies the first events that fit one message.
@@ -1215,4 +1412,13 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.TrimSpace(strings.ToValidUTF8(string(t.buf), ""))
+}
+
+// runCfg is the config r was offered under (run.cfg), or the one in effect
+// for a run made without one.
+func (j *jobs) runCfg(r *run) *Config {
+	if r.cfg != nil {
+		return r.cfg
+	}
+	return j.c.cfg()
 }

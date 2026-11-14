@@ -76,6 +76,12 @@ type Registry struct {
 	// attached is when each live connection was attached: the copilot asks
 	// the most recently connected of a person's runners (llm.go).
 	attached map[string]time.Time
+	// builtInID is the runner a single-user hub started for itself at this
+	// startup (SetBuiltIn); welcomedBuiltIn the runners whose last welcome
+	// said they are it (Runner.BuiltIn). Both in memory: a restart decides
+	// again.
+	builtInID       string
+	welcomedBuiltIn map[string]bool
 }
 
 // NewRegistry builds a registry over the workspace database. notify, when set,
@@ -188,7 +194,47 @@ func (r *Registry) scan(row interface{ Scan(...any) error }) (runnerwire.Runner,
 		}
 	}
 	out.Online = r.Online(out.ID)
+	out.BuiltIn = r.WelcomedBuiltIn(out.ID)
 	return out, nil
+}
+
+// SetBuiltIn names the runner a single-user hub started for itself at this
+// startup: the only one its welcome may call built-in. "" names none.
+func (r *Registry) SetBuiltIn(id string) {
+	r.mu.Lock()
+	r.builtInID = id
+	r.mu.Unlock()
+}
+
+// IsBuiltInID reports whether id is the runner SetBuiltIn named.
+func (r *Registry) IsBuiltInID(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return id != "" && id == r.builtInID
+}
+
+// SetWelcomed records what the runner's latest welcome said about it being
+// the built-in runner, which Runner.BuiltIn shows.
+func (r *Registry) SetWelcomed(id string, builtIn bool) {
+	r.mu.Lock()
+	if r.welcomedBuiltIn == nil {
+		r.welcomedBuiltIn = map[string]bool{}
+	}
+	if builtIn {
+		r.welcomedBuiltIn[id] = true
+	} else {
+		delete(r.welcomedBuiltIn, id)
+	}
+	r.mu.Unlock()
+}
+
+// WelcomedBuiltIn reports whether the runner's latest welcome called it the
+// built-in runner: the runner SetBuiltIn named, on a single-user hub, over
+// a socket straight from this machine (httpapi/runners decides).
+func (r *Registry) WelcomedBuiltIn(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.welcomedBuiltIn[id]
 }
 
 // List returns the runners viewer may see: an administrator sees all, anyone

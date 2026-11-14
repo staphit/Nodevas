@@ -36,6 +36,10 @@ export interface RunStoreState {
    * views); refreshed by runs-changed from then on. */
   activeRuns: Run[];
   activeRunsLoaded: boolean;
+  /** Global agents' runs (phase 2), by id: no node or project holds them.
+   * Fed by the Global agents tab's list, a workspace action, a realtime
+   * fetch; kept across project switches. */
+  globalById: Record<string, Run>;
   /** A run's changes, fetched only when someone opens its diff. */
   changesByRun: Record<string, HeldChanges>;
   changesLoading: Record<string, boolean>;
@@ -80,6 +84,11 @@ export interface RunStoreState {
   loadChanges: (runId: string, commit: string | undefined) => Promise<void>;
   /** Reloads one run from GET /api/runs/:id. */
   refreshRun: (runId: string) => Promise<void>;
+  /** Holds a run fetched or returned elsewhere (a workspace action, a
+   * run-notify), wherever the store lists it; a global run in globalById. */
+  putRun: (run: Run) => void;
+  /** putRun for many: the Global agents list. */
+  putRuns: (runs: Run[]) => void;
   /** Fetches a pipeline unless it is held already (or `force`). */
   loadPipeline: (id: string, force?: boolean) => Promise<void>;
   /** Holds a pipeline fetched elsewhere (the run-notify handler). */
@@ -197,6 +206,31 @@ export function findRun(state: Pick<RunStoreState, "runsByNode">, runId: string)
   return undefined;
 }
 
+/** A run wherever the store holds it: a global run by id, a node's list
+ * (the freshest a view asked for), then the active runs, then the newest per
+ * node. */
+export function selectRunById(
+  state: Pick<RunStoreState, "runsByNode" | "activeRuns" | "latestByNode"> & Partial<Pick<RunStoreState, "globalById">>,
+  runId: string,
+): Run | undefined {
+  return (
+    state.globalById?.[runId] ??
+    findRun(state, runId) ??
+    state.activeRuns.find((run) => run.id === runId) ??
+    Object.values(state.latestByNode).find((run) => run.id === runId)
+  );
+}
+
+/** Where a run fetched or returned is held: a global run by id, any other
+ * in its node's list and the newest per node. */
+function placed(state: RunStoreState, run: Run): Partial<RunStoreState> {
+  if (run.global) return { globalById: { ...state.globalById, [run.id]: run } };
+  return {
+    runsByNode: upsertRun(state.runsByNode, run),
+    latestByNode: foldLatest(state.latestByNode, [run]),
+  };
+}
+
 // One events fetch per run at a time. A push that lands mid-fetch marks the
 // run dirty, and the fetch goes round once more instead of racing itself.
 const eventsInFlight = new Map<string, Promise<void>>();
@@ -227,6 +261,7 @@ let generation = 0;
 const initial = {
   runsByNode: {},
   latestByNode: {},
+  globalById: {},
   projectRunsLoaded: false,
   activeRuns: [],
   activeRunsLoaded: false,
@@ -406,14 +441,38 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     try {
       const run = await api.getRun(runId);
       if (gen !== generation) return;
-      set((state) => ({
-        runsByNode: upsertRun(state.runsByNode, run),
-        latestByNode: foldLatest(state.latestByNode, [run]),
-      }));
+      set((state) => placed(state, run));
     } catch {
       // The list refresh reports failures; a single run's is not worth a
       // second message for the same outage.
     }
+  },
+
+  putRun: (run) => {
+    if (!run?.id) return;
+    if (run.global) {
+      set((state) => ({ globalById: { ...state.globalById, [run.id]: run } }));
+      return;
+    }
+    set((state) => ({
+      runsByNode: upsertRun(state.runsByNode, run),
+      latestByNode: foldLatest(state.latestByNode, [run]),
+      activeRuns: state.activeRuns.some((item) => item.id === run.id)
+        ? state.activeRuns.map((item) => (item.id === run.id ? run : item))
+        : state.activeRuns,
+    }));
+  },
+
+  putRuns: (runs) => {
+    const global = runs.filter((run) => run?.id && run.global);
+    if (global.length > 0) {
+      set((state) => {
+        const globalById = { ...state.globalById };
+        for (const run of global) globalById[run.id] = run;
+        return { globalById };
+      });
+    }
+    for (const run of runs) if (run?.id && !run.global) get().putRun(run);
   },
 
   loadPipeline: (id, force = false) => {
@@ -549,8 +608,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       // A running run stays "running" until the runner reports it ended; the
       // view says the stop is on its way instead of offering cancel again.
       set((state) => ({
-        runsByNode: upsertRun(state.runsByNode, run),
-        latestByNode: foldLatest(state.latestByNode, [run]),
+        ...placed(state, run),
         stopRequested: runFinal(run.status)
           ? state.stopRequested
           : { ...state.stopRequested, [runId]: true },
@@ -577,10 +635,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     });
     try {
       const run = await api.retryRunNow(runId);
-      set((state) => ({
-        runsByNode: upsertRun(state.runsByNode, run),
-        latestByNode: foldLatest(state.latestByNode, [run]),
-      }));
+      set((state) => placed(state, run));
       return true;
     } catch (error) {
       set((state) => ({ cancelErrors: { ...state.cancelErrors, [runId]: message(error) } }));
@@ -602,12 +657,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     try {
       const run = await api.mergeRun(runId, headSha);
       if (gen !== generation) return true;
-      if (run?.id) {
-        set((state) => ({
-          runsByNode: upsertRun(state.runsByNode, run),
-          latestByNode: foldLatest(state.latestByNode, [run]),
-        }));
-      }
+      if (run?.id) set((state) => placed(state, run));
       return true;
     } catch (error) {
       if (gen !== generation) return false;
@@ -707,7 +757,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       if (!pipelineEnded(pipeline.status)) void state.loadPipeline(pipeline.id, true);
     }
     for (const runId of Object.keys(state.watched)) {
-      const run = findRun(state, runId);
+      const run = selectRunById(state, runId);
       if (!run || !runFinal(run.status)) void state.loadEvents(runId);
       void state.loadRunAsks(runId);
     }
@@ -731,6 +781,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     activeTimer = null;
 
     // Live views keep their watch counts; they re-register on remount.
-    set({ ...initial, watched: get().watched });
+    // Global runs belong to no project: a switch keeps them.
+    set({ ...initial, watched: get().watched, globalById: get().globalById });
   },
 }));

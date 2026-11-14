@@ -6,6 +6,7 @@ import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { NodeRuns } from "./NodeRuns";
 import { useRuns } from "./runStore";
+import { useWorkspace } from "./workspaceStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -248,5 +249,42 @@ describe("NodeRuns", () => {
     expect(useRuns.getState().selectedRun.alpha).toBe("run0");
     await waitFor(() => expect(useRuns.getState().watched.run1).toBeUndefined());
     expect(useRuns.getState().watched.run0).toBe(1);
+  });
+});
+
+describe("NodeRuns and the agent workspace", () => {
+  it("opens the selected run's workspace from its detail", async () => {
+    vi.spyOn(api, "listRuns").mockResolvedValue({ runs: [makeRun({ status: "succeeded" })] });
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    vi.spyOn(api, "getRunWorkspace").mockResolvedValue({
+      runId: "run1",
+      owner: false,
+      runnerOnline: true,
+      files: { allowed: false, blocked: "not_owner" },
+      merge: { mode: "", blocked: "not_owner" },
+      discard: { allowed: false, blocked: "not_owner" },
+      info: null,
+      infoError: "not_owner",
+    });
+    useWorkspace.setState({ open: null });
+    render(<NodeRuns id="alpha" />);
+    const open = await screen.findByRole("button", { name: "Workspace" });
+    expect(open).toHaveAttribute("title", "Open this run's worktree, changes and terminal");
+    fireEvent.click(open);
+    expect(useWorkspace.getState().open).toEqual({ runId: "run1", tab: "changes" });
+  });
+
+  it("marks a row whose work was merged locally or discarded", async () => {
+    vi.spyOn(api, "listRuns").mockResolvedValue({
+      runs: [
+        makeRun({ id: "run2", status: "succeeded", workspace: "merged_local" }),
+        makeRun({ id: "run1", status: "failed", workspace: "discarded" }),
+      ],
+    });
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    render(<NodeRuns id="alpha" />);
+    const rows = within(await screen.findByRole("list", { name: "Runs" })).getAllByRole("button");
+    expect(within(rows[0]).getByText("Merged locally")).toHaveClass("run-workspace-chip");
+    expect(within(rows[1]).getByText("Discarded")).toHaveClass("run-workspace-chip");
   });
 });

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -418,6 +419,43 @@ func TestAnImageIsServedSafely(t *testing.T) {
 	}
 }
 
+// A scene's clip is served as its type and as safely as an image, and in
+// ranges: a browser asks for a video piece by piece.
+func TestAClipIsServedSafelyAndInRanges(t *testing.T) {
+	f := newFixture(t)
+	clip := []byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00body of a clip")
+	manifest := strings.Replace(manifestFor, `"image": "figures/read.png",`, `"image": "figures/read.png", "video": "figures/read.mp4",`, 1)
+	archive := packZip(t, "magic", map[string][]byte{
+		"theme.json":       []byte(strings.Replace(manifest, `"ID"`, `"magic"`, 1)),
+		"figures/read.mp4": clip,
+	})
+	if rec := f.upload(t, "alice", archive); rec.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", rec.Code, rec.Body)
+	}
+	whole := f.call(t, "bob", http.MethodGet, "/api/themes/magic/files/figures/read.mp4", nil, nil)
+	if whole.Code != http.StatusOK || !bytes.Equal(whole.Body.Bytes(), clip) {
+		t.Fatalf("clip = %d %q", whole.Code, whole.Body)
+	}
+	rec := f.call(t, "bob", http.MethodGet, "/api/themes/magic/files/figures/read.mp4", nil, map[string]string{"Range": "bytes=4-11"})
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "ftypisom" {
+		t.Fatalf("a range = %d %q", rec.Code, rec.Body)
+	}
+	for header, want := range map[string]string{
+		"Content-Type":            "video/mp4",
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Security-Policy": "sandbox; default-src 'none'",
+		"Cache-Control":           "private, max-age=3600",
+		"Accept-Ranges":           "bytes",
+	} {
+		if got := rec.Header().Get(header); got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
+		}
+	}
+	if got := rec.Header().Get("Content-Range"); !strings.HasPrefix(got, "bytes 4-11/") {
+		t.Errorf("Content-Range = %q", got)
+	}
+}
+
 // The browser reloads the manifest on themes-changed, so unlike an image's it
 // must not answer from a cache without asking.
 func TestTheManifestIsServedAndAlwaysRevalidated(t *testing.T) {
@@ -446,6 +484,137 @@ func TestTheManifestIsServedAndAlwaysRevalidated(t *testing.T) {
 	again := f.call(t, "bob", http.MethodGet, "/api/themes/magic", nil, map[string]string{"If-None-Match": rec.Header().Get("ETag")})
 	if again.Code != http.StatusNotModified {
 		t.Fatalf("revalidation = %d", again.Code)
+	}
+}
+
+// The manifest served is written out again from what was validated, so what
+// a whole picture adds has to survive that: a scene with no room, its frames,
+// and the sign and where it goes.
+func TestTheServedManifestKeepsAnAnimatedWholePicture(t *testing.T) {
+	f := newFixture(t)
+	const manifest = `{
+  "schema": 1, "name": {"en": "magic"}, "version": "1.0.0", "author": "someone",
+  "canvas": [1536, 864], "rooms": {"lounge": "rooms/lounge.webp"},
+  "characters": {"claude": {"sign": "signs/mage.png", "scenes": {
+    "read": {"room": "lounge", "image": "figures/read.png", "x": 100, "y": 200, "w": 300, "h": 500, "box": [120, 210, 380, 700]},
+    "idle": {"image": "figures/read.png", "x": 0, "y": 0, "w": 1536, "h": 864, "box": [120, 210, 380, 700],
+      "frames": {"count": 4, "blink": 1, "click": [2, 3]}, "sign": [250, 180.5, 96]}}}}}`
+	archive := packZip(t, "magic", map[string][]byte{"theme.json": []byte(manifest), "signs/mage.png": pngImage})
+	if rec := f.upload(t, "alice", archive); rec.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", rec.Code, rec.Body)
+	}
+	rec := f.call(t, "bob", http.MethodGet, "/api/themes/magic", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manifest = %d %s", rec.Code, rec.Body)
+	}
+	var served struct {
+		Characters map[string]struct {
+			Sign   string                    `json:"sign"`
+			Scenes map[string]map[string]any `json:"scenes"`
+		} `json:"characters"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	character := served.Characters["claude"]
+	if character.Sign != "signs/mage.png" || character.Scenes["read"]["room"] != "lounge" {
+		t.Fatalf("manifest = %s", rec.Body)
+	}
+	idle := character.Scenes["idle"]
+	frames, _ := json.Marshal(idle["frames"])
+	sign, _ := json.Marshal(idle["sign"])
+	if _, hasRoom := idle["room"]; hasRoom || string(frames) != `{"blink":1,"click":[2,3],"count":4}` || string(sign) != `[250,180.5,96]` {
+		t.Fatalf("the whole picture = %v", idle)
+	}
+	if got := f.call(t, "bob", http.MethodGet, "/api/themes/magic/files/signs/mage.png", nil, nil); got.Code != http.StatusOK || !bytes.Equal(got.Body.Bytes(), pngImage) {
+		t.Fatalf("the sign image = %d %q", got.Code, got.Body)
+	}
+}
+
+// A skin colours the whole app and places names the war room's six: the
+// browser is served both as the pack gave them.
+func TestTheServedManifestKeepsASkinAndPlaces(t *testing.T) {
+	f := newFixture(t)
+	const skin = `{"scheme": "dark", "font": "serif",
+    "colors": {"bg": "#0d0e1c", "surface": "#15142b", "text": "#EFE6D0", "accent": "#d9b86c80", "border": "#abc"}}`
+	const places = `{
+    "work": {"en": "Study", "zh-TW": "書房"}, "meeting": {"en": "Council", "zh-TW": "議事廳"},
+    "entrance": {"en": "Gate", "zh-TW": "城門"}, "lounge": {"en": "Hearth", "zh-TW": "爐邊"},
+    "away": {"en": "Wilds"}, "runners": {"en": "Crystal tower", "zh-TW": "水晶塔"}}`
+	manifest := strings.Replace(manifestFor, `"schema": 1,`, `"schema": 1, "skin": `+skin+`, "places": `+places+`,`, 1)
+	archive := packZip(t, "magic", map[string][]byte{"theme.json": []byte(strings.Replace(manifest, `"ID"`, `"magic"`, 1))})
+	if rec := f.upload(t, "alice", archive); rec.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", rec.Code, rec.Body)
+	}
+	rec := f.call(t, "bob", http.MethodGet, "/api/themes/magic", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manifest = %d %s", rec.Code, rec.Body)
+	}
+	var served map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	for key, given := range map[string]string{"skin": skin, "places": places} {
+		var want any
+		if err := json.Unmarshal([]byte(given), &want); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(served[key], want) {
+			t.Errorf("%s = %v, want %v", key, served[key], want)
+		}
+	}
+	if served["id"] != "magic" || served["rooms"] == nil || served["characters"] == nil {
+		t.Fatalf("the rest of the manifest = %s", rec.Body)
+	}
+}
+
+// A pack from before either field has neither key, not an empty one: the
+// browser tells "none" by the key's absence.
+func TestTheServedManifestOfAPlainPackHasNoSkinAndNoPlaces(t *testing.T) {
+	f := newFixture(t)
+	f.mustUpload(t, "alice", "magic")
+	rec := f.call(t, "bob", http.MethodGet, "/api/themes/magic", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manifest = %d %s", rec.Code, rec.Body)
+	}
+	var served map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"skin", "places"} {
+		if value, has := served[key]; has {
+			t.Errorf("%s = %v", key, value)
+		}
+	}
+}
+
+// What a skin's colour says goes into the page's CSS, so an upload that says
+// more than a colour is refused, and so is a place the war room does not have.
+func TestAnUploadWithASpoiledSkinOrPlaceIsRefused(t *testing.T) {
+	f := newFixture(t)
+	for name, field := range map[string]string{
+		"a second declaration": `"skin": {"scheme": "dark", "colors": {"bg": "#fff;background:url(x)"}}`,
+		"a variable":           `"skin": {"scheme": "dark", "colors": {"bg": "var(--x)"}}`,
+		"a named colour":       `"skin": {"scheme": "dark", "colors": {"bg": "red"}}`,
+		"unknown colour":       `"skin": {"scheme": "dark", "colors": {"shadow": "#000"}}`,
+		"a scheme of its own":  `"skin": {"scheme": "sepia"}`,
+		"a font of its own":    `"skin": {"scheme": "dark", "font": "cursive"}`,
+		"unknown place":        `"places": {"attic": {"en": "Attic"}}`,
+		"no English name":      `"places": {"lounge": {"zh-TW": "爐邊"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifest := strings.Replace(manifestFor, `"schema": 1,`, `"schema": 1, `+field+`,`, 1)
+			rec := f.upload(t, "alice", packZip(t, "magic", map[string][]byte{"theme.json": []byte(strings.Replace(manifest, `"ID"`, `"magic"`, 1))}))
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "error") {
+				t.Fatalf("upload = %d %s", rec.Code, rec.Body)
+			}
+			if got := f.call(t, "alice", http.MethodGet, "/api/themes/magic", nil, nil); got.Code != http.StatusNotFound {
+				t.Fatalf("the refused pack is served: %d %s", got.Code, got.Body)
+			}
+		})
+	}
+	if len(f.changed) != 0 {
+		t.Fatalf("a refusal told the browsers: %v", f.changed)
 	}
 }
 

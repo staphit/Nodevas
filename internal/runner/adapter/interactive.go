@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -37,8 +36,11 @@ const TaskFileName = "task.md"
 
 // InteractivePrompt is what an interactive agent is told first: the runner's
 // preamble, then the task. Unlike the headless preamble, someone may be
-// watching and answering.
+// watching and answering. A global agent's job gets GlobalInteractivePrompt.
 func InteractivePrompt(job runnerwire.Job, branch string) string {
+	if job.Global {
+		return GlobalInteractivePrompt(job, branch)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are running interactively for Nodevas node %s", job.NodeID)
 	if job.NodeTitle != "" {
@@ -119,8 +121,7 @@ func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 		// As headless (Command): the worktree's settings are not trusted.
 		args = append(args, "--setting-sources", "user", "--disallowedTools", ClaudeReadOnlyDeny)
 	}
-	args = append(args, "--allowedTools", NodevasMCPTools)
-	args = append(args, env.AllowedTools...)
+	args = append(args, claudeAllowedTools(env, false)...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Env = jobEnv(job, terminalEnv...)
@@ -132,10 +133,16 @@ func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	return cmd, nil
 }
 
-// writeMCPConfig writes Claude Code's --mcp-config file into the temp dir.
+// writeMCPConfig writes Claude Code's --mcp-config file into the temp dir:
+// the nodevas server, or no server at all for a run with no board, which
+// --strict-mcp-config then keeps to none.
 func writeMCPConfig(env RunEnv) (string, error) {
+	servers := map[string]MCPServer{"nodevas": env.MCP}
+	if env.NoBoard {
+		servers = map[string]MCPServer{}
+	}
 	config, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]MCPServer{"nodevas": env.MCP},
+		"mcpServers": servers,
 	})
 	if err != nil {
 		return "", err
@@ -176,13 +183,7 @@ func (Codex) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, erro
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)
 	}
-	args = append(args,
-		"-c", "mcp_servers.nodevas.command="+tomlString(env.MCP.Command),
-		"-c", "mcp_servers.nodevas.args="+tomlArray(env.MCP.Args),
-		"-c", "mcp_servers.nodevas.default_tools_approval_mode='approve'",
-		"-c", "mcp_servers.nodevas.tool_timeout_sec="+strconv.Itoa(codexToolTimeoutSec),
-		prompt,
-	)
+	args = append(append(args, codexMCPArgs(env)...), prompt)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Env = jobEnv(job, terminalEnv...)
@@ -218,7 +219,7 @@ func (Gemini) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	}
 	args := []string{
 		"--approval-mode", mode,
-		"--allowed-mcp-server-names", "nodevas",
+		"--allowed-mcp-server-names", geminiAllowedServer(env),
 	}
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)

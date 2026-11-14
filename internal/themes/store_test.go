@@ -497,12 +497,13 @@ func TestOpenStaysInsideThePack(t *testing.T) {
 func TestContentTypeComesFromTheExtension(t *testing.T) {
 	for name, want := range map[string]string{
 		"a.webp": "image/webp", "a/b.png": "image/png", "a.jpg": "image/jpeg", "a.jpeg": "image/jpeg",
+		"a.mp4": "video/mp4", "a/b.webm": "video/webm",
 	} {
 		if got, ok := ContentType(name); !ok || got != want {
 			t.Errorf("%s = %q, %v", name, got, ok)
 		}
 	}
-	for _, name := range []string{"a.svg", "a.html", "a.PNG", "a", "theme.json", "a.png.exe"} {
+	for _, name := range []string{"a.svg", "a.html", "a.PNG", "a", "theme.json", "a.png.exe", "a.MP4", "a.mov", "a.mkv"} {
 		if got, ok := ContentType(name); ok {
 			t.Errorf("%s = %q", name, got)
 		}

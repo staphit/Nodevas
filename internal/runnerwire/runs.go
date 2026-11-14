@@ -141,7 +141,49 @@ type Job struct {
 	TestFiles  []string         `json:"testFiles,omitempty"`
 	Acceptance []AcceptanceItem `json:"acceptance,omitempty"`
 	Verify     *VerifySpec      `json:"verify,omitempty"`
+
+	// Global agents (global.go): a run for no project and no node (Project
+	// and NodeID ""), with no board. Slug names its branch
+	// (agent/<slug>-<run8>); NoPR keeps its work on the runner instead of
+	// pushing and opening a pull request. Only offered to a runner with
+	// CapGlobalRuns and CapGlobalRunsOn.
+	Global bool   `json:"global,omitempty"`
+	Slug   string `json:"slug,omitempty"`
+	NoPR   bool   `json:"noPR,omitempty"`
+
+	// Origin is what started the run (Origin*); "" (unknown, an older hub)
+	// counts as automatic. A single-user hub's built-in runner starts a
+	// person's run without asking; on a team hub it is shown only and never
+	// relaxes a guard (a compromised hub could lie).
+	Origin string `json:"origin,omitempty"`
 }
+
+// Job origins (Job.Origin), set by the hub at run creation.
+const (
+	// OriginPerson: someone clicked (dispatch, a global agent, retry now).
+	OriginPerson = "person"
+	// OriginAutopilot: Autopilot dispatched it.
+	OriginAutopilot = "autopilot"
+	// OriginPipeline: a review or revise round, or a fallback.
+	OriginPipeline = "pipeline"
+	// OriginHandoff: a continuation after a usage limit.
+	OriginHandoff = "handoff"
+)
+
+// Decline codes (Envelope.Code with TypeDecline, Run.DeclineCode), beside
+// the English reason; "" from an older runner.
+const (
+	DeclineInApp          = "declined_in_app"
+	DeclineOnRunner       = "declined_on_runner"
+	DeclineTimedOut       = "timed_out"
+	DeclineNoOneThere     = "no_one_there"
+	DeclineRepoNotAdded   = "repo_not_added"
+	DeclineAgentMissing   = "agent_missing"
+	DeclineInteractiveOff = "interactive_off"
+	DeclineGlobalOff      = "global_off"
+	DeclineBusy           = "busy"
+	DeclineOther          = "other"
+)
 
 // Accept reports an accepted job: the worktree and branch it runs in.
 type Accept struct {
@@ -242,6 +284,13 @@ type Run struct {
 	PRHeadSHA string `json:"prHeadSha,omitempty"`
 	// Merge is the latest merge request for the run, if any (W4).
 	Merge *MergeRequest `json:"merge,omitempty"`
+	// Agent workspace (workspace.go): what became of the run's worktree and
+	// branch on its runner ("", RunWorkspaceMergedLocal or
+	// RunWorkspaceDiscarded; not a status), the base's head after a local
+	// merge, and the latest workspace action, like Merge.
+	Workspace       string              `json:"workspace,omitempty"`
+	WorkspaceCommit string              `json:"workspaceCommit,omitempty"`
+	WorkspaceAction *RunWorkspaceAction `json:"workspaceAction,omitempty"`
 	// W5: job kind, failure kind, review verdict, the run this one falls back
 	// from, and the pipeline it belongs to.
 	Kind        string `json:"kind,omitempty"`
@@ -275,11 +324,23 @@ type Run struct {
 	CostEstimated   bool    `json:"costEstimated"`
 	NodeType        string  `json:"nodeType,omitempty"`
 	AcceptanceCount int     `json:"acceptanceCount"`
-	CreatedBy       string  `json:"createdBy"`
-	CreatedByName   string  `json:"createdByName"`
-	CreatedAt       string  `json:"createdAt"`
-	StartedAt       string  `json:"startedAt,omitempty"`
-	FinishedAt      string  `json:"finishedAt,omitempty"`
+	// Global agents (global.go): a run for no project and no node, its
+	// title (the task's first line; global runs only) and whether no pull
+	// request was asked for.
+	Global bool   `json:"global,omitempty"`
+	Title  string `json:"title,omitempty"`
+	NoPR   bool   `json:"noPR,omitempty"`
+	// Offer asks (offerask.go): what started the run (Origin*), the runner's
+	// pending ask while the run is offered, and why it was declined
+	// (Decline*).
+	Origin        string    `json:"origin,omitempty"`
+	Ask           *OfferAsk `json:"ask,omitempty"`
+	DeclineCode   string    `json:"declineCode,omitempty"`
+	CreatedBy     string    `json:"createdBy"`
+	CreatedByName string    `json:"createdByName"`
+	CreatedAt     string    `json:"createdAt"`
+	StartedAt     string    `json:"startedAt,omitempty"`
+	FinishedAt    string    `json:"finishedAt,omitempty"`
 }
 
 // CreateRunRequest is the body of POST /api/runs (project from ?project=).

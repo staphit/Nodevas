@@ -12,18 +12,23 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
   - 頂端的 **全部暫停**：暫停你啟動的自動推進，並取消還沒開始的 run（也可以一併取消執行中的）。之後按 **全部恢復**，這些自動推進就從停下的地方繼續；
   - **等你處理**：提問與權限提示、暫留訊息、審查、要合併或修正的 PR、runner 還沒接受的 run、用量上限與每日預算；
   - 目標的自動推進：在目標節點面板頂端按 **自動推進**，就會在這裡開啟；
-  - 戰情室：把整個工作區畫成一棟像素風大樓，有這個專案的辦公室、其他專案的辦公室、閒置 agent 共用的休息室，以及每個 runner 一座機櫃的機房。每個 agent 都是按鈕：它的選單可以開啟它的 run、改動、節點或目標，暫停或恢復它的自動推進，或取消這次 run；
+  - Agent 動態：把整個工作區畫成一棟像素風大樓，有這個專案的辦公室、其他專案的辦公室、閒置 agent 共用的休息室，以及每個 runner 一座機櫃的機房。每個 agent 都是按鈕：它的選單可以開啟它的 run、改動、節點或目標，暫停或恢復它的自動推進，或取消這次 run；
   - 過去一小時誰做了什麼；
-  - 側欄有今天的花費、runner，以及可以直接發訊息的 Agent 對話。
+  - 側欄有今天的花費、runner，以及可以直接發訊息的 Agent 對話；
+  - **全域 agent**：與這個專案並列的分頁，列出在你 runner 的 repo 裡工作、不屬於任何專案的 agent；見[全域 agent](#全域-agent)。
 
   agent 提問、權限提示、用量達上限、每日預算用完時，瀏覽器也會通知你。
 - **安全預設**：
-  - run 需要你在 runner 的終端機上同意。遠端派工需要 step-up passcode，加上你在 runner 上設定的 auto-accept 白名單。
+  - **只在一台電腦上自己用（單人版）**：你在 app 裡開始的 run 會直接在這台電腦上開始，不需要終端機：按下按鈕就是同意。只保留一道防線：自動開始的 run（自動推進、審查或修改回合、後備模型，或用量上限後接續）若用的是你設定為 **在這台電腦上執行任何指令** 的 agent，會在 app 裡等你確認，除非你對那個 agent 勾了 **之後不用再問**。agent 會寫看板節點，自動推進又會把節點變成提示，所以被提示注入的 agent 可能埋下一個工作，讓有完整權限的 agent 不經詢問就執行。出廠設定下沒有任何 agent 能執行任何指令。**每個工作開始前都先問我** 會在每個 run 開始前詢問。只有 `serve` 為自己啟動、直接從這台電腦連線的 runner 會這樣處理。
+  - **共用的電腦**：單人版信任所有能使用這台電腦的人。同一台電腦上的其他使用者帳號可以透過 loopback 開啟 app，而 run 會直接開始，所以它能以你的身分啟動 agent。請只在你一個人使用的電腦上用單人版；共用的電腦請改用有帳號的團隊 hub。那道防線也不是沙箱：這台電腦上任何沒有被沙箱限制的程式（包括可以執行任何指令的 agent）都能以你的身分回答它。
+  - **團隊 hub**：run 需要你在 runner 所在的電腦上、在它的終端機同意；hub 只顯示「等待在某台電腦上核准」與原因。hub 永遠不會核准 run，所以被入侵的 hub 無法在那裡啟動 run；hub 所說的「誰開始了這個 run」只會顯示，從不採信。遠端派工需要 step-up passcode，加上你在 runner 上設定的 auto-accept 白名單。
   - 遠端 merge 預設關閉，要自己打開。
   - 審查、拆解與評審（目標 QA 與檢查清單檢查）一律唯讀，而且不載入 repo 自帶的 agent 設定；Claude Code 在這些 run 裡也不能用 WebFetch、WebSearch 或 Monitor。
   - run 新增或修改的 agent 設定（`.claude/settings.json`、`.mcp.json`、`.codex/`、`.gemini/`、`opencode.json` 等）不會進它的 commit，worktree 會保留下來，讓你自己決定要不要 commit。`nodevas runner status` 會列出保留的 worktree；`nodevas runner prune-kept [--dry-run]` 移除只剩被擋下設定的那些（分支保留）；不會自動移除。讀寫這份清單時會加鎖（runner 資料夾裡的 `kept-worktrees.lock`），所以 `prune-kept` 或共用同一個資料夾的另一個 runner，不會弄丟 run 剛保留的 worktree。
   - headless run 的權限提示一律拒絕，除非你[轉給 Nodevas](#權限提示預設關閉)；自動接受的 run 只有在打開 `allow-shell` 時才會轉送。
   - 專案總管的 **檔案** 分頁只讓你本人唯讀瀏覽你 runner 上的 repo，並隱藏看起來像祕密的檔案（`.env`、金鑰、`.ssh`、憑證）。執行 `nodevas runner set repoBrowse off` 並重啟 runner 即可關閉。
+  - run 的 **工作區**（它的 worktree、分支與變更）只有你本人能瀏覽、在本機合併或捨棄，管理員與 agent 都不行；見 [Agent 工作區](#agent-工作區)。執行 `nodevas runner set workspaceActions false` 並重啟 runner，即可關閉合併與捨棄。
+  - **全域 agent** 只能在你自己的 runner、已登記的 repo 裡啟動，沒有看板；除非你要求開 PR，分支都留在 runner 上。見[全域 agent](#全域-agent)。執行 `nodevas runner set globalRuns off` 並重啟 runner，即可拒絕全域 agent。
   - hub 放在 Cloudflare Access 後面，runner 用 service token 連線。
   - 可以用驗證器 App 開啟兩步驟驗證（**設定 → 帳號**）。開啟後登入還要輸入 App 的驗證碼，step-up 也改問 App，不再寄 email。
 
@@ -34,13 +39,13 @@ app 裡與 agent 有關的部分（runner、run、自動推進、Agent 對話與
 1. 部署 hub：見 [Getting started: Team server](./getting-started.md#team-server)。
 2. 在 hub 上打開 **設定 → Agent 與 Runner**，打開 **讓 agent 在這裡工作**，再按 **連結新裝置**，複製一次性連結。在你的電腦上執行 [`scripts/install.sh --hub <網址> --link`](./install.md#set-up-a-new-pc-with-a-device-link)，帶入允許 run 使用的 repo，出現提示時貼上連結。連結只能用一次、十分鐘內有效；若管理員存過 hub 的 Access service token，連結也會一併帶上，不必再從 Cloudflare 手動複製。
 
-只在一台電腦上自己用時，一個指令就能同時啟動兩者：`nodevas serve --project ./workspace [--repo ~/code/myapp]`（只要 hub 時加 `--no-runner`）。runner 仍是獨立的程序、用自己的 token 連線，每個 run 仍要你在執行 `serve` 的終端機接受。見 [Hub and runner on one machine](./install.md#hub-and-runner-on-one-machine)。
+只在一台電腦上自己用時，一個指令就能同時啟動兩者：`nodevas serve --project ./workspace`（只要 hub 時加 `--no-runner`），或使用桌面 App。runner 內建在 app 裡：用 **＋ 新增 repo**（或 **設定 → Agent → 這台電腦**，也在那裡選每個 agent 可以做的事）新增 repo，你開始的 run 會直接開始，完全不需要終端機。見 [Hub and runner on one machine](./install.md#hub-and-runner-on-one-machine)。
 
 ## 回覆你的 agent
 
 agent 可以停下來透過 Nodevas 問你（`ask_user`）：請你核准（**核准** 或 **拒絕**，可附備註）、問一個要你用文字回答的問題，或請你從 2 到 8 個選項中選一個。問題與選擇都可以 **不回答**。agent 最多等 10 分鐘。
 
-可以在 Agent 對話（Ctrl+Shift+A，或工作站側欄的卡片）、工作站的 **等你處理**，或戰情室裡的那個 agent 上回覆；瀏覽器也會通知你。run 的時間軸（節點面板 → **活動** → 該 run）會列出它的每個提問與結果；run 結束時仍未回覆的提問會失效。只有發問 agent 的主人或管理員可以回覆。
+可以在 Agent 對話（Ctrl+Shift+A，或工作站側欄的卡片）、工作站的 **等你處理**，或 Agent 動態裡的那個 agent 上回覆；瀏覽器也會通知你。run 的時間軸（節點面板 → **活動** → 該 run）會列出它的每個提問與結果；run 結束時仍未回覆的提問會失效。只有發問 agent 的主人或管理員可以回覆。
 
 ### 權限提示（預設關閉）
 
@@ -73,6 +78,37 @@ headless 實作 run 若因 agent 達到用量上限或 rate limit 而停下，ru
 - runner 只會從自己建立、屬於同一個 repository 與節點、且仍停在它記錄的 commit 的交接分支接續。hub 可以指名這樣的分支，但不能指定其他任何 ref。較舊的 runner 在還沒檢查節點時記錄、沒有節點的交接分支不會被接續，該工作會被拒絕（「has no node on record」）。runner 每建立一個交接分支，就會刪除超過 30 天或超出最新 200 個的交接分支，前提是它們仍停在記錄的 commit。
 
 登入無法使用的模型或不存在的 CLI，會在 agent 第一輪之前就失敗；這時沒有成果可保留，等待也沒用，所以這類失敗只沿著鏈往下換模型。
+
+## Agent 工作區
+
+每個 run 都有一個 **工作區** 面板：可以從 run 的那一列、工作站的 run 選單，或 Agent 動態裡的人物或座位開啟。它會顯示 agent 與模型、節點、runner、run 的分支與基準分支、run 的狀態，以及 PR 與 CI。分頁有 **檔案**（runner 上這次 run 的 worktree，唯讀、即時）、**變更**（相對基準分支的 diff），以及互動 run 的 **終端機** 或其他 run 的 **紀錄**。
+
+只有 runner 的擁有者看得到檔案、能使用動作。管理員也不例外（磁碟是擁有者的），agent 一律不行，而且 runner 會再確認請求來自它的擁有者。檔案的規則與專案總管相同：隱藏祕密與 `.git`，不會穿過任何通往 worktree 外面的連結（symlink 或 Windows junction）讀取，也不會執行 repo 的 git filter。`nodevas runner set repoBrowse off` 也會關閉檔案分頁。
+
+- **合併**：有開啟中 PR 的 run，照舊在 PR 合併。沒有 PR 的 run（autoPR 關閉、推送失敗、離線）可以由你的 runner **在本機合併到基準分支**，不會推送。runner 只合併這次 run 自己的分支（`agent/<節點>-<run>`），只在你看過的那個 commit，而且絕不碰有未提交變更的工作目錄：
+  - 基準分支簽出在登記的 repo 裡，追蹤中的檔案沒有變更、也沒有進行到一半的 merge、rebase、cherry-pick、revert 或 bisect：在那裡以 `--no-ff` 合併（未追蹤與被忽略的檔案沒關係，合併不會覆寫它們，所以你自己的 `.env` 或本機設定不會被換掉），而且只在合併開始時那個工作目錄仍在基準分支上才合併；
+  - 基準分支沒有在任何地方簽出：在 runner 資料夾下的暫時 worktree 合併，之後移除；repo 設定（在那裡讀到的）指定的所有 filter 都會清空，也不會進入 submodule；若合併要用 repo 自己設定的程式簽署（或驗證簽章），就拒絕；
+  - 基準分支簽出在其他 worktree、run 的 worktree 有未提交的檔案、repo 設定了 merge driver，或還有其他未結束的 run（或這次 run 的流程）在用這個分支：拒絕並說明原因；
+  - 有衝突：中止合併，一切維持原狀。
+
+  合併後會移除這次 run 的 worktree 與分支。其他種類的 run（審查、修訂）不會從這裡合併。
+- **捨棄**（run 結束後）：先關閉開啟中的 PR 並刪除 GitHub 上的 PR 分支（`gh pr close --delete-branch`），再移除 run 的 worktree（包含未提交的檔案）、刪除本機分支，並從保留的 worktree 清單中移除。`gh` 關不掉 PR 時，什麼都不會移除。修訂或審查 run 的 PR 屬於實作 run，所以捨棄它們不會動到那個 PR 與它的分支。交接分支會保留。run 之後才加到分支（或 run 的 worktree）上、其他分支都沒有的提交，會讓捨棄在移除任何東西之前就停下。還有其他 run（同一個 PR 的修訂或審查）或這次 run 的流程在用這個分支時，捨棄要等它們結束。重複捨棄，或 worktree 已經不在的 run，都沒問題。從沒有 worktree 的 run（被拒絕、開始前就取消）只在 hub 上捨棄。確認視窗只列出 runner 真的會移除的東西，數不出未提交檔案時也會直說。
+
+兩個動作都會先請你確認。run 上會顯示已合併或已捨棄，但它的狀態不變，所以歷史、評分卡與自動推進都不受影響。runner 離線時，請求最多等 15 分鐘；同一個請求送兩次，runner 只會處理一次。每個請求、回覆與逾時都記在稽核紀錄裡（`run.workspace.*`）。
+
+## 全域 agent
+
+工作站的 **全域 agent** 分頁可以啟動不屬於任何專案、也沒有看板的 agent：在你 runner 的某個 repo 裡做一件事，適合不是節點的工作（整理 repo、試個想法、修個腳本）。寫下任務即可，第一行會成為它的標題。
+
+- **誰、在哪裡**：只有你本人，只能用你自己的 runner（管理員也不例外），而且只能在那台 runner 已加入的 repo 裡；runner 還沒有 repo 時，表單會列出要在那台電腦上執行的 `nodevas runner repo add <路徑>`。hub 從不指定資料夾，agent 也不能啟動全域 agent。分頁列出你啟動的、或在你 runner 上執行的全域 agent，以及你的 runner。
+- **沒有看板**：runner 不會給全域 agent `nodevas` MCP server，所以它不認領任務、不設定狀態，也無法問你任何事，權限提示也一律不轉送。在背景執行時它自己做決定，並在摘要裡說明它的假設；想和它對話請選 **互動式**，在它的終端機裡談。你 runner 本身的限制（權限模式、沙箱、自動接受規則）照常適用。Claude Code 與 Gemini CLI 完全不載入 MCP server；OpenCode 會關掉所有 server，包括你自己的 `nodevas` 設定；Codex 與 agy 仍會載入你自己設定檔（`config.toml`、`~/.gemini/config`）列出的 server，但其中的 `nodevas mcp` 在全域 agent 的 run 裡會拒絕服務：runner 在 agent 的環境變數放 `NODEVAS_NO_BOARD`，並在 agent 執行期間於它工作樹的 git 資料夾放一個 `nodevas-no-board` 檔（給 Codex 用，它在工作樹裡以清空的環境變數啟動 MCP server）。它在讀取參數、連上 hub 之前就停下，所以不論是 run 經由 runner 的通道，還是 loopback hub 對本機的信任，都不會讓它碰到看板。不涵蓋：你 `PATH` 上比 runner 舊的 `nodevas`，以及你在會清空環境變數的 CLI 裡、設定成在工作樹以外啟動的 MCP 項目。沒有指定專案或節點、又不是全域 agent 的 run，runner 一律拒絕。
+- **分支與 PR**：分支是 `agent/<slug>-<run>`，slug 取自標題（小寫英文字母、數字與單一連字號，最多 40 個字元；標題裡沒有這些字元時用 `task`），也可以自己取。預設不開 PR：commit 留在那個分支、runner 上它的 worktree 裡，可以從它的[工作區](#agent-工作區)**在本機合併**或**捨棄**。勾選 **完成後開 PR**，runner 就會像節點的 run 一樣推送並開 PR，前提是它的 `autoPR` 是開著的。commit 與 PR 會註明 run（`Nodevas-Run`），但沒有節點。
+- **全域 agent 不支援**：審查管線、拆解、角色與階段、路由規則、fallback 鏈、等待用量重置與交接、自動推進。全域 agent 因用量上限停下就算失敗，已做的部分會 commit 在它的分支上。
+- **runner 有多忙**：分頁會逐台列出 runner 正在執行與排隊中的 run（包含所有專案與全域的），以及今天的 run 數、token 與花費。**同時執行** 可以從 hub 設定 runner 的 `maxConcurrent`，上限是它的 `maxConcurrentCeiling`（預設 8；`maxConcurrent` 更大時取它）。runner 會立即套用，並寫進它的 `runner.json`，只改這一個設定，而且是重新讀檔後再寫，所以 runner 啟動後用 `nodevas runner set` 改過的設定都會保留；調低不會停掉任何 run，只是先不接新的。
+
+在 runner 上：`nodevas runner set globalRuns off` 拒絕全域 agent，`nodevas runner set remoteSettings off` 讓 `maxConcurrent` 只能在那台電腦上改，`nodevas runner set maxConcurrentCeiling <1-16>` 設定 hub 最多能要求多少。這些都要重啟 runner 才生效。只有 runner 的擁有者能從 hub 變更它的設定，runner 也會再確認一次。
+
+全域 agent 的更新只會送給你和它 runner 的擁有者，不會送到任何專案。啟動全域 agent 會以 `run.global.start` 記進稽核紀錄（不含任務內容），從 **同時執行** 做的變更則記為 `runner.settings.update`。
 
 ## Agent 角色與工作流程階段
 

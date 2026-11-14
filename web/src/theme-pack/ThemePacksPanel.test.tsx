@@ -96,7 +96,7 @@ describe("the theme packs part of Settings", () => {
     serve();
     render(<ThemePacksPanel />);
     await listed("Magic world");
-    expect(screen.getByText(/whoever imported it/)).toHaveTextContent(/images only, no code runs/i);
+    expect(screen.getByText(/whoever imported it/)).toHaveTextContent(/images and short silent clips only, no code runs/i);
   });
 
   it("says when there are none", async () => {

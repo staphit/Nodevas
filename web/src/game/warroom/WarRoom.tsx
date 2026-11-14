@@ -2,7 +2,8 @@
 // project's office first and in full (its work area, its meeting room, its
 // entrance), the other projects' offices as a glance through their doors,
 // then the ground floor: a lounge every project's idle agents share and a
-// server room with a rack per runner. Every agent, item, office and rack is
+// server room with a rack per runner. The viewer's global agents (outside any
+// project) have a full office of their own under the current one. Every agent, item, office and rack is
 // a real button; an agent's menu holds what can be done about it (a run's own
 // controls, through station/runMenuItems). Station mounts it lazily
 // (StationWarRoom), so its code and styles only reach a browser that opens
@@ -12,6 +13,10 @@
 // by CSS tokens, so a theme switch costs nothing; animation is CSS steps()
 // over a few frames, off under reduced motion and in a background tab. A
 // heartbeat only redraws a desk whose agent changed (PixelDesk is memoised).
+//
+// With a theme pack on, the same building is told as a story instead
+// (StoryRoom): places to go to, the pack's pictures of who is there, and a
+// dialogue box. The text list and the announcements are the same either way.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
@@ -22,15 +27,18 @@ import { useWorkstationVisible } from "../../runners/workstation";
 import type { ControlRow } from "../../station/control";
 import { setProjectMode } from "../../station/projectMode";
 import { useApp } from "../../store";
-import { agentWho, energyLabel, itemLabel, type LabelOf, type TitleOf } from "../labels";
+import { agentWho, itemLabel, type LabelOf, type TitleOf } from "../labels";
 import { usePageHidden, useReducedMotion } from "../useMotion";
-import type { Actor, Building } from "../world";
+import { GLOBAL_OFFICE, type Actor, type Building } from "../world";
 import { artPixel, useArtPixel } from "./artPixel";
 import { BuildingText } from "./BuildingText";
+import { EnergyHud } from "./EnergyHud";
 import { Lounge } from "./Lounge";
 import { OfficeRoom } from "./OfficeRoom";
 import { OtherOffices } from "./OtherOffices";
 import { ServerRoom } from "./ServerRoom";
+import { StoryRoom } from "./StoryRoom";
+import { ThemeCastContext, useActiveThemeCast, useThemeCast } from "./themeCastContext";
 
 export { artPixel };
 
@@ -41,14 +49,17 @@ export interface WarRoomProps {
   rowOf: (runId: string) => ControlRow | undefined;
 }
 
-/** Project name → its label, from every office in the building. */
+/** Project name → its label, from every office in the building; the
+ * global agents' office by its own name. */
 function useLabelOf(building: Building): LabelOf {
+  const { t } = useI18n();
   return useMemo(() => {
     const labels = new Map<string, string>();
     if (building.current) labels.set(building.current.project, building.current.label);
     for (const office of [...building.others, ...building.doorSigns]) labels.set(office.project, office.label);
+    labels.set(GLOBAL_OFFICE, t("globalAgents.office"));
     return (project: string) => labels.get(project) || project;
-  }, [building.current, building.others, building.doorSigns]);
+  }, [building.current, building.others, building.doorSigns, t]);
 }
 
 /** The building as Station shows it: still under reduced motion, paused in
@@ -59,6 +70,7 @@ export default function WarRoomStage(props: WarRoomProps) {
   const workstation = useWorkstationVisible();
   const announcement = useOfficeAnnouncements(props.building, workstation);
   const px = useArtPixel();
+  const cast = useActiveThemeCast(reduced || hidden);
   return (
     <div
       className="px-office"
@@ -67,10 +79,10 @@ export default function WarRoomStage(props: WarRoomProps) {
       style={{ ["--px" as string]: `${px}px` } as CSSProperties}
     >
       {workstation ? (
-        <>
+        <ThemeCastContext.Provider value={cast}>
           <WarRoom {...props} />
           <BuildingText building={props.building} />
-        </>
+        </ThemeCastContext.Provider>
       ) : (
         <WarRoomOff />
       )}
@@ -143,8 +155,9 @@ export function WarRoom({ building, titleOf, rowOf }: WarRoomProps) {
     [building.actors],
   );
   const labelOf = useLabelOf(building);
+  const cast = useThemeCast();
 
-  if (!building.current) {
+  if (!building.current && !building.global) {
     return (
       <div className="px-empty">
         <p>{t("game.warroom.noRooms")}</p>
@@ -153,32 +166,29 @@ export function WarRoom({ building, titleOf, rowOf }: WarRoomProps) {
     );
   }
 
-  const { energy } = building;
+  if (cast) {
+    return (
+      <StoryRoom
+        building={building}
+        office={building.current}
+        actorsById={actorsById}
+        titleOf={titleOf}
+        rowOf={rowOf}
+        labelOf={labelOf}
+        cast={cast}
+      />
+    );
+  }
+
   return (
     <div className="px-building">
-      {energy && (
-        <div className="px-hud">
-          <span>{t("game.energy.today")}</span>
-          {energy.cap ? (
-            <span
-              className="px-meter is-wide"
-              role="meter"
-              aria-label={t("game.energy.today")}
-              aria-valuemin={0}
-              aria-valuemax={energy.cap}
-              aria-valuenow={Math.min(energy.used, energy.cap)}
-              aria-valuetext={energyLabel(t, energy.used, energy.cap)}
-            >
-              <span
-                className={energy.used >= energy.cap ? "is-full" : undefined}
-                style={{ width: `${Math.min(100, (energy.used / energy.cap) * 100)}%` }}
-              />
-            </span>
-          ) : null}
-          <span className="px-hud-value">{energyLabel(t, energy.used, energy.cap)}</span>
-        </div>
+      {building.energy && <EnergyHud energy={building.energy} />}
+      {building.current && (
+        <OfficeRoom office={building.current} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} />
       )}
-      <OfficeRoom office={building.current} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} />
+      {building.global && (
+        <OfficeRoom office={building.global} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} />
+      )}
       <OtherOffices building={building} labelOf={labelOf} />
       <div className="px-ground">
         <Lounge building={building} actorsById={actorsById} titleOf={titleOf} rowOf={rowOf} labelOf={labelOf} />

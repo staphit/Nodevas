@@ -6,6 +6,7 @@ import { useMemo } from "react";
 
 import { canAnswerAsk, useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
+import { useLocalRunner } from "../runners/edition";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { useStation } from "./stationStore";
@@ -19,6 +20,7 @@ export function useWaitingItems(): WaitingItem[] {
   const viewer = useAgents((s) => s.viewer);
   const reviews = useAutopilot((s) => s.waiting);
   const exceeded = useBudget((s) => s.status?.exceeded);
+  const builtInRunnerId = useLocalRunner()?.id;
   return useMemo(
     () =>
       waitingOnYou({
@@ -30,7 +32,8 @@ export function useWaitingItems(): WaitingItem[] {
         budgetExceeded: exceeded,
         canAnswer: (ask) => canAnswerAsk(ask, viewer),
         now: Date.now(),
+        builtInRunnerId,
       }),
-    [runs, active, asks, held, reviews, exceeded, viewer],
+    [runs, active, asks, held, reviews, exceeded, viewer, builtInRunnerId],
   );
 }

@@ -81,12 +81,17 @@ func TestOpenCodeServerNames(t *testing.T) {
 			{"type":"document","path":"/home/a/.config/opencode/opencode.json","info":{"mcp":{"servers":{"owners":{"type":"local"}}}}},
 			{"type":"document","path":"/w/opencode.json","info":{"mcp":{"servers":{"repoEvil":{"type":"local"},"nodevas":{"type":"local"}}}}}]`,
 	} {
-		names, err := openCodeServerNames([]byte("\ufeff" + out + "\n"))
+		names, err := openCodeServerNames([]byte("\ufeff"+out+"\n"), false)
 		if err != nil || !slices.Equal(names, []string{"owners", "repoEvil"}) {
 			t.Errorf("%s: %q, %v", name, names, err)
 		}
+		// A run with no board switches the owner's own nodevas off too.
+		names, err = openCodeServerNames([]byte(out), true)
+		if err != nil || !slices.Equal(names, []string{"nodevas", "owners", "repoEvil"}) {
+			t.Errorf("%s with nodevas: %q, %v", name, names, err)
+		}
 	}
-	if _, err := openCodeServerNames([]byte("Error: no service")); err == nil {
+	if _, err := openCodeServerNames([]byte("Error: no service"), false); err == nil {
 		t.Error("not JSON: no error")
 	}
 }

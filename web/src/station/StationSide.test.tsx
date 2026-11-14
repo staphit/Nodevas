@@ -7,6 +7,7 @@ import type { World } from "../game/world";
 import { readPreferences } from "../preferences";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
+import { useWorkspace } from "../runs/workspaceStore";
 import { useApp } from "../store";
 import { useUsage } from "../usage/usageStore";
 import { StationSide } from "./StationSide";
@@ -97,6 +98,36 @@ describe("StationSide", () => {
     const roster = screen.getByRole("list", { name: "Agents" });
     expect(within(roster).getByRole("button", { name: /Claude opus/ })).toBeInTheDocument();
     expect(within(roster).getByText("Work area · mac-mini")).toBeInTheDocument();
+  });
+
+  it("counts a global agent in the roster, and opens its workspace (it has no node)", () => {
+    const openWorkspace = vi.fn();
+    useWorkspace.setState({ openWorkspace });
+    const withGlobal = {
+      building: {
+        actors: [
+          ...world.building.actors,
+          {
+            id: "run:g1",
+            agent: "codex",
+            model: "gpt-5",
+            pose: "working",
+            area: "work",
+            runnerName: "mac-mini",
+            runId: "g1",
+            nodeTitle: "Bump the deps",
+            global: true,
+          },
+        ],
+      },
+    } as unknown as World;
+    render(<StationSide world={withGlobal} />);
+    fireEvent.click(screen.getByRole("button", { name: /2 working · 2 in all/ }));
+    const roster = screen.getByRole("list", { name: "Agents" });
+    const line = within(roster).getByRole("button", { name: /Codex gpt-5.*Bump the deps/ });
+    expect(line).toBeEnabled();
+    fireEvent.click(line);
+    expect(openWorkspace).toHaveBeenCalledWith("g1", undefined);
   });
 
   it("lists the runners, and manages them in Settings", () => {

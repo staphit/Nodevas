@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { PREFERENCE_SCHEMA } from "./schema";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ACCOUNT_PREFERENCE_KEYS, PREFERENCE_KEYS, PREFERENCE_SCHEMA } from "./schema";
 import {
+  applyStoredPreferences,
   configurePreferenceStorage,
   readPreference,
   resetPreferences,
+  setPreferenceWriteHook,
   subscribePreferences,
   writePreference,
 } from "./storage";
@@ -158,5 +160,137 @@ describe("subscriptions", () => {
     unsubscribe();
     writePreference("editorFontSize", 16);
     expect(seen).toEqual(["theme"]);
+  });
+
+  it("hears a change another tab stored", () => {
+    configurePreferenceStorage(null);
+    const seen: string[] = [];
+    const unsubscribe = subscribePreferences((key) => seen.push(key));
+    localStorage.setItem(PREFERENCE_SCHEMA.theme.key, "light");
+    window.dispatchEvent(new StorageEvent("storage", { key: PREFERENCE_SCHEMA.theme.key }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "vised-prefs-pending" }));
+    unsubscribe();
+    expect(seen).toEqual(["theme"]);
+    expect(readPreference("theme")).toBe("light");
+  });
+});
+
+describe("where each preference lives", () => {
+  it("marks every preference account or device", () => {
+    for (const key of PREFERENCE_KEYS) {
+      expect(["account", "device"]).toContain(PREFERENCE_SCHEMA[key].sync);
+    }
+  });
+
+  it("syncs the choices and keeps sizes and the view last open on the device", () => {
+    for (const key of [
+      "theme",
+      "themePack",
+      "storyLayout",
+      "language",
+      "textScale",
+      "editorMode",
+      "timelineOrientation",
+      "stationTab",
+      "copilotDefaultMode",
+      "diffLayout",
+      "tourChaptersDone",
+    ] as const) {
+      expect(ACCOUNT_PREFERENCE_KEYS).toContain(key);
+    }
+    for (const key of [
+      "paneSplit",
+      "drawerWidth",
+      "explorerWidth",
+      "timelineCellWidth",
+      "projectMode",
+      "settingsSection",
+      "explorerCollapsed",
+    ] as const) {
+      expect(ACCOUNT_PREFERENCE_KEYS).not.toContain(key);
+    }
+  });
+
+  // The server takes at most 64 keys per PATCH and 4 KiB per value.
+  it("fits every account choice in one request", () => {
+    expect(ACCOUNT_PREFERENCE_KEYS.length).toBeLessThanOrEqual(64);
+    for (const key of ACCOUNT_PREFERENCE_KEYS) {
+      expect(PREFERENCE_SCHEMA[key].key).toMatch(/^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/);
+    }
+  });
+});
+
+describe("the sync hook", () => {
+  afterEach(() => setPreferenceWriteHook(null));
+
+  it("hears changed account choices only", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-theme": "light" }));
+    const heard: string[] = [];
+    setPreferenceWriteHook((key) => heard.push(key));
+    writePreference("theme", "light");
+    writePreference("theme", "dark");
+    writePreference("paneSplit", 30);
+    writePreference("editorFontSize", 16);
+    expect(heard).toEqual(["vised-theme", "vised-editor-fs"]);
+  });
+
+  it("hears a reset of a stored account choice", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-theme": "light", "vised-pane-split": "30.00" }));
+    const heard: string[] = [];
+    setPreferenceWriteHook((key) => heard.push(key));
+    resetPreferences();
+    expect(heard).toEqual(["vised-theme"]);
+  });
+
+  it("is not told about values taken in from the server", () => {
+    const storage = fakeStorage();
+    configurePreferenceStorage(storage);
+    const heard: string[] = [];
+    const seen: string[] = [];
+    setPreferenceWriteHook((key) => heard.push(key));
+    const unsubscribe = subscribePreferences((key) => seen.push(key));
+    const changed = applyStoredPreferences({
+      "vised-theme": "light",
+      "vised-language": "fr",
+      "vised-unknown": "1",
+      "vised-editor-fs": null,
+    });
+    unsubscribe();
+    expect(changed).toEqual(["theme"]);
+    expect(seen).toEqual(["theme"]);
+    expect(heard).toEqual([]);
+    expect([...storage.map.keys()]).toEqual(["vised-theme"]);
+  });
+});
+
+describe("keys from before the schema", () => {
+  it("moves each under its schema key once, then forgets it", () => {
+    const storage = fakeStorage({
+      "nodevas.copilot.prefs": JSON.stringify({ speakReplies: true, defaultMode: "acceptEdits" }),
+      "nodevas.runs.diffLayout": "unified",
+      "nodevas-station-tab": "global",
+      "nodevas-station-network-open": "1",
+    });
+    configurePreferenceStorage(storage);
+    expect(readPreference("copilotSpeakReplies")).toBe(true);
+    expect(readPreference("copilotDefaultMode")).toBe("acceptEdits");
+    expect(readPreference("diffLayout")).toBe("unified");
+    expect(readPreference("stationTab")).toBe("global");
+    expect(readPreference("stationNetworkOpen")).toBe(true);
+    expect([...storage.map.keys()].filter((key) => !key.startsWith("vised-"))).toEqual([]);
+  });
+
+  it("keeps a value already stored under the schema key, and skips what it cannot read", () => {
+    const storage = fakeStorage({
+      "vised-diff-layout": "split",
+      "nodevas.runs.diffLayout": "unified",
+      "nodevas.copilot.prefs": "{broken",
+      "nodevas-station-tab": "elsewhere",
+    });
+    configurePreferenceStorage(storage);
+    expect(readPreference("diffLayout")).toBe("split");
+    expect(readPreference("copilotDefaultMode")).toBe("default");
+    expect(readPreference("stationTab")).toBe("project");
+    expect(storage.map.has("nodevas.copilot.prefs")).toBe(false);
   });
 });

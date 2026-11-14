@@ -29,6 +29,8 @@ export function RunModePicker({
 }) {
   const { t } = useI18n();
   const supported = runnerSupportsInteractive(runner);
+  // This computer's built-in runner: no runner to name.
+  const local = Boolean(runner?.builtIn);
   const option = (mode: DispatchMode, label: string, disabled = false) => (
     <label className={`run-mode-option${value === mode ? " selected" : ""}${disabled ? " disabled" : ""}`}>
       <input
@@ -50,9 +52,11 @@ export function RunModePicker({
         {option("interactive", t("terminal.modeInteractive"), !supported)}
       </div>
       {!supported ? (
-        <p className="run-hint">{t("terminal.modeUnsupported")}</p>
+        <p className="run-hint">{t(local ? "terminal.modeUnsupportedLocal" : "terminal.modeUnsupported")}</p>
       ) : (
-        value === "interactive" && <p className="run-hint">{t("terminal.modeNote")}</p>
+        value === "interactive" && (
+          <p className="run-hint">{t(local ? "terminal.modeNoteLocal" : "terminal.modeNote")}</p>
+        )
       )}
     </fieldset>
   );

@@ -95,6 +95,9 @@ type Record struct {
 	// ("TESTS: approve-changes"); like ResetAt it is not stored: the staged
 	// pipeline records it on its guard at once.
 	GuardAck bool
+	// BranchSlug names a global run's branch (agent/<slug>-<run8>; see
+	// global.go); "" for a node's run. Global and NoPR are on the API's Run.
+	BranchSlug string
 	// Agent roles: what the run's job is offered besides its prompt (the
 	// role's tools, the Tester's files an Executor must not change, the
 	// acceptance items and, for a verify or goal judge, what to verify).
@@ -143,6 +146,8 @@ func (r Record) Job() runnerwire.Job {
 		Mode:          r.Mode,
 		HandoffBranch: r.JobHandoffBranch, HandoffNote: r.JobHandoffNote,
 		Role: r.Role, Tools: r.Tools, TestFiles: r.TestFiles, Acceptance: r.Acceptance, Verify: r.VerifySpec,
+		Global: r.Global, Slug: r.BranchSlug, NoPR: r.NoPR,
+		Origin: r.Origin,
 	}
 }
 
@@ -251,11 +256,40 @@ type New struct {
 	// made. Both empty copies them from the newest run on the same node.
 	NodeType        string
 	AcceptanceCount int
+	// Global agents (global.go): a run for no project and no node, its
+	// branch slug, and whether its work stays on the runner (no pull
+	// request). NodeTitle is then the task's title.
+	Global     bool
+	BranchSlug string
+	NoPR       bool
+	// Origin is what started the run (runnerwire.Origin*): the caller's for
+	// a run it starts, OriginPipeline or OriginHandoff for a follow-up. ""
+	// is unknown, which a runner treats as automatic.
+	Origin string
+}
+
+// validOrigins are the origins a run may be recorded with.
+var validOrigins = map[string]bool{
+	"": true, runnerwire.OriginPerson: true, runnerwire.OriginAutopilot: true,
+	runnerwire.OriginPipeline: true, runnerwire.OriginHandoff: true,
 }
 
 // Create records a queued run.
 func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	required := []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
+	if in.Global {
+		// No project, node, pipeline, fallback lineage, kind or role: a
+		// global run is an implement run of its own (the database holds it
+		// to that too, runs_global_shape).
+		if in.Project != "" || in.NodeID != "" || in.PipelineID != "" || in.RetryOf != "" || in.Kind != "" ||
+			in.Role != "" || in.JobHandoffBranch != "" || len(in.Fallbacks) > 0 || !in.JobRoles.empty() ||
+			!runnerwire.ValidSlug(in.BranchSlug) {
+			return Record{}, locale.Errorf("%w: not a global run's shape", "%w：不符合全域執行的格式", ErrInvalid)
+		}
+		required = []string{in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
+	} else if in.BranchSlug != "" || in.NoPR {
+		return Record{}, locale.Errorf("%w: branch slug on a node's run", "%w：節點的執行不能指定分支代稱", ErrInvalid)
+	}
 	// A verify run is the runner's test command: no agent runs it.
 	if in.Kind != runnerwire.JobVerify {
 		required = append(required, in.Agent)
@@ -284,6 +318,9 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if !jobKinds[in.Kind] {
 		return Record{}, locale.Errorf("%w: job kind %q", "%w：工作種類「%s」", ErrInvalid, in.Kind)
 	}
+	if !validOrigins[in.Origin] {
+		return Record{}, locale.Errorf("%w: origin %q", "%w：來源「%s」", ErrInvalid, in.Origin)
+	}
 	fallbacks, err := encodeChain(in.Fallbacks)
 	if err != nil {
 		return Record{}, err
@@ -309,7 +346,7 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 		reviewCap = runnerwire.MaxRevisionBytes
 	}
 	nodeType, acceptanceCount := in.NodeType, in.AcceptanceCount
-	if nodeType == "" && acceptanceCount == 0 {
+	if nodeType == "" && acceptanceCount == 0 && !in.Global {
 		// Follow-up runs (fallbacks, pipeline steps, handoffs) carry the
 		// node's shape from the run before them.
 		err := s.db.QueryRowContext(ctx, `
@@ -325,8 +362,9 @@ INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
                   stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
-                  role, override, job_roles, node_type, acceptance_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  role, override, job_roles, node_type, acceptance_count,
+                  is_global, branch_slug, no_pr, origin)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
@@ -334,7 +372,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
 		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
-		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)))
+		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)),
+		in.Global, in.BranchSlug, in.NoPR, in.Origin)
 	if err != nil {
 		return Record{}, err
 	}
@@ -349,7 +388,8 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
        retry_at, limit_waits, role, verify, checks, override, job_roles,
-       cost_usd, cost_estimated, node_type, acceptance_count`
+       cost_usd, cost_estimated, node_type, acceptance_count, workspace, workspace_commit,
+       is_global, branch_slug, no_pr, origin, decline_code`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -364,7 +404,8 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
 		&r.Role, &verify, &checks, &r.Override, &jobRoles,
-		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount); err != nil {
+		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount, &r.Workspace, &r.WorkspaceCommit,
+		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode); err != nil {
 		return Record{}, err
 	}
 	r.AcceptanceCount = int(acceptanceCount)
@@ -394,10 +435,14 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	}
 	// A plan run carrying a revision reconciles it (runnerwire.Run.Replan).
 	r.Replan = r.Kind == runnerwire.JobPlan && r.Review != ""
+	// A global run has no node: its title is the task's first line.
+	if r.Global {
+		r.Title = r.NodeTitle
+	}
 	return r, nil
 }
 
-// Get returns one run, with its latest merge request.
+// Get returns one run, with its latest merge request and workspace action.
 func (s *Store) Get(ctx context.Context, id string) (Record, error) {
 	r, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -407,6 +452,9 @@ func (s *Store) Get(ctx context.Context, id string) (Record, error) {
 		return Record{}, err
 	}
 	if err := s.attachMerges(ctx, []*Record{&r}); err != nil {
+		return Record{}, err
+	}
+	if err := s.attachWorkspaceActions(ctx, []*Record{&r}); err != nil {
 		return Record{}, err
 	}
 	return r, nil
@@ -430,7 +478,8 @@ type Filter struct {
 
 // List returns runs newest first.
 func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
-	query := `SELECT ` + runColumns + ` FROM runs WHERE project = ?`
+	// Never a global run (global.go), even for an empty project name.
+	query := `SELECT ` + runColumns + ` FROM runs WHERE project = ? AND NOT is_global`
 	args := []any{f.Project}
 	if f.NodeID != "" {
 		query += ` AND node_id = ?`
@@ -462,6 +511,9 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
 		refs[i] = &out[i]
 	}
 	if err := s.attachMerges(ctx, refs); err != nil {
+		return nil, err
+	}
+	if err := s.attachWorkspaceActions(ctx, refs); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -496,7 +548,7 @@ func (s *Store) ListBuilding(ctx context.Context, f BuildingFilter) ([]Record, e
 	if len(f.Projects) == 0 {
 		return []Record{}, nil
 	}
-	query := `SELECT ` + runColumns + ` FROM runs WHERE project IN (` + placeholders(len(f.Projects)) + `)`
+	query := `SELECT ` + runColumns + ` FROM runs WHERE project IN (` + placeholders(len(f.Projects)) + `) AND NOT is_global`
 	args := make([]any, 0, len(f.Projects)+7)
 	for _, project := range f.Projects {
 		args = append(args, project)
@@ -524,6 +576,9 @@ func (s *Store) ListBuilding(ctx context.Context, f BuildingFilter) ([]Record, e
 	if err := s.attachMerges(ctx, refs); err != nil {
 		return nil, err
 	}
+	if err := s.attachWorkspaceActions(ctx, refs); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -541,7 +596,7 @@ func (s *Store) CountOthersActive(ctx context.Context, projects []string, viewer
 	}
 	args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning, viewer, viewer)
 	rows, err := s.db.QueryContext(ctx, `SELECT project, COUNT(*) FROM runs
-		WHERE project IN (`+placeholders(len(projects))+`) AND status IN (?, ?, ?)
+		WHERE project IN (`+placeholders(len(projects))+`) AND NOT is_global AND status IN (?, ?, ?)
 		AND NOT (created_by = ? OR owner_id = ?)
 		GROUP BY project`, args...)
 	if err != nil {
@@ -621,6 +676,8 @@ type Change struct {
 	// Verify and Checks are a verify or judge run's result (agent roles).
 	Verify *runnerwire.VerifyResult
 	Checks []runnerwire.CheckResult
+	// DeclineCode is a decline's code (runnerwire.Decline*).
+	DeclineCode string
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -662,6 +719,9 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.Verdict != "" {
 		set("verdict", change.Verdict)
+	}
+	if change.DeclineCode != "" {
+		set("decline_code", Truncate(change.DeclineCode, maxShortField))
 	}
 	if change.HandoffBranch != "" {
 		set("handoff_branch", change.HandoffBranch)
@@ -746,6 +806,11 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	verdict := CleanVerdict(result.Verdict)
 	if current, err := s.Get(ctx, id); err == nil {
 		verdict = s.reconcileVerdict(ctx, current, verdict)
+		// A global agent's work stays on its own branch: nothing continues
+		// it, so it has no handoff to record (global.go).
+		if current.Global {
+			handoffBranch, handoffNote = "", ""
+		}
 	}
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,

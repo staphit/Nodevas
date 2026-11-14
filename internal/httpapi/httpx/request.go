@@ -45,6 +45,9 @@ var projectScopedPathExempt = []string{
 	"/api/station/",
 	// Theme packs are the server's, whichever project is open.
 	"/api/themes",
+	// Global agents belong to no project: a person keeps their own whichever
+	// board is open (internal/httpapi/runs/global.go).
+	"/api/global-runs",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

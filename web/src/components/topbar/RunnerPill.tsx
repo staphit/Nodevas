@@ -6,6 +6,9 @@
  * Today's spend is the daily budget's "used" figure (GET /api/runs/budget),
  * the one number the hub already keeps for today. Drawn only while the agent
  * workstation is shown: a board used as a planner has nothing to say here.
+ *
+ * Single-user edition: there is one machine, so the pill says "This
+ * computer" (green while its built-in runner is up), never "runners".
  */
 
 import { useEffect } from "react";
@@ -13,6 +16,7 @@ import { useEffect } from "react";
 import { useConnectivity } from "../../api/connectivity";
 import { setProjectMode } from "../../station/projectMode";
 import { useI18n } from "../../i18n";
+import { builtInRunner, useEdition } from "../../runners/edition";
 import { useWorkstationVisible } from "../../runners/workstation";
 import { useRunners } from "../../runners/runnerStore";
 import { useBudget } from "../../runs/budgetStore";
@@ -31,6 +35,7 @@ export function RunnerPill() {
   const cost = useBudget((s) => s.status?.used.costUsd);
   // Offline, the last list is stale: no runner is known to be up or down.
   const offline = useConnectivity((s) => s.offline);
+  const single = useEdition() === "single";
 
   useEffect(() => {
     if (!visible) return;
@@ -46,7 +51,7 @@ export function RunnerPill() {
   if (!visible) return null;
 
   if (offline) {
-    const unknown = t("topbar.runnerPill.unknown");
+    const unknown = t(single ? "local.pillUnknown" : "topbar.runnerPill.unknown");
     return (
       <button
         type="button"
@@ -63,12 +68,21 @@ export function RunnerPill() {
     );
   }
 
-  const online = runners.filter((runner) => runner.online).length;
-  const count = online === 1 ? t("topbar.runnerPill.one") : t("topbar.runnerPill.many", { count: online });
   const spend = typeof cost === "number" ? formatSpend(cost) : "";
-  const label = spend
-    ? t("topbar.runnerPill.label", { runners: count, cost: spend })
-    : t("topbar.runnerPill.labelNoCost", { runners: count });
+  const local = single ? builtInRunner(runners) : undefined;
+  const online = single ? (local?.online ? 1 : 0) : runners.filter((runner) => runner.online).length;
+  const count = single
+    ? t("local.title")
+    : online === 1
+      ? t("topbar.runnerPill.one")
+      : t("topbar.runnerPill.many", { count: online });
+  const label = single
+    ? spend
+      ? t("local.pill", { cost: spend })
+      : t("local.title")
+    : spend
+      ? t("topbar.runnerPill.label", { runners: count, cost: spend })
+      : t("topbar.runnerPill.labelNoCost", { runners: count });
 
   return (
     <button

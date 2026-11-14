@@ -163,8 +163,8 @@ func prepareLocalRunner(ctx context.Context, path, hub string, repos []string, m
 		fmt.Fprintf(stderr, "local runner: agent runs may now work in %s (id %s)\n", repo.Path, repo.ID)
 	}
 	if len(cfg.Repos) == 0 {
-		fmt.Fprintf(stderr, "local runner: no repositories yet, so no run can start; allow one with "+
-			"`nodevas serve --repo <dir>` or `nodevas runner repo add <dir> --config %q`\n", path)
+		fmt.Fprintf(stderr, "local runner: no repositories yet, so no run can start; add one in Nodevas "+
+			"(+ Add repo / ＋ 新增 repo), or with `nodevas serve --repo <dir>` or `nodevas runner repo add <dir> --config %q`\n", path)
 	}
 	return runner.SaveConfig(path, cfg)
 }
@@ -172,16 +172,24 @@ func prepareLocalRunner(ctx context.Context, path, hub string, repos []string, m
 // localRunnerEnv is the local runner's environment: serve's, without the
 // hub's own secrets (the runner, its agents and their verify commands work
 // on content an attacker may control and need none of them), and marked as
-// started by serve.
-func localRunnerEnv() []string {
-	return append(secretenv.Without(os.Environ()), localRunnerUnderServeEnv+"=1")
+// started by serve; for a standalone hub, also as the single-user edition's
+// runner, which may act as the hub's built-in runner
+// (internal/runner/builtin.go). The runner reads both once and removes them.
+func localRunnerEnv(standalone bool) []string {
+	env := append(secretenv.Without(os.Environ()), localRunnerUnderServeEnv+"=1")
+	if standalone {
+		env = append(env, localRunnerEditionEnv+"="+runnerwire.EditionSingle)
+	}
+	return env
 }
 
 // startLocalRunner starts `nodevas runner start --config path` on this
 // terminal: its questions go where serve's log goes, and its answers come
 // from serve's stdin, which serve itself never reads. The returned stop asks
-// it to finish and waits.
-func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func(), err error) {
+// it to finish and waits. standalone marks it as the single-user edition's
+// runner (localRunnerEnv): runs started in Nodevas begin right away, so a
+// stdin nobody types into is no reason for a warning there.
+func startLocalRunner(path string, stdin *os.File, stderr *os.File, standalone bool) (stop func(), err error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -190,14 +198,14 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stderr, stderr
 	// Serve owns Ctrl+C on the terminal they share (it asks for a second
 	// one); the runner ends when serve stops it.
-	cmd.Env = localRunnerEnv()
+	cmd.Env = localRunnerEnv(standalone)
 	endWithServe(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the local runner: %w", err)
 	}
 	tieToServe(cmd)
 	fmt.Fprintf(stderr, "local runner started (settings %s; change them with `nodevas runner ... --config %q`)\n", path, path)
-	if !isTerminal(stdin) {
+	if !standalone && !isTerminal(stdin) {
 		fmt.Fprintln(stderr, "local runner: stdin is not a terminal, so nobody can accept a run here; "+
 			"runs its auto-accept policy does not cover are declined")
 	}
