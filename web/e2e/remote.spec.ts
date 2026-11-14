@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { expect, freshProject, test } from "./fixture";
+import { asTeamHub, expect, freshProject, test } from "./fixture";
 
 // W6: step-up, auto-accept policies and external session changes. The hub's
 // routes are answered here: these tests are about the dialogs' and the Runs
@@ -137,6 +137,9 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
   test(`runners dialog shows the auto-accept policy on ${name}`, async ({ page }) => {
     await page.setViewportSize(viewport);
+    // A team hub's: the single-user edition has no auto-accept policy to
+    // show, its runner asks in This computer instead.
+    await asTeamHub(page);
     await mockRunners(page);
     await mockStepUp(page);
     await freshProject(page, ["設計稿"]);

@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { expect, freshProject, test } from "./fixture";
+import { expect, freshProject, setPreferences, test } from "./fixture";
 
 // Station's control center against the real binary. The run and autopilot
 // routes a runner would feed are answered here, and so is pause-all: the
@@ -145,10 +145,7 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["Auth API", "Login form", "Ship login"]);
     const ids = await nodeIds(page);
     const bodies = await stage(page, ids);
-    await page.addInitScript(() => {
-      localStorage.setItem("vised-language", "en");
-      localStorage.setItem("vised-project-mode", "station");
-    });
+    await setPreferences(page, { "vised-language": "en", "vised-project-mode": "station" });
     await page.reload();
 
     const panel = page.getByRole("region", { name: "Agent activity" });

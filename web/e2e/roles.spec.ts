@@ -1,5 +1,5 @@
 import { type Page, type Route } from "@playwright/test";
-import { expect, freshProject, test } from "./fixture";
+import { AGENTS_PAGE, expect, freshProject, test } from "./fixture";
 
 // Agent roles and workflow stages, with the hub's run, runner and autopilot
 // routes answered here: these tests are about what the UI shows and writes,
@@ -87,7 +87,7 @@ function stagedRuns(nodeId: string) {
 test("choosing the Standard preset shows its cost hint", async ({ page }) => {
   await freshProject(page, ["設計稿"]);
   await page.getByRole("button", { name: /設定|Settings/ }).first().click();
-  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: /^(Agent 與 Runner|Agents)/ }).click();
+  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: AGENTS_PAGE }).click();
   const advanced = page.getByRole("region", { name: /進階|Advanced/ });
   await advanced.getByRole("button", { name: /^(進階|Advanced)/ }).click();
   await advanced.getByRole("button", { name: /(工作流程階段|Workflow stages)/ }).click();

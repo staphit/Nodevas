@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ACCOUNT_PREFERENCE_KEYS, PREFERENCE_SCHEMA } from "../src/preferences/schema";
 import { createDatabase, dropDatabase, nodevasBinary } from "./database";
 
 let counter = 0;
@@ -214,14 +215,78 @@ export { expect };
  * runner or a run; these specs drive the timeline and the run controls
  * directly, often against mocked runners that arrive after the first paint, so
  * they start from a browser that has both on.
+ *
+ * The account's choices live on the server (preferences/sync.ts), and every
+ * test of a worker uses the same account on the same server. So each test
+ * starts from an account with none of the previous test's choices: what the
+ * server keeps is forgotten, then the pins are set there as well as here.
  */
 export async function declineTour(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("vised-tour-prompt", "declined");
-    localStorage.setItem("vised-language", "zh-TW");
-    localStorage.setItem("vised-pane-timeline", "1");
-    localStorage.setItem("vised-agent-workstation", "1");
+  await resetAccountPreferences(page);
+  await setPreferences(page, {
+    "vised-tour-prompt": "declined",
+    "vised-language": "zh-TW",
+    "vised-pane-timeline": "1",
+    "vised-agent-workstation": "1",
   });
+}
+
+/**
+ * Settings › Agents in the navigation, by its accessible name (label and
+ * subtitle). The e2e server is a loopback one without accounts, the
+ * single-user edition, where the page is "Agent" / "Agents" (This computer
+ * and advanced); on a team hub it is "Agent 與 Runner" / "Agents".
+ */
+export const AGENTS_PAGE = /^(Agent 與 Runner|Agents?)\s/;
+
+/**
+ * Shows this page the team hub's edition: a server with accounts, signed in
+ * as the e2e server's own actor. The e2e server is a loopback one without
+ * accounts — the single-user edition, where the runner is part of the app and
+ * no runner list, runner details or auto-accept policy shows. Specs about
+ * those use this, with the runner routes answered by the spec.
+ */
+export async function asTeamHub(page: Page) {
+  const status = await (await page.request.get("/api/auth/status")).json();
+  await page.route("**/api/auth/status", (route) =>
+    route.fulfill({ json: { ...status, mode: "accounts", authenticated: true } }),
+  );
+}
+
+const PREFERENCES_URL = "/api/me/preferences";
+
+/** The storage keys of the choices that follow the account. */
+const accountStorageKeys = new Set<string>(ACCOUNT_PREFERENCE_KEYS.map((key) => PREFERENCE_SCHEMA[key].key));
+
+/** Forgets every preference the server keeps for the signed-in account. */
+export async function resetAccountPreferences(page: Page) {
+  const res = await page.request.get(PREFERENCES_URL);
+  expect(res.ok(), await res.text()).toBeTruthy();
+  const keys = Object.keys(((await res.json()) as { values?: Record<string, string> }).values ?? {});
+  // The server takes at most 64 keys in one change.
+  for (let i = 0; i < keys.length; i += 64) {
+    const cleared = await page.request.patch(PREFERENCES_URL, {
+      data: { set: {}, remove: keys.slice(i, i + 64) },
+    });
+    expect(cleared.ok(), await cleared.text()).toBeTruthy();
+  }
+}
+
+/**
+ * Sets preferences the way a person who chose them has them: in this
+ * browser's storage from the next page load on, and, for a choice that
+ * follows the account, on the server too. A page that synced before takes
+ * the server's copy over its own cache, so writing storage alone would be
+ * undone by the next load.
+ */
+export async function setPreferences(page: Page, values: Record<string, string>) {
+  await page.addInitScript((pinned) => {
+    for (const [key, value] of Object.entries(pinned)) localStorage.setItem(key, value);
+  }, values);
+  const account = Object.fromEntries(Object.entries(values).filter(([key]) => accountStorageKeys.has(key)));
+  if (Object.keys(account).length === 0) return;
+  const res = await page.request.patch(PREFERENCES_URL, { data: { set: account, remove: [] } });
+  expect(res.ok(), await res.text()).toBeTruthy();
 }
 
 /**
