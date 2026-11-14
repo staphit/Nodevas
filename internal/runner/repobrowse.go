@@ -223,11 +223,17 @@ func resolveRepoPath(root, rel string) (string, error) {
 }
 
 // existingInside reports whether the deepest existing directory above full
-// is inside root, links and junctions included.
+// is inside root, links and junctions included. A dangling link on the way
+// is not: where it points is outside what can be checked, and skipping it
+// would answer "no such file" for a path under a link out of the repo (on
+// Linux EvalSymlinks reports a missing link target as not existing).
 func existingInside(root, full string) bool {
 	for p := filepath.Dir(full); inside(root, p); p = filepath.Dir(p) {
 		if real, err := filepath.EvalSymlinks(p); err == nil {
 			return inside(root, real) && !throughMountPoint(root, real)
+		}
+		if _, err := os.Lstat(p); err == nil {
+			return false
 		}
 		if p == root {
 			break
