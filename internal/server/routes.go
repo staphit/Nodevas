@@ -12,13 +12,17 @@ import (
 	"nodevas/internal/httpapi/graph"
 	membersapi "nodevas/internal/httpapi/members"
 	"nodevas/internal/httpapi/node"
+	prefsapi "nodevas/internal/httpapi/prefs"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
 	runnersapi "nodevas/internal/httpapi/runners"
 	runsapi "nodevas/internal/httpapi/runs"
 	stationapi "nodevas/internal/httpapi/station"
 	"nodevas/internal/httpapi/system"
+	themesapi "nodevas/internal/httpapi/themes"
 	usageapi "nodevas/internal/httpapi/usage"
+	"nodevas/internal/prefs"
+	"nodevas/internal/runners"
 	"nodevas/internal/usage"
 )
 
@@ -99,13 +103,28 @@ func (s *Server) Handler() http.Handler {
 	if s.usage != nil {
 		usageapi.New(s.pm, s.usage).Register(api)
 	}
+	if s.themes != nil {
+		themesapi.New(s.themes, s.themesChanged).Register(api)
+	}
+	if s.database != nil {
+		// What each person chose in the app, on either edition: the
+		// signed-in account's, or the local user's on a hub without accounts.
+		prefsapi.New(prefs.NewStore(s.database)).Register(api)
+	}
 	if s.runners != nil {
-		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithRepo(s.repo).WithLinks(s.runnerLinkOptions()).Register(api)
+		// The single-user edition welcomes its own runner as built in, and
+		// that runner's repos are added from the app (never the hub's own
+		// data folders).
+		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithRepo(s.repo).WithSettings(runners.NewSettingsRelay(s.runners)).
+			WithEdition(s.singleUser()).
+			WithRepoAdmin(runnersapi.RepoAdminOptions{Relay: runners.NewRepoAdminRelay(s.runners), Reserved: s.hubDataFolder}).
+			WithLinks(s.runnerLinkOptions()).Register(api)
 	}
 	if s.runs != nil {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
 		s.configureStepUp(runsAPI)
 		runsAPI.UseAutoRoute(s.autoRouteRequest)
+		runsAPI.UseRepo(s.repo)
 		if s.agents != nil {
 			runsAPI.UseAsks(s.agents)
 		}

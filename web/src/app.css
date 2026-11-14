@@ -39,6 +39,9 @@
 @import "./styles/26-audit.css"; /* Settings → Audit log: audit health, trail, rate limiter */
 @import "./styles/27-settings.css"; /* Settings sections: search, rows opened in place, Advanced, runner lines */
 @import "./styles/28-roles.css"; /* agent roles: acceptance criteria, workflow stages, role settings, run evidence */
+@import "./styles/29-run-workspace.css"; /* agent workspace: a run's worktree, changes and terminal, merge and discard */
+@import "./styles/30-global-agents.css"; /* global agents: Station's tabs, the start form, runner load, the list */
+@import "./styles/31-this-computer.css"; /* single-user edition: This computer, add a repo, the "Start this run?" card */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

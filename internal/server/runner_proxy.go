@@ -76,6 +76,17 @@ var runnerProxyRoutes = []proxyRoute{
 	// rejecting held messages are a person's decisions about agents.
 }
 
+// CodeGlobalRunNoBoard refuses a global run's proxied request: it has no
+// board to read or write.
+const CodeGlobalRunNoBoard = "GLOBAL_RUN_NO_BOARD"
+
+var errGlobalRunNoBoard = locale.Errorf("a global agent has no board", "全域 agent 沒有看板")
+
+// globalRunProxyAllows is what a global run's request may still reach.
+func globalRunProxyAllows(method, target string) bool {
+	return method == http.MethodGet && (target == "/api/auth/status" || target == "/api/ready")
+}
+
 // runnerProxyAllows reports whether the proxy forwards method on target, an
 // /api/ path. A path that is not already clean (dot segments, doubled or
 // trailing slashes) is refused rather than normalised: the router must see
@@ -201,6 +212,13 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	rec := s.proxiedRun(r, runner)
 	if rec != nil && runnerwire.RunFinal(rec.Status) {
 		httpx.Coded(c, http.StatusUnauthorized, "RUN_ENDED", errRunEnded, nil)
+		return
+	}
+	// A global agent (runs/global.go) has no board: its runner starts no
+	// `nodevas mcp` for it, and should something speak for it anyway, it
+	// gets nothing past checking the hub is there.
+	if rec != nil && rec.Global && !globalRunProxyAllows(r.Method, target) {
+		httpx.Coded(c, http.StatusForbidden, CodeGlobalRunNoBoard, errGlobalRunNoBoard, nil)
 		return
 	}
 	actor, err := s.runnerProxyActor(r, runner, rec)

@@ -18,6 +18,7 @@ import { useTeamServer, useViewer } from "../components/SignIn";
 import { InlineDialogContext } from "../components/DialogFrame";
 import { setProjectMode } from "../station/projectMode";
 import { useI18n } from "../i18n";
+import { useEdition } from "../runners/edition";
 import { useWorkstationVisible } from "../runners/workstation";
 import { useApp, usePreference } from "../store";
 import { AgentsSection } from "./AgentsSection";
@@ -47,6 +48,7 @@ export default function SettingsView() {
   const { t } = useI18n();
   const viewer = useViewer();
   const teamServer = useTeamServer();
+  const single = useEdition() === "single";
   const workstation = useWorkstationVisible();
   const section = usePreference("settingsSection");
   const activeProject = useApp((s) => s.activeProject);
@@ -81,6 +83,8 @@ export default function SettingsView() {
 
   const offered = (need: SettingsNeed): boolean => {
     if (need === "workstation") return workstation;
+    if (need === "runners") return !single;
+    if (need === "local") return single;
     if (need === "team") return teamServer;
     if (need === "account") return Boolean(teamServer && viewer);
     return Boolean(teamServer && viewer?.role === "admin");
@@ -123,7 +127,7 @@ export default function SettingsView() {
 
   const sub: Record<SettingsPage, string> = {
     general: t("settingsPage.sub.general"),
-    agents: t("settingsPage.sub.agents"),
+    agents: t(single ? "settingsPage.sub.agentsLocal" : "settingsPage.sub.agents"),
     project: activeProject || t("settingsPage.sub.project"),
     account: teamServer ? t("settingsPage.sub.account") : t("settingsPage.sub.accountStandalone"),
   };
@@ -173,7 +177,7 @@ export default function SettingsView() {
                 aria-current={id === page ? "page" : undefined}
                 onClick={() => go(id, null, false)}
               >
-                <span>{t(`settingsPage.page.${id}`)}</span>
+                <span>{t(id === "agents" && single ? "settingsPage.page.agentsLocal" : `settingsPage.page.${id}`)}</span>
                 {/* Cut with an ellipsis where the list is narrow; whole on hover. */}
                 <small title={sub[id]}>{sub[id]}</small>
               </button>

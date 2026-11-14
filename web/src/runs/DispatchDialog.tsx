@@ -13,6 +13,8 @@ import {
   type Run,
   type Runner,
   type RunnerAgent,
+  type RunnerRepo,
+  CAP_REPO_ADMIN,
 } from "../api";
 import { useViewer } from "../components/SignIn";
 import { IconClose, IconSend } from "../icons";
@@ -20,6 +22,11 @@ import { useI18n } from "../i18n";
 import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
+import { builtInRunner, useEdition } from "../runners/edition";
+import { AddRepoDialog, repoAddCommand } from "../local/AddRepoDialog";
+import { permissionOf } from "../local/ThisComputerPanel";
+import { openSettings } from "../settings/openSettings";
+import { agentName } from "../game/labels";
 import {
   agentCatalog,
   agentModelProblem,
@@ -73,19 +80,76 @@ function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-function installedAgents(runner: Runner | undefined): RunnerAgent[] {
+export function installedAgents(runner: Runner | undefined): RunnerAgent[] {
   return (runner?.info?.agents ?? []).filter((agent) => agent.installed);
 }
 
-function defaultModel(agent: RunnerAgent | undefined): string {
+export function defaultModel(agent: RunnerAgent | undefined): string {
   const models = agent?.models ?? [];
   return (models.find((model) => model.default) ?? models[0])?.id ?? "";
 }
 
+/** Whether repos are added to `runner` from the app: this computer's
+ * built-in runner (single-user edition). Any other runner adds them on its
+ * own PC. */
+export function addsReposInApp(runner: Runner | undefined): boolean {
+  return Boolean(runner?.builtIn && runner.info?.capabilities?.includes(CAP_REPO_ADMIN));
+}
+
+/**
+ * "+ Add repo" beside a repo choice: the folder dialog for this computer's
+ * built-in runner, or, for a runner on another PC, where to add it there
+ * (with the command line under Advanced).
+ */
+export function AddRepoButton({
+  runner,
+  onAdded,
+}: {
+  runner: Runner;
+  onAdded: (repo: RunnerRepo) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const inApp = addsReposInApp(runner);
+  return (
+    <>
+      <button
+        type="button"
+        className="run-link-button run-add-repo"
+        aria-expanded={inApp ? undefined : open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {t("repoAdd.button")}
+      </button>
+      {open && inApp && (
+        <AddRepoDialog
+          runnerId={runner.id}
+          onClose={() => setOpen(false)}
+          onAdded={(repo) => {
+            setOpen(false);
+            onAdded(repo);
+          }}
+        />
+      )}
+      {open && !inApp && (
+        <div className="run-empty run-empty-left run-add-repo-remote" role="note">
+          <p>{t("repoAdd.onRunner", { machine: runnerDisplayName(t, runner.name) })}</p>
+          <details className="run-advanced">
+            <summary>{t("repoAdd.advancedCli")}</summary>
+            <code>{repoAddCommand("", undefined)}</code>
+          </details>
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * Dispatches a node to an agent on one of the viewer's runners: runner, then
- * agent, then model, then repository. Nothing starts here — the runner shows
- * the offer and someone there accepts it.
+ * agent, then model, then repository. On a team hub nothing starts here: the
+ * runner shows the offer and someone there accepts it. In the single-user
+ * edition there is no runner to pick: this computer's built-in runner starts
+ * it right away (unless its owner asked to be asked first).
  */
 export function DispatchDialog({
   nodeId,
@@ -117,11 +181,18 @@ export function DispatchDialog({
   const refreshRunners = useRunners((s) => s.refresh);
   const createRun = useRuns((s) => s.createRun);
 
+  const single = useEdition() === "single";
   const mine = useMemo(() => ownRunners(runners, viewer), [runners, viewer]);
+  // Single-user: this computer's built-in runner, and no choice. Without
+  // one (it did not start) a runner someone connected by hand still works
+  // the classic way.
+  const localRunner = single ? builtInRunner(mine) : undefined;
+  const choices = useMemo(() => (localRunner ? [localRunner] : mine), [localRunner, mine]);
   const eligible = useMemo(
-    () => mine.filter((runner) => runnerUnavailableReason(runner) === ""),
-    [mine],
+    () => choices.filter((runner) => runnerUnavailableReason(runner) === ""),
+    [choices],
   );
+  const [addedNote, setAddedNote] = useState("");
 
   const [runnerId, setRunnerId] = useState("");
   const [agentKind, setAgentKind] = useState("");
@@ -402,6 +473,10 @@ export function DispatchDialog({
   };
 
   const loadingRunners = !runnersLoaded || (runnersLoading && runners.length === 0);
+  // The agent may run any command on this computer: said beside Start.
+  const fullAccess = Boolean(
+    localRunner && agent && runner?.id === localRunner.id && permissionOf(runner, agent.kind) === "full",
+  );
 
   return (
     <div className="confirm-backdrop run-dispatch-backdrop" onClick={onClose}>
@@ -418,7 +493,7 @@ export function DispatchDialog({
           </span>
           <div>
             <h2 id="run-dispatch-title">{t("runs.dispatchTitle")}</h2>
-            <p>{t("runs.dispatchDescription", { title: nodeTitle })}</p>
+            <p>{t(localRunner ? "runs.dispatchDescriptionLocal" : "runs.dispatchDescription", { title: nodeTitle })}</p>
           </div>
           <button
             type="button"
@@ -471,7 +546,22 @@ export function DispatchDialog({
                   </button>
                 </div>
               )}
-              {missingTestCommand && (
+              {missingTestCommand && localRunner && (
+                <div className="run-stage-warning" role="status">
+                  <span>{t("dispatch.noTestCommandLocal")}</span>{" "}
+                  <button
+                    type="button"
+                    className="run-inline-link"
+                    onClick={() => {
+                      onClose();
+                      openSettings("runners");
+                    }}
+                  >
+                    {t("dispatch.setTestCommand")}
+                  </button>
+                </div>
+              )}
+              {missingTestCommand && !localRunner && (
                 <div className="run-stage-warning" role="status">
                   <span>{t("dispatch.noTestCommand")}</span>
                   <code>{`nodevas runner repo set ${repo?.name ?? "<repo>"} --test-command "go test ./..."`}</code>
@@ -508,6 +598,10 @@ export function DispatchDialog({
 
           {loadingRunners ? (
             <p className="run-empty">{t("common.loading")}</p>
+          ) : single && (mine.length === 0 || (localRunner && eligible.length === 0)) ? (
+            <p className="run-empty" role="status">
+              {t("local.unavailable")}
+            </p>
           ) : mine.length === 0 ? (
             <div className="run-empty">
               <p>{t("runs.noRunners")}</p>
@@ -527,6 +621,7 @@ export function DispatchDialog({
                   ))}
                 </p>
               )}
+              {!localRunner && (
               <label className="run-field">
                 <span>{t("runs.runner")}</span>
 
@@ -550,6 +645,7 @@ export function DispatchDialog({
                   ))}
                 </select>
               </label>
+              )}
 
               {eligible.length === 0 ? (
                 <div className="run-empty">
@@ -598,7 +694,9 @@ export function DispatchDialog({
                       </select>
                     </label>
                   </div>
-                  {agents.length === 0 && <p className="run-hint">{t("runs.noAgents")}</p>}
+                  {agents.length === 0 && (
+                    <p className="run-hint">{t(localRunner ? "runs.noAgentsLocal" : "runs.noAgents")}</p>
+                  )}
 
                   <details className="run-advanced" data-testid="dispatch-fallbacks">
                     <summary>{t("routing.fallbacks", { count: fallbacks.length })}</summary>
@@ -646,9 +744,23 @@ export function DispatchDialog({
                     />
                   )}
 
-                  <label className="run-field">
-                    <span>{t("runs.repo")}</span>
+                  <div className="run-field">
+                    <span className="run-field-label-row">
+                      <label className="run-field-label" htmlFor="run-dispatch-repo">
+                        {t("runs.repo")}
+                      </label>
+                      {runner && repos.length > 0 && (
+                        <AddRepoButton
+                          runner={runner}
+                          onAdded={(added) => {
+                            setRepoId(added.id);
+                            setAddedNote(t("repoAdd.added", { name: added.name }));
+                          }}
+                        />
+                      )}
+                    </span>
                     <select
+                      id="run-dispatch-repo"
                       value={repoId}
                       onChange={(event) => setRepoId(event.target.value)}
                       disabled={repos.length === 0}
@@ -660,11 +772,23 @@ export function DispatchDialog({
                         </option>
                       ))}
                     </select>
-                  </label>
-                  {repos.length === 0 && (
+                    {addedNote && (
+                      <small className="run-hint run-repo-added" role="status">
+                        {addedNote}
+                      </small>
+                    )}
+                  </div>
+                  {repos.length === 0 && runner && (
                     <div className="run-empty run-empty-left">
-                      <p>{t("runs.noRepos")}</p>
-                      <code>nodevas runner repo add &lt;path&gt;</code>
+                      <p>{t(localRunner ? "runs.noReposLocal" : "runs.noRepos")}</p>
+                      {!localRunner && <code>nodevas runner repo add &lt;path&gt;</code>}
+                      <AddRepoButton
+                        runner={runner}
+                        onAdded={(added) => {
+                          setRepoId(added.id);
+                          setAddedNote(t("repoAdd.added", { name: added.name }));
+                        }}
+                      />
                     </div>
                   )}
 
@@ -738,6 +862,11 @@ export function DispatchDialog({
         </form>
 
         <footer>
+          {fullAccess && (
+            <span className="run-full-access" role="note">
+              {t("dispatch.fullAccessNote", { agent: agentName(agent?.kind ?? "") })}
+            </span>
+          )}
           <button type="button" onClick={onClose}>
             {t("common.cancel")}
           </button>

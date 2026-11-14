@@ -14,6 +14,7 @@ import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { useRunners } from "../runners/runnerStore";
 import { useBuilding } from "../station/buildingStore";
+import { useGlobalAgents } from "../station/globalAgentsStore";
 import { useWaitingItems } from "../station/useWaitingItems";
 import { useApp } from "../store";
 import { buildWorld } from "./buildWorld";
@@ -44,6 +45,13 @@ export function mergeRuns(
     (runFinal(run.status) ? done : open).push(run);
   }
   return [...open, ...done];
+}
+
+/** The global agents' runs as the war room draws them: Station's list, each
+ * in the run store's copy when it holds one (a cancel, a workspace action and
+ * a toast's fetch land there first). */
+export function freshGlobalRuns(listed: Run[], held: Record<string, Run>): Run[] {
+  return listed.map((run) => held[run.id] ?? run);
 }
 
 /** Runs `work` over `items`, at most `limit` at a time. */
@@ -158,6 +166,8 @@ export function useWorld(): World {
   const latestByNode = useRuns((s) => s.latestByNode);
   const runsByNode = useRuns((s) => s.runsByNode);
   const pipelines = useRuns((s) => s.pipelines);
+  const globalById = useRuns((s) => s.globalById);
+  const listedGlobal = useGlobalAgents((s) => s.runs);
   const runners = useRunners((s) => s.runners);
   const sessions = useAgents((s) => s.sessions);
   const asks = useAgents((s) => s.asks);
@@ -181,6 +191,7 @@ export function useWorld(): World {
     () => mergeRuns(activeRuns, latestByNode, runsByNode),
     [activeRuns, latestByNode, runsByNode],
   );
+  const globalRuns = useMemo(() => freshGlobalRuns(listedGlobal, globalById), [listedGlobal, globalById]);
 
   const world = useMemo(
     () =>
@@ -198,6 +209,7 @@ export function useWorld(): World {
         projectLabel,
         remote,
         waitingItems,
+        globalRuns,
         // The real clock, not the tick: a message that arrived mid-tick must
         // show its bubble now, not at the next boundary.
         now: Date.now(),
@@ -217,6 +229,7 @@ export function useWorld(): World {
       projectLabel,
       remote,
       waitingItems,
+      globalRuns,
       tick,
       bubbleClock,
     ],

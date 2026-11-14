@@ -423,16 +423,27 @@ const (
 // step-up waived), and the repository, agent and mode all listed. A no comes
 // with every condition that failed, each naming what was missing.
 func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string) {
+	ok, why, _ := AutoAcceptAsk(p, offer)
+	return ok, why
+}
+
+// AutoAcceptAsk is AutoAcceptDecision with, for a no, the reasons as codes
+// (runnerwire.AskReason) a classic runner sends in its offer_ask, so the hub
+// can say why the run waits for a person at the runner. Auto-accept being
+// off is no reason of its own: asking is then simply the default.
+func AutoAcceptAsk(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string, []runnerwire.AskReason) {
 	if !p.Enabled {
-		return false, ReasonAutoAcceptOff
+		return false, ReasonAutoAcceptOff, nil
 	}
 	job := offer.Job
 	if job.Kind == runnerwire.JobVerify {
 		return verifyAutoAccept(p, offer)
 	}
 	var missing []string
+	var reasons []runnerwire.AskReason
 	if p.RequireStepUp && !job.SteppedUp {
 		missing = append(missing, ReasonNeedsStepUp)
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNeedsStepUp})
 	}
 	if !slices.Contains(p.Repos, job.RepoID) {
 		name := offer.Repo.Name
@@ -440,29 +451,36 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 			name = job.RepoID
 		}
 		missing = append(missing, fmt.Sprintf("repo %s is not on this runner's auto-accept list", name))
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNotOnList, Missing: runnerwire.AskMissingRepo})
 	}
 	if !slices.Contains(p.Agents, job.Agent) {
 		missing = append(missing, fmt.Sprintf("agent %s is not on this runner's auto-accept list", job.Agent))
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNotOnList, Missing: runnerwire.AskMissingAgent,
+			Agent: job.Agent})
 	}
 	if !slices.Contains(allowedModes(p), job.Mode) {
 		missing = append(missing, fmt.Sprintf("%s runs are not on this runner's auto-accept list", ModeName(job.Mode)))
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNotOnList, Missing: runnerwire.AskMissingMode})
 	}
 	if offer.Shell != "" && !p.AllowShell {
 		missing = append(missing, fmt.Sprintf("agent %s may run any shell command here (%s); "+
 			"auto-accept leaves that to a person (nodevas runner autoaccept allow-shell on)", job.Agent, offer.Shell))
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskShellAgent, Agent: job.Agent,
+			Setting: shellSetting(offer.Shell)})
 	}
 	if runsTests(job) && !p.AllowVerify {
 		missing = append(missing, verifyConsentMissing)
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskVerifyTests})
 	}
 	if len(missing) > 0 {
-		return false, strings.Join(missing, "; ")
+		return false, strings.Join(missing, "; "), reasons
 	}
 	why := "dispatcher stepped up"
 	if !job.SteppedUp {
 		why = "step-up not required"
 	}
 	return true, fmt.Sprintf("%s; repo %s, agent %s, %s are on the auto-accept list",
-		why, offer.Repo.Name, job.Agent, ModeName(job.Mode))
+		why, offer.Repo.Name, job.Agent, ModeName(job.Mode)), nil
 }
 
 // verifyConsentMissing is why a job that runs the repository's test command
@@ -481,24 +499,28 @@ func runsTests(job runnerwire.Job) bool {
 // command runs code an agent wrote, so it is taken unasked only when the
 // owner switched verify on (nodevas runner autoaccept verify on) for a repo
 // on the list.
-func verifyAutoAccept(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string) {
+func verifyAutoAccept(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string, []runnerwire.AskReason) {
 	job := offer.Job
 	name := offer.Repo.Name
 	if name == "" {
 		name = job.RepoID
 	}
 	var missing []string
+	var reasons []runnerwire.AskReason
 	if !p.AllowVerify {
 		missing = append(missing, verifyConsentMissing)
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskVerifyTests})
 	}
 	if p.RequireStepUp && !job.SteppedUp {
 		missing = append(missing, ReasonNeedsStepUp)
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNeedsStepUp})
 	}
 	if !slices.Contains(p.Repos, job.RepoID) {
 		missing = append(missing, fmt.Sprintf("repo %s is not on this runner's auto-accept list", name))
+		reasons = append(reasons, runnerwire.AskReason{Code: runnerwire.AskNotOnList, Missing: runnerwire.AskMissingRepo})
 	}
 	if len(missing) > 0 {
-		return false, strings.Join(missing, "; ")
+		return false, strings.Join(missing, "; "), reasons
 	}
-	return true, fmt.Sprintf("verify job in repo %s; verify jobs are on the auto-accept list", name)
+	return true, fmt.Sprintf("verify job in repo %s; verify jobs are on the auto-accept list", name), nil
 }

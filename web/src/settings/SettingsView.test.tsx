@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -7,6 +7,7 @@ import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRouting } from "../runs/routingStore";
 import { useApp } from "../store";
+import { useThemePacks } from "../theme-pack/themePackStore";
 import { openSettings, useSettingsRequest } from "./openSettings";
 import SettingsView from "./SettingsView";
 
@@ -41,11 +42,27 @@ beforeEach(() => {
   });
   vi.spyOn(api, "getRouting").mockResolvedValue({ rules: [] });
   vi.spyOn(api, "getStepUp").mockResolvedValue({ required: false, active: false });
+  useThemePacks.getState().reset();
+  vi.spyOn(api, "listThemePacks").mockResolvedValue({ packs: [], default: "" });
+  vi.spyOn(api, "getThemeManifest").mockResolvedValue({});
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 const nav = (name = "Settings") => screen.getByRole("navigation", { name });
+
+const magicPack = {
+  id: "magic",
+  name: { en: "Magic world" },
+  version: "1.0.0",
+  author: "someone",
+  owner: "ann",
+  sizeBytes: 2048,
+  createdAt: "2026-11-01T00:00:00Z",
+  updatedAt: "2026-11-01T00:00:00Z",
+  mine: true,
+  canDelete: true,
+};
 
 describe("Settings", () => {
   it("lists four sections, each saying what it holds", () => {
@@ -250,5 +267,62 @@ describe("Settings", () => {
     const search = within(nav()).getByRole("searchbox", { name: "Search settings" });
     await user.type(search, "performance");
     expect(within(nav()).getByRole("button", { name: /Agent performance\s*Agents › Advanced/ })).toBeInTheDocument();
+  });
+
+  it("offers Theme packs as a row of General right under Appearance, saying what shows", async () => {
+    vi.spyOn(api, "listThemePacks").mockResolvedValue({ packs: [magicPack], default: "magic" });
+    act(() => openSettings("appearance"));
+    render(<SettingsView />);
+
+    const row = await screen.findByRole("button", { name: /^Theme packs\s*Magic world/ });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    const appearance = screen.getByRole("region", { name: "Appearance and language" });
+    expect(appearance.nextElementSibling).toContainElement(row);
+  });
+
+  it("says the built-in people show when no pack does", async () => {
+    act(() => openSettings("appearance"));
+    render(<SettingsView />);
+    expect(await screen.findByRole("button", { name: /^Theme packs\s*Built-in pixel people/ })).toBeInTheDocument();
+  });
+
+  it("opens Theme packs as a part of its own, and remembers it", async () => {
+    const user = userEvent.setup();
+    act(() => openSettings("themePacks"));
+    render(<SettingsView />);
+
+    expect(within(nav()).getByRole("button", { name: /^General/ })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("region", { name: "Theme packs" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Theme packs/ }));
+    expect(screen.queryByRole("region", { name: "Theme packs" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Theme packs/ }));
+    expect(useApp.getState().preferences.settingsSection).toBe("themePacks");
+  });
+
+  it("finds Theme packs by search, in either language", async () => {
+    const user = userEvent.setup();
+    act(() => openSettings("project"));
+    render(<SettingsView />);
+
+    await user.type(within(nav()).getByRole("searchbox", { name: "Search settings" }), "theme pack");
+    await user.click(within(nav()).getByRole("button", { name: /Theme packs\s*General/ }));
+    expect(await screen.findByRole("region", { name: "Theme packs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Theme packs/ })).toHaveFocus();
+
+    act(() => useApp.getState().updateUIPreference("language", "zh-TW"));
+    await user.type(within(nav("設定")).getByRole("searchbox", { name: "搜尋設定" }), "主題包");
+    expect(within(nav("設定")).getByRole("button", { name: /主題包\s*一般/ })).toBeInTheDocument();
+  });
+
+  it("keeps working when the server has no theme packs to give", async () => {
+    vi.spyOn(api, "listThemePacks").mockRejectedValue(new Error("404"));
+    act(() => openSettings("appearance"));
+    render(<SettingsView />);
+    // No value on the row: it cannot say.
+    const row = await screen.findByRole("button", { name: /^Theme packs/ });
+    await waitFor(() => expect(useThemePacks.getState().error).toBe("404"));
+    expect(row.querySelector(".settings-disclosure-value")).toBeNull();
+    expect(screen.getByRole("region", { name: "Appearance and language" })).toBeInTheDocument();
   });
 });

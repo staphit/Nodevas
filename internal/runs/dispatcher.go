@@ -34,6 +34,10 @@ type Dispatcher struct {
 	// audit records merge approvals and results. Either may be nil.
 	notify func(project, runID string)
 	audit  func(AuditEntry)
+	// globalNotify is told, instead of changed, events and notify, about a
+	// global run (global.go): it has no project room to tell. evType is one
+	// of runnerwire's Global*Event. May be nil.
+	globalNotify func(evType string, r Record)
 
 	// W6 step-up: whether this server has accounts to step up (a loopback
 	// server does not, and vouches for everyone), how long a step-up lasts,
@@ -66,6 +70,19 @@ type Dispatcher struct {
 
 	// createRun records a run (Store.Create); a seam for Start's tests.
 	createRun func(ctx context.Context, in New) (Record, error)
+
+	// workspaceWaiters are the requests waiting for a workspace action's
+	// answer (AwaitWorkspaceAction), by action ID; closed when it comes.
+	workspaceMu      sync.Mutex
+	workspaceWaiters map[string]chan struct{}
+
+	// asks are the runners' pending offer asks by run ID (offerask.go): in
+	// memory only, cleared when the run moves on, refilled on reconnect.
+	// asked marks the runs whose ask was notified, so a reconnect's resend
+	// is not news again.
+	asksMu sync.Mutex
+	asks   map[string]pendingAsk
+	asked  map[string]bool
 }
 
 // UsageAnnounceInterval is the least time between two runs changes a running
@@ -165,6 +182,10 @@ func (d *Dispatcher) SetNotify(fn func(project, runID string)) { d.notify = fn }
 func (d *Dispatcher) SetAudit(fn func(AuditEntry)) { d.audit = fn }
 
 func (d *Dispatcher) notifyRun(r Record) {
+	if r.Global {
+		d.tellGlobal(runnerwire.GlobalRunNotifyEvent, r)
+		return
+	}
 	if d.notify != nil {
 		d.notify(r.Project, r.ID)
 	}
@@ -191,14 +212,33 @@ func (d *Dispatcher) notifyChanged(r Record) {
 	if runnerwire.RunFinal(r.Status) {
 		d.forgetUsage(r.ID)
 	}
-	d.termStatus(r)
-	if d.changed != nil {
-		d.changed(r.Project, r.NodeID)
+	// An ask is about an offer: accepted, declined, cancelled or back in
+	// the queue, nobody is asked any more.
+	if r.Status != runnerwire.RunOffered {
+		d.forgetAsk(r.ID)
 	}
+	d.termStatus(r)
+	d.announceChanged(r)
 	d.observed(Update{Run: r})
 }
 
+// announceChanged is the realtime half of notifyChanged: the run's project
+// room, or for a global run its people.
+func (d *Dispatcher) announceChanged(r Record) {
+	if r.Global {
+		d.tellGlobal(runnerwire.GlobalRunsChangedEvent, r)
+		return
+	}
+	if d.changed != nil {
+		d.changed(r.Project, r.NodeID)
+	}
+}
+
 func (d *Dispatcher) notifyEvents(r Record) {
+	if r.Global {
+		d.tellGlobal(runnerwire.GlobalRunEventsEvent, r)
+		return
+	}
 	if d.events != nil {
 		d.events(r.Project, r.ID)
 	}
@@ -270,6 +310,11 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		if r.RetryAt != "" {
 			continue // waiting for a usage limit to reset (handoff.go)
 		}
+		// A global run waits for a runner that takes them: an older one
+		// would start a board for no project (global.go).
+		if r.Global && !TakesGlobalRuns(runner.Info) {
+			continue
+		}
 		// A role's max concurrent runs (roles_store.go) holds it queued.
 		if ok, err := d.store.roleHasRoom(ctx, r); err != nil || !ok {
 			continue
@@ -310,6 +355,9 @@ func (d *Dispatcher) offer(ctx context.Context, r Record) bool {
 // it, so it is offered again. A listed run the hub already ended (cancelled
 // while the runner was away) is cancelled on the runner.
 func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []string) {
+	// Whatever the runner still asks it says again once it is attached; an
+	// ask from before the reconnect may have ended while it was away.
+	d.dropRunnerAsks(ctx, runnerID)
 	listed := make(map[string]bool, len(active))
 	for _, id := range active {
 		listed[id] = true
@@ -346,6 +394,7 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 	}
 	d.Pump(ctx, runnerID)
 	d.sendPendingMerges(ctx, runnerID)
+	d.sendPendingWorkspaceActions(ctx, runnerID)
 }
 
 func (d *Dispatcher) sendCancel(r Record, reason string) bool {
@@ -361,6 +410,15 @@ func (d *Dispatcher) Accept(ctx context.Context, runnerID string, accept runnerw
 		Runner: runnerID, Base: accept.Base, Branch: accept.Branch,
 	})
 	if errors.Is(err, ErrTransition) && r.RunnerID == runnerID {
+		// Too late, but the runner made a worktree and a branch for it: the
+		// hub keeps the branch, so a discard goes to the runner.
+		if accept.Branch != "" && r.Branch == "" {
+			if late, lateErr := d.store.RecordLateBranch(ctx, r.ID, runnerID, accept.Branch); lateErr != nil {
+				slog.Warn("runs: record a late accept's branch", slog.String("run", r.ID), slog.Any("error", lateErr))
+			} else {
+				d.notifyChanged(late)
+			}
+		}
 		d.sendCancel(r, "run is "+r.Status+" on the hub")
 		return err
 	}
@@ -371,12 +429,14 @@ func (d *Dispatcher) Accept(ctx context.Context, runnerID string, accept runnerw
 	return nil
 }
 
-// Decline applies a runner's decline: offered → declined, with its reason.
-func (d *Dispatcher) Decline(ctx context.Context, runnerID, runID, reason string) error {
+// Decline applies a runner's decline: offered → declined, with its reason
+// and code (runnerwire.Decline*; "" from an older runner, and a code this
+// hub does not know is DeclineOther).
+func (d *Dispatcher) Decline(ctx context.Context, runnerID, runID, reason, code string) error {
 	if reason == "" {
 		reason = "declined at the runner"
 	}
-	r, err := d.store.Transition(ctx, runID, runnerwire.RunDeclined, Change{Runner: runnerID, Error: reason})
+	r, err := d.store.Transition(ctx, runID, runnerwire.RunDeclined, Change{Runner: runnerID, Error: reason, DeclineCode: CleanDeclineCode(code)})
 	if err != nil {
 		return err
 	}
@@ -440,8 +500,8 @@ func (d *Dispatcher) usageChanged(r Record) {
 		d.usageAt[r.ID] = at
 	}
 	d.usageMu.Unlock()
-	if due && d.changed != nil {
-		d.changed(r.Project, r.NodeID)
+	if due {
+		d.announceChanged(r)
 	}
 }
 

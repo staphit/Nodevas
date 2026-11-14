@@ -28,6 +28,7 @@ import (
 	"nodevas/internal/runs"
 	"nodevas/internal/safego"
 	"nodevas/internal/store"
+	"nodevas/internal/themes"
 	"nodevas/internal/usage"
 	"path/filepath"
 	"strconv"
@@ -57,6 +58,8 @@ type Server struct {
 	// runs serves /api/runs and the run traffic on the runner socket; nil
 	// until UseRunnersDB.
 	runs *runs.Dispatcher
+	// themes keeps theme packs; nil until UseThemesDB.
+	themes *themes.Store
 	// usage keeps agent sessions' token usage and the prices that cost it;
 	// nil until UseAgentsDB.
 	usage *usage.Store
@@ -374,6 +377,9 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, nodeID string) { s.broadcastProject(project, runnerwire.RunsChangedEvent, nodeID) },
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
+	// A global agent belongs to no project room: its events go to the
+	// connections of who started it and who owns its runner, ids only.
+	s.runs.SetGlobalNotify(s.broadcastGlobalRun)
 	s.runs.SetAudit(s.auditRun)
 	// Agent roles: a staged pipeline's evidence goes on its node's history,
 	// and its approval marks the node done (the Executor may not).
@@ -414,6 +420,19 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	// …or a System One model (Jev, or Laya on the owner's PC) through it.
 	autopilot.RegisterSystemOneAdvisor(autopilot.NewSystemOneAdvisor(s.llm))
 	s.startAutopilot(database)
+}
+
+// broadcastGlobalRun tells a global run's dispatcher and its runner's owner
+// about it (runnerwire.GlobalRunsChangedEvent and the like), and nobody
+// else: a global agent is no project's, so no room hears of it.
+func (s *Server) broadcastGlobalRun(evType string, r runs.Record) {
+	if s.hub == nil {
+		return
+	}
+	s.hub.BroadcastActor(r.CreatedBy, evType, r.ID)
+	if r.OwnerID != r.CreatedBy {
+		s.hub.BroadcastActor(r.OwnerID, evType, r.ID)
+	}
 }
 
 // RunnerLLM is the relay for copilot model calls made on runners, or nil

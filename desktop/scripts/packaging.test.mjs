@@ -65,3 +65,15 @@ test("the Windows installer locks down a just-me folder outside the user's Progr
   assert.match(mine, /',"S-1-'/, "the SID is read from whoami's CSV line");
   assert.match(mine, /\$\{if\} \$1 < 8/, "no grant without a SID");
 });
+
+// The app is packed from build.files and nothing else: a file main.cjs
+// requires that is not listed there is missing from every installed copy,
+// and the app fails on its first line.
+test("the packed app carries every file main.cjs requires", () => {
+  const main = readFileSync(resolve(desktop, "main.cjs"), "utf8");
+  const local = [...main.matchAll(/require\("\.\/([^"]+)"\)/g)].map((match) => match[1]);
+  assert.ok(local.includes("port.cjs"), "main.cjs no longer requires port.cjs");
+  for (const file of local) {
+    assert.ok(build.files.includes(file), `${file} is required by main.cjs but not packed`);
+  }
+});

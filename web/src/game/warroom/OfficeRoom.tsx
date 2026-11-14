@@ -2,7 +2,9 @@
 // a button that changes the style), then the room: the style's wall, the
 // work area's desks, the meeting room's table (agents in a meeting, and what
 // lies there for the viewer: PRs to merge, reviews, held messages) and the
-// entrance, where offered runs wait to be let in.
+// entrance, where offered runs wait to be let in. The global agents' office
+// is drawn the same way, with a plain sign (no project, no style of its own)
+// and only the rooms someone is in.
 
 import { memo, useMemo, useRef, useState, type CSSProperties } from "react";
 
@@ -15,11 +17,11 @@ import type { Sprite } from "../pixel/compile";
 import { PixelSprite } from "../pixel/PixelSprite";
 import { CELL, DOOR } from "../pixel/sprites";
 import { floorDecorOf, HANGING, wallDecorOf } from "../pixel/styleSprites";
-import type { Actor, Meeting, MeetingItem, OfficeStyle, ProjectOffice } from "../world";
+import { GLOBAL_OFFICE, type Actor, type Meeting, type MeetingItem, type OfficeStyle, type ProjectOffice } from "../world";
 import { itemScene, type MeetingOptions } from "./deskArt";
 import { layoutOffice } from "./officeLayout";
 import { OfficeStylePopover } from "./OfficeStylePopover";
-import { AgentDesk, EmptySeat, FreeDesk, menuItem } from "./PixelDesk";
+import { AgentDesk, EmptySeat, FreeDesk, menuItem, type AgentFace } from "./PixelDesk";
 
 /** A glyph per style for the door sign: the style in one character. */
 export const STYLE_GLYPH: Record<OfficeStyle, string> = {
@@ -135,24 +137,25 @@ export function OfficeRoom({
   const itemsById = useMemo(() => new Map(office.items.map((item) => [item.id, item])), [office.items]);
   const { style } = office;
   const floorDecor = floorDecorOf(style);
+  // The global agents' office: no project to name, no asks, no table.
+  const global = office.project === GLOBAL_OFFICE;
+  const name = global ? t("globalAgents.office") : office.label;
+
+  const face = (actor: Actor): AgentFace => {
+    const meeting = meetingOf.get(actor.id);
+    return {
+      actor,
+      label: actorLabel(t, actor, placeOf(t, actor)),
+      detail: meeting ? meetingLabel(t, meeting) || undefined : undefined,
+      row: actor.runId ? rowOf(actor.runId) : undefined,
+      titleOf,
+    };
+  };
 
   const desk = (id: string, scene: "desk" | "door" | "meeting", edge?: MeetingOptions["edge"]) => {
     const actor = actorsById.get(id);
     if (!actor) return null;
-    const meeting = meetingOf.get(id);
-    return (
-      <AgentDesk
-        key={id}
-        actor={actor}
-        scene={scene}
-        style={style}
-        edge={edge}
-        label={actorLabel(t, actor, placeOf(t, actor))}
-        detail={meeting ? meetingLabel(t, meeting) || undefined : undefined}
-        row={actor.runId ? rowOf(actor.runId) : undefined}
-        titleOf={titleOf}
-      />
-    );
+    return <AgentDesk key={id} scene={scene} style={style} edge={edge} {...face(actor)} />;
   };
 
   const running = office.work.filter((id) => {
@@ -162,23 +165,36 @@ export function OfficeRoom({
   const waiting =
     office.items.length + [...office.work, ...office.meeting].filter((id) => actorsById.get(id)?.ask).length;
   const cells = layout.meetingCells.length;
+  const meetingRoom = !global || office.meeting.length + office.items.length > 0;
+  const entrance = !global || layout.entrance.length > 0;
 
   return (
     <section
-      className={`px-office-room px-style--${style}`}
-      aria-label={t("game.office.label", { name: office.label })}
+      className={`px-office-room px-style--${style}${global ? " is-global" : ""}`}
+      aria-label={t("game.office.label", { name })}
       style={{ ["--px-cols" as string]: Math.min(Math.max(layout.desks.length + layout.spareDesks, 3), 6) } as CSSProperties}
     >
       <header className="px-office-head">
-        <DoorSign office={office} />
+        {global ? (
+          <span className="px-sign is-global">
+            <span className="px-sign-name">{name}</span>
+          </span>
+        ) : (
+          <DoorSign office={office} />
+        )}
         <span className="px-office-chips">
           <Chip glyph="▶" label={t("game.office.running", { count: running })} count={running} />
-          <Chip glyph="✋" label={t("game.office.waiting", { count: waiting })} count={waiting} attention />
+          {!global && (
+            <Chip glyph="✋" label={t("game.office.waiting", { count: waiting })} count={waiting} attention />
+          )}
           <Chip glyph="🚪" label={t("game.office.offered", { count: layout.entrance.length })} count={layout.entrance.length} />
         </span>
-        <span className="px-office-free">
-          {office.freeDesks === 1 ? t("game.office.freeOne") : t("game.office.free", { count: office.freeDesks })}
-        </span>
+        {/* The runners' free slots are said once, by the project's office. */}
+        {!global && (
+          <span className="px-office-free">
+            {office.freeDesks === 1 ? t("game.office.freeOne") : t("game.office.free", { count: office.freeDesks })}
+          </span>
+        )}
       </header>
       <div className="px-scene">
         <StyleWall style={style} />
@@ -194,39 +210,43 @@ export function OfficeRoom({
               ))}
             </div>
           </div>
-          <div className="px-area is-meeting" role="group" aria-label={areaName(t, "meeting")}>
-            <span className="px-area-name" aria-hidden="true">
-              {areaName(t, "meeting")}
-            </span>
-            <div className="px-floor px-meeting">
-              <div className="px-table">
-                {layout.meetingCells.map((cell, i) => {
-                  const edge = edgeOf(i, cells);
-                  if ("actorId" in cell) return desk(cell.actorId, "meeting", edge);
-                  if ("itemId" in cell) {
-                    const item = itemsById.get(cell.itemId);
-                    return item ? (
-                      <MeetingItemCell key={item.id} item={item} style={style} edge={edge} titleOf={titleOf} />
-                    ) : null;
-                  }
-                  return <EmptySeat key={`empty-${i}`} style={style} edge={edge} />;
-                })}
+          {meetingRoom && (
+            <div className="px-area is-meeting" role="group" aria-label={areaName(t, "meeting")}>
+              <span className="px-area-name" aria-hidden="true">
+                {areaName(t, "meeting")}
+              </span>
+              <div className="px-floor px-meeting">
+                <div className="px-table">
+                  {layout.meetingCells.map((cell, i) => {
+                    const edge = edgeOf(i, cells);
+                    if ("actorId" in cell) return desk(cell.actorId, "meeting", edge);
+                    if ("itemId" in cell) {
+                      const item = itemsById.get(cell.itemId);
+                      return item ? (
+                        <MeetingItemCell key={item.id} item={item} style={style} edge={edge} titleOf={titleOf} />
+                      ) : null;
+                    }
+                    return <EmptySeat key={`empty-${i}`} style={style} edge={edge} />;
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-        <div className="px-entrance px-floor" role="group" aria-label={areaName(t, "entrance")}>
-          {layout.entrance.length === 0 ? (
-            <span className="px-doorway" aria-hidden="true">
-              <PixelSprite parts={lone("door", DOOR)} width={DOOR.w} height={DOOR.h} />
-            </span>
-          ) : (
-            layout.entrance.map((id) => desk(id, "door"))
           )}
-          <span className="px-floor-decor" aria-hidden="true">
-            <PixelSprite parts={lone("decor", floorDecor)} width={floorDecor.w} height={floorDecor.h} />
-          </span>
         </div>
+        {entrance && (
+          <div className="px-entrance px-floor" role="group" aria-label={areaName(t, "entrance")}>
+            {layout.entrance.length === 0 ? (
+              <span className="px-doorway" aria-hidden="true">
+                <PixelSprite parts={lone("door", DOOR)} width={DOOR.w} height={DOOR.h} />
+              </span>
+            ) : (
+              layout.entrance.map((id) => desk(id, "door"))
+            )}
+            <span className="px-floor-decor" aria-hidden="true">
+              <PixelSprite parts={lone("decor", floorDecor)} width={floorDecor.w} height={floorDecor.h} />
+            </span>
+          </div>
+        )}
       </div>
     </section>
   );

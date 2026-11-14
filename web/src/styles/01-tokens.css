@@ -93,6 +93,14 @@ body,
   background: var(--bg);
   line-height: 1.6;
 }
+/* A theme pack's skin asked for serif (theme-pack/themeSkin.ts): fonts the
+   system already has, nothing downloaded. "sans" is the stack above. */
+html[data-theme-font="serif"],
+html[data-theme-font="serif"] body,
+html[data-theme-font="serif"] #root {
+  font-family: "Noto Serif TC", "Source Han Serif TC", "Songti TC", "PMingLiU", Georgia,
+    "Times New Roman", serif;
+}
 html {
   color-scheme: light;
 }

@@ -14,6 +14,7 @@
 import { isNetworkFailure } from "../api";
 import { markServerReachable } from "../api/connectivity";
 import { useApp } from "../store";
+import { useThemePacks } from "../theme-pack/themePackStore";
 import type { OperationMap } from "./operations";
 
 export async function resyncAfterReconnect(): Promise<void> {
@@ -32,6 +33,7 @@ export async function resyncAfterReconnect(): Promise<void> {
       error: isNetworkFailure(state.error) ? null : state.error,
     };
   });
+  useThemePacks.getState().onChanged();
   const { loadAll, refreshState, refreshTrash, refreshProjects } = useApp.getState();
   await Promise.allSettled([loadAll(), refreshState(), refreshTrash(), refreshProjects()]);
 }

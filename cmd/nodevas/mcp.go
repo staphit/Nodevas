@@ -9,11 +9,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/mcp"
+	"nodevas/internal/runnerwire"
 )
 
 // mcpServe runs the MCP server that lets an agent work the board.
@@ -24,6 +26,13 @@ import (
 // opposite of the point. --project names a project inside the workspace the
 // running server already has open.
 func mcpServe(args []string) {
+	// First, before any flag or the network: a global agent's run has no
+	// board, whichever config started this.
+	wd, _ := os.Getwd()
+	if reason := noBoardReason(os.Getenv, wd); reason != "" {
+		fmt.Fprintf(os.Stderr, "nodevas mcp: refusing to serve: %s\n", reason)
+		os.Exit(2)
+	}
 	fs, f := newMCPFlags(flag.ExitOnError)
 	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
 	serverURL, err := mcpServerURL(fs, f)
@@ -96,6 +105,71 @@ func mcpServe(args []string) {
 		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// noBoardReason is why this process must not serve, or "": it runs inside a
+// global agent's run (runnerwire/noboard.go), which has no board. The runner
+// starts no `nodevas mcp` for one, but its agent CLI may start the owner's
+// own from its config (Codex and the Antigravity CLI do), and that one would
+// work through whatever the hub on this machine trusts: a loopback hub with
+// no accounts trusts every local process. The run says so in its
+// environment, and in its worktree for a CLI that starts its MCP servers
+// with a cleared environment but in its own working directory.
+//
+// wd is searched upwards for the first .git: a worktree's .git file names
+// its git directory, which the runner marks. A .git directory is a checkout
+// of its own, never a run's worktree.
+func noBoardReason(getenv func(string) string, wd string) string {
+	if run := strings.TrimSpace(getenv(runnerwire.NoBoardEnv)); run != "" {
+		return fmt.Sprintf("this is global agent run %s's environment (%s), and a global agent has no board",
+			run, runnerwire.NoBoardEnv)
+	}
+	if wd == "" {
+		return ""
+	}
+	for dir := filepath.Clean(wd); ; {
+		dotGit := filepath.Join(dir, ".git")
+		if info, err := os.Stat(dotGit); err == nil {
+			if !info.Mode().IsRegular() {
+				return ""
+			}
+			marker := worktreeMarker(dotGit)
+			if marker == "" {
+				return ""
+			}
+			if _, err := os.Stat(marker); err != nil {
+				return ""
+			}
+			return fmt.Sprintf("%s is a global agent's worktree, and a global agent has no board "+
+				"(when the runner is gone and the run is over, delete %s)", dir, marker)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// worktreeMarker is where the runner's no-board marker would be for the
+// worktree whose .git file is dotGit: in the git directory the file names
+// (relative to the file's folder when it is relative). "" when the file
+// names none.
+func worktreeMarker(dotGit string) string {
+	raw, err := os.ReadFile(dotGit)
+	if err != nil || len(raw) > 4<<10 {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(raw), "\n")
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:")
+	if gitDir = strings.TrimSpace(gitDir); !ok || gitDir == "" {
+		return ""
+	}
+	gitDir = filepath.FromSlash(gitDir)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(filepath.Dir(dotGit), gitDir)
+	}
+	return filepath.Join(gitDir, runnerwire.NoBoardMarker)
 }
 
 // runMCPEnv carries a runner's `nodevas mcp` command line for one run, as a

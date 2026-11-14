@@ -10,6 +10,8 @@ import {
 import { AuthError, api, onUnauthorized, type Actor } from "../api";
 import { IconSignOut } from "../icons";
 import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../i18n";
+import { flushPreferences, setPreferenceAccount } from "../preferences/sync";
+import { EditionProvider } from "../runners/edition";
 import { compactSecondFactor, isSecondFactorCode } from "./secondFactor";
 
 /**
@@ -61,6 +63,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [actor, setActor] = useState<Actor | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // Who signed in, for the app and for the choices that follow the account
+  // (preferences/sync.ts). A cache that holds another account's choices, or
+  // none yet, may hold the app back a moment so the right ones show first.
+  const adopt = useCallback((next: Actor) => {
+    const waiting = setPreferenceAccount(next.id);
+    if (waiting) void waiting.then(() => setActor(next));
+    else setActor(next);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -68,11 +79,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       .then((status) => {
         if (cancelled) return;
         const accounts = status.mode === "accounts";
-        setMode(accounts ? "accounts" : "local");
         // A loopback server answers with its built-in "local" actor, and
         // authenticated: true. That is not a person signed in: the rest of
         // the app reads a null viewer as "no accounts here", so it gets one.
-        setActor(accounts && status.authenticated ? status.actor : null);
+        // Its choices are still that actor's on the server ("local").
+        const signedIn = accounts && status.authenticated ? status.actor : null;
+        const show = () => {
+          if (cancelled) return;
+          setMode(accounts ? "accounts" : "local");
+          setActor(signedIn);
+        };
+        const waiting = setPreferenceAccount(
+          accounts ? (signedIn?.id ?? null) : status.actor?.id || "local",
+        );
+        if (waiting) void waiting.then(show);
+        else show();
       })
       .catch(() => {
         // A failure here says nothing about who is signed in, so it must not be
@@ -89,7 +110,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, [attempt]);
 
-  useEffect(() => onUnauthorized(() => setActor(null)), []);
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        setPreferenceAccount(null);
+        setActor(null);
+      }),
+    [],
+  );
 
   /**
    * Drop the session, then the actor.
@@ -100,10 +128,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
    * nothing.
    */
   const signOut = useCallback(() => {
-    void api
-      .logout()
+    // A choice made a moment ago is saved as this account before the session
+    // ends; the next account to sign in here never sends it.
+    void flushPreferences()
+      .then(() => api.logout())
       .catch(() => undefined)
-      .finally(() => setActor(null));
+      .finally(() => {
+        setPreferenceAccount(null);
+        setActor(null);
+      });
   }, []);
 
   if (mode === "loading") {
@@ -126,15 +159,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
   if (mode === "accounts" && actor === null) {
-    return <SignIn onSignedIn={setActor} />;
+    return <SignIn onSignedIn={adopt} />;
   }
+  // A loopback server without accounts is the single-user edition: its
+  // runner is part of the app (runners/edition.ts).
   return (
     <ServerModeContext.Provider value={mode}>
-      <ViewerContext.Provider value={actor}>
-        <SignOutContext.Provider value={signOut}>
-          {children}
-        </SignOutContext.Provider>
-      </ViewerContext.Provider>
+      <EditionProvider edition={mode === "local" ? "single" : "team"}>
+        <ViewerContext.Provider value={actor}>
+          <SignOutContext.Provider value={signOut}>
+            {children}
+          </SignOutContext.Provider>
+        </ViewerContext.Provider>
+      </EditionProvider>
     </ServerModeContext.Provider>
   );
 }

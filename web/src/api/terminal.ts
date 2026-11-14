@@ -1,5 +1,5 @@
 import { getProjectOverride, notifyUnauthorized } from "./http";
-import { runFinal } from "./runs";
+import { isGlobalRun, runFinal } from "./runs";
 
 // Mirrors internal/runnerwire/terminal.go (W2.5). An interactive run's agent
 // TUI runs in a PTY on the runner; the hub relays its bytes to every browser
@@ -47,9 +47,12 @@ export interface TerminalConnection {
 
 /** The terminal socket's URL. A WebSocket carries no custom headers, so the
  * project goes in the query (the server reads ?project= before the header the
- * REST calls send). */
+ * REST calls send). A global run's has no project: its own route. */
 export function terminalSocketURL(runId: string, project = ""): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
+  if (isGlobalRun(runId)) {
+    return `${proto}://${location.host}/api/global-runs/${encodeURIComponent(runId)}/terminal`;
+  }
   const scope = project || getProjectOverride();
   const query = scope ? `?project=${encodeURIComponent(scope)}` : "";
   return `${proto}://${location.host}/api/runs/${encodeURIComponent(runId)}/terminal${query}`;

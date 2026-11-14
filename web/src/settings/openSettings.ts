@@ -12,6 +12,7 @@ import { useApp } from "../store";
 export type SettingsSection =
   | "project"
   | "appearance"
+  | "themePacks"
   | "notifications"
   | "backup"
   | "workstation"
@@ -35,6 +36,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = ["general", "agents", "pr
 /** A row of a section that opens in place. Those of Agents › Advanced are
  * ADVANCED_ROWS. */
 export type SettingsRow =
+  | "themePacks"
   | "layout"
   | "reminders"
   | "copilot"
@@ -74,6 +76,7 @@ export interface SettingsPlace {
 /** Where each old part lives now. */
 export const SETTINGS_PLACES: Record<SettingsSection, SettingsPlace> = {
   appearance: { page: "general" },
+  themePacks: { page: "general", row: "themePacks" },
   notifications: { page: "general", row: "reminders" },
   copilot: { page: "general", row: "copilot" },
   workstation: { page: "agents" },

@@ -61,7 +61,7 @@ const ErrRemoteMergeOff = "this runner does not accept remote merges"
 
 // loadMerges reads merges.json, dropping answers older than a day.
 func (j *jobs) loadMerges() {
-	dir, err := j.c.Config.RunDataDir()
+	dir, err := j.c.cfg().RunDataDir()
 	if err != nil {
 		return
 	}
@@ -118,7 +118,7 @@ func (j *jobs) sortedMergesLocked() []mergeRecord {
 }
 
 func (j *jobs) saveMergesLocked() {
-	dir, err := j.c.Config.RunDataDir()
+	dir, err := j.c.cfg().RunDataDir()
 	if err != nil {
 		return
 	}
@@ -219,7 +219,7 @@ func (j *jobs) queueMergeResult(req runnerwire.MergeJob, reason string) {
 // (now, or already at the approved head); merged is then the watched PR to
 // refresh and clean up after.
 func (j *jobs) tryMerge(req runnerwire.MergeJob) (reason string, merged *watchedPR) {
-	cfg := j.c.Config
+	cfg := j.c.cfg()
 	if !cfg.RemoteMergeOn() {
 		return ErrRemoteMergeOff, nil
 	}

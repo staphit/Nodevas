@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Run, type RunChanges, type RunEvent } from "../api";
-import { foldLatest, mergeEvents, useRuns } from "./runStore";
+import { foldLatest, mergeEvents, selectRunById, useRuns } from "./runStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -288,5 +288,50 @@ describe("foldLatest", () => {
     expect(foldLatest(held, [makeRun({ id: "old", createdAt: "2026-10-23T08:00:00Z" })])).toBe(held);
     const updated = foldLatest(held, [{ ...first, prState: "open" }]);
     expect(updated.alpha.prState).toBe("open");
+  });
+});
+
+describe("global runs", () => {
+  const globalRun = (overrides: Partial<Run> = {}) =>
+    makeRun({ id: "g1", project: "", nodeId: "", global: true, title: "Fix login", ...overrides });
+
+  beforeEach(() => {
+    useRuns.setState({ globalById: {} });
+  });
+
+  it("holds a global run by id, never in a node's list", () => {
+    useRuns.getState().putRun(globalRun());
+    useRuns.getState().putRuns([globalRun({ id: "g2" }), makeRun({ id: "p1" })]);
+    const state = useRuns.getState();
+    expect(Object.keys(state.globalById).sort()).toEqual(["g1", "g2"]);
+    expect(state.runsByNode).toEqual({ alpha: [expect.objectContaining({ id: "p1" })] });
+    expect(state.latestByNode[""]).toBeUndefined();
+    expect(selectRunById(state, "g2")?.title).toBe("Fix login");
+    expect(selectRunById(state, "p1")?.id).toBe("p1");
+    expect(selectRunById(state, "nope")).toBeUndefined();
+  });
+
+  it("keeps a cancelled global run where it is held", async () => {
+    useRuns.getState().putRun(globalRun());
+    vi.spyOn(api, "cancelRun").mockResolvedValue(globalRun({ status: "cancelled" }));
+    expect(await useRuns.getState().cancelRun("g1")).toBe(true);
+    expect(useRuns.getState().globalById.g1.status).toBe("cancelled");
+    expect(useRuns.getState().runsByNode).toEqual({});
+  });
+
+  it("refreshes a global run in place", async () => {
+    useRuns.getState().putRun(globalRun());
+    vi.spyOn(api, "getRun").mockResolvedValue(globalRun({ status: "succeeded" }));
+    await useRuns.getState().refreshRun("g1");
+    expect(useRuns.getState().globalById.g1.status).toBe("succeeded");
+    expect(useRuns.getState().runsByNode).toEqual({});
+  });
+
+  it("keeps global runs across a project switch", () => {
+    useRuns.getState().putRun(globalRun());
+    useRuns.getState().putRun(makeRun({ id: "p1" }));
+    useRuns.getState().reset();
+    expect(useRuns.getState().globalById.g1).toBeTruthy();
+    expect(useRuns.getState().runsByNode).toEqual({});
   });
 });

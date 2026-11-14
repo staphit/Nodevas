@@ -118,6 +118,8 @@ func TestEveryStoredActionReadsAsTheSharedVocabulary(t *testing.T) {
 			logShape{"configuration", "config.change", "success", "", "", ""}},
 		{"model prices", Event{Action: "PUT usage/prices"},
 			logShape{"configuration", "config.change", "success", "", "", ""}},
+		{"the site's theme pack", Event{Action: "PUT themes/default"},
+			logShape{"configuration", "config.change", "success", "", "", ""}},
 		{"a refusal for an unknown address", Event{Action: ActionSignInFailed, Detail: map[string]any{"reason": "bad-credentials"}, Reason: "unknown-account"},
 			logShape{"authentication", "auth.signin", "failure", "unknown-account", "otp", "sign-in"}},
 		{"the guess that burnt the passcode", Event{Action: ActionSignInFailed, Detail: map[string]any{"reason": "bad-credentials"}, Reason: "too-many-attempts"},

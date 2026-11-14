@@ -11,6 +11,7 @@ import { authApi } from "./auth";
 import { controlApi } from "./control";
 import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
+import { globalRunsApi } from "./globalRuns";
 import { graphApi } from "./graph";
 import { historyApi } from "./history";
 import { lifecycleApi } from "./lifecycle";
@@ -21,6 +22,7 @@ import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
 import { stationApi } from "./station";
+import { themesApi } from "./themes";
 import { usageApi } from "./usage";
 import { workspaceApi } from "./workspace";
 
@@ -142,7 +144,44 @@ export type {
   RunnerListResponse,
   RunnerModel,
   RunnerRepo,
+  RunnerSettingsResponse,
+  RunnerSettingsRequest,
+  LocalSettings,
+  PermissionLevel,
+  InitPlan,
+  RepoInspect,
+  RepoInspectState,
+  RepoRefusal,
+  RepoAddResponse,
+  RepoChangeResponse,
 } from "./runners";
+export {
+  CAP_APP_ACCEPT,
+  CAP_GLOBAL_RUNS,
+  CAP_GLOBAL_RUNS_ON,
+  CAP_REMOTE_SETTINGS,
+  CAP_REPO_ADMIN,
+  RunnerRequestError,
+} from "./runners";
+export {
+  DEFAULT_GLOBAL_SLUG,
+  globalTitle,
+  GlobalRunError,
+  MAX_GLOBAL_TASK_BYTES,
+  MAX_GLOBAL_TITLE_CHARS,
+  MAX_SLUG_BYTES,
+  slugFrom,
+  validSlug,
+} from "./globalRuns";
+export type {
+  CancelAllResponse,
+  CreateGlobalRunRequest,
+  GlobalRunsBlock,
+  GlobalRunsResponse,
+  RunnerLoad,
+  RunnerToday,
+  SettableBlock,
+} from "./globalRuns";
 export {
   MAX_SESSION_FILES,
   MAX_RUN_PROMPT_BYTES,
@@ -150,8 +189,22 @@ export {
   runCancellable,
   runWaitsForLimit,
   runFinal,
+  forgetRunWorkspace,
+  forgetGlobalRuns,
+  isGlobalRun,
+  rememberGlobalRun,
+  rememberGlobalRuns,
+  runPath,
+  WorkspaceActionError,
+  WORKSPACE_CODES,
+  WORKSPACE_GATE_CODES,
+  WORKSPACE_RUNNER_CODES,
 } from "./runs";
 export type {
+  AskReason,
+  OfferAnswer,
+  OfferAsk,
+  RunOrigin,
   CIStatus,
   CreateRunRequest,
   FileChange,
@@ -192,6 +245,15 @@ export type {
   RoleSettings,
   RoleSettingsResponse,
   VerifyResult,
+  RunWorkspaceAction,
+  RunWorkspaceInfo,
+  RunWorkspaceState,
+  RunWorkspaceView,
+  WorkspaceActionKind,
+  WorkspaceActionStatus,
+  WorkspaceCode,
+  WorkspaceFilesBlock,
+  WorkspaceGateCode,
 } from "./runs";
 export {
   FAILURE_KINDS,
@@ -265,6 +327,7 @@ export type {
   BuildingWaiting,
   WaitingRunLike,
 } from "./station";
+export type { ThemePack, ThemePackList } from "./themes";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -294,6 +357,7 @@ export const api = {
   ...agentsApi,
   ...runnersApi,
   ...runsApi,
+  ...globalRunsApi,
   ...usageApi,
   ...membersApi,
   ...accountsApi,
@@ -301,4 +365,5 @@ export const api = {
   ...planApi,
   ...controlApi,
   ...stationApi,
+  ...themesApi,
 };

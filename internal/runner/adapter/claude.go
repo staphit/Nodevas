@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -110,11 +111,7 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if relay {
 		args = append(args, "--permission-prompt-tool", ClaudeApproveTool)
 	}
-	args = append(args, "--allowedTools", NodevasMCPTools)
-	if relay {
-		args = append(args, ClaudeApproveTool)
-	}
-	args = append(args, env.AllowedTools...)
+	args = append(args, claudeAllowedTools(env, relay)...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	// On stdin, not as an argument: no command-line length limit and no
@@ -130,13 +127,32 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 
 // ClaudeRelays reports whether a Claude Code run under env sends its
 // permission prompts to the hub's approve_tool (--permission-prompt-tool):
-// permissionRelay on, in a mode that asks at all.
+// permissionRelay on, in a mode that asks at all, with a board to ask
+// through.
 func ClaudeRelays(env RunEnv) bool {
 	mode := env.PermissionMode
 	if mode == "" {
 		mode = DefaultClaudePermissionMode
 	}
-	return env.PermissionRelay && PermissionRelayApplies("claude", mode, false)
+	return env.PermissionRelay && !env.NoBoard && PermissionRelayApplies("claude", mode, false)
+}
+
+// claudeAllowedTools is the trailing --allowedTools flag: the nodevas
+// server's tools (none without a board), approve_tool when relay, then the
+// owner's own; nothing at all when that leaves no tool.
+func claudeAllowedTools(env RunEnv, relay bool) []string {
+	var tools []string
+	if !env.NoBoard {
+		tools = append(tools, NodevasMCPTools)
+	}
+	if relay {
+		tools = append(tools, ClaudeApproveTool)
+	}
+	tools = append(tools, env.AllowedTools...)
+	if len(tools) == 0 {
+		return nil
+	}
+	return append([]string{"--allowedTools"}, tools...)
 }
 
 // ApproveToolName is the nodevas MCP tool ClaudeApproveTool names.
@@ -170,7 +186,8 @@ func claudeMCPTimeoutAtLeast(ms int) bool {
 //     run's asks and heartbeats would land on that session;
 //   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
 //     secret, the copilot and advisor keys. jobEnv adds back the few a run
-//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP, NODEVAS_RUN_NODE);
+//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP, NODEVAS_RUN_NODE, and
+//     NODEVAS_NO_BOARD for a global agent's run);
 //   - GitHub tokens: the runner pushes and opens pull requests itself, an
 //     agent never needs them.
 //
@@ -232,10 +249,16 @@ func strippedEnv(name string) bool {
 // setup-agent`) do not report a run as one of the owner's sessions.
 const RunIDEnv = "NODEVAS_RUN_ID"
 
-// jobEnv is childEnv for job's agent process: RunIDEnv set, and each of extra
-// ("NAME=value") in place of whatever the runner's environment had under that
-// name (names compared case-insensitively, as Windows does).
+// jobEnv is childEnv for job's agent process: RunIDEnv set, for a global
+// agent's run runnerwire.NoBoardEnv too (a `nodevas mcp` its CLI starts from
+// the owner's config refuses on it), and each of extra ("NAME=value") in
+// place of whatever the runner's environment had under that name (names
+// compared case-insensitively, as Windows does).
 func jobEnv(job runnerwire.Job, extra ...string) []string {
+	if job.Global {
+		// Never blank: `nodevas mcp` reads a blank one as unset.
+		extra = append([]string{runnerwire.NoBoardEnv + "=" + cmp.Or(job.RunID, "global")}, extra...)
+	}
 	if job.RunID != "" {
 		extra = append([]string{RunIDEnv + "=" + job.RunID}, extra...)
 	}

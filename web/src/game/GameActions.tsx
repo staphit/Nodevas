@@ -2,8 +2,8 @@
 // out maps to a real action of the app: open the node, open the run in the
 // drawer, show a diff, answer an ask, decide a held message, follow a PR
 // link, go to another project's office (and do something there once it has
-// loaded), open an autopilot or the runners. The views never invent
-// behaviour of their own.
+// loaded), open an autopilot, the runners or Station's Global agents tab.
+// The views never invent behaviour of their own.
 
 import {
   createContext,
@@ -26,9 +26,11 @@ import { useI18n } from "../i18n";
 import { RunDiffDialog } from "../runs/DiffViewer";
 import { SessionDiffDialog } from "../runs/NodeSessions";
 import { openNodeRuns } from "../runs/openRuns";
+import { openRunWorkspace } from "../runs/openWorkspace";
 import { useRuns } from "../runs/runStore";
 import { useSessions } from "../runs/sessionStore";
 import { openSettings } from "../settings/openSettings";
+import { openGlobalAgents } from "../station/openGlobalAgents";
 import { useStation } from "../station/stationStore";
 import { reportError, useApp } from "../store";
 import { mergeRuns } from "./useWorld";
@@ -53,9 +55,12 @@ export function useGameActions(): GameActions {
 
 function findRun(runId: string) {
   const state = useRuns.getState();
-  return mergeRuns(state.activeRuns, state.latestByNode, state.runsByNode)
-    .reverse()
-    .find((run) => run.id === runId);
+  return (
+    state.globalById[runId] ??
+    mergeRuns(state.activeRuns, state.latestByNode, state.runsByNode)
+      .reverse()
+      .find((run) => run.id === runId)
+  );
 }
 
 /** Opens a link the hub reported, only over http(s), never with an opener. */
@@ -101,6 +106,11 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
           return;
         case "run-diff":
           open({ kind: "run-diff", runId: target.runId });
+          return;
+        case "run-workspace":
+          // Drawn by RunWorkspaceHost, over whichever room asked; a global
+          // agent's too, whatever project the board is on.
+          openRunWorkspace(target.runId);
           return;
         case "session-diff": {
           // The session's snapshot is the diff it left at Stop; its node's
@@ -154,6 +164,9 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
           return;
         case "runners":
           openSettings("runners");
+          return;
+        case "global-agents":
+          openGlobalAgents(target.runId);
           return;
       }
     },

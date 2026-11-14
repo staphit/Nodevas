@@ -4,27 +4,32 @@
 // a glance through its door: who is at a desk, how much waits on the viewer
 // there. Idle projects and the overflow past MAX_COMPACT are door signs only,
 // so a workspace of many projects stays one screen. Agents with nothing to do
-// share a lounge; the runners stand as racks in a server room.
+// share a lounge; the runners stand as racks in a server room. The viewer's
+// global agents (no project, no node) have an office of their own under the
+// current one, built the same way from Station's global store.
 
 import type { BuildingProject, BuildingResponse, BuildingRun } from "../api/station";
 import type { Runner } from "../api/runners";
-import { runFinal, runWaitsForLimit } from "../api/runs";
+import { runFinal, runInteractive, runWaitsForLimit, type Run } from "../api/runs";
 import type { WaitingItem } from "../station/waiting";
 import { waitingOnYou } from "../station/waiting";
 import type { WorldInputs } from "./buildWorld";
 import { nodeTitles } from "./buildWorld";
-import { buildCurrentOffice, holdsSlot } from "./office";
+import { buildCurrentOffice, dedupeRuns, holdsSlot, seatedRuns } from "./office";
 import { resolveOfficeStyle } from "./officeStyle";
 import { sessionOnline } from "./presence";
-import type {
-  Building,
-  ClickTarget,
-  CompactOffice,
-  Energy,
-  LoungeSpot,
-  MiniDesk,
-  Pose,
-  Rack,
+import {
+  GLOBAL_OFFICE,
+  type Actor,
+  type Building,
+  type ClickTarget,
+  type CompactOffice,
+  type Energy,
+  type LoungeSpot,
+  type MiniDesk,
+  type Pose,
+  type ProjectOffice,
+  type Rack,
 } from "./world";
 
 /** Other busy offices drawn as compact offices; the rest are door signs. */
@@ -46,6 +51,9 @@ export type BuildingInputs = WorldInputs & {
   remote: BuildingResponse | null;
   /** What waits on the viewer in the current project. */
   waitingItems: WaitingItem[];
+  /** The viewer's global agents' runs (no project, no node); none or absent:
+   * no global office. Duplicates allowed, the last copy wins. */
+  globalRuns?: Run[];
 };
 
 const inProject = (project: string, then: ClickTarget): ClickTarget => ({ kind: "in-project", project, then });
@@ -117,9 +125,11 @@ export function compactOffice(p: BuildingProject, now: number): CompactOffice {
 
   const target: ClickTarget = { kind: "project", project: p.name };
   const actions: ClickTarget[] = [target];
-  for (const run of [...active].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"))) {
-    if (actions.length > MAX_RUN_ACTIONS) break;
+  const byStatus = [...active].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"));
+  // Each run: open it, then open its workspace.
+  for (const run of byStatus.slice(0, MAX_RUN_ACTIONS)) {
     actions.push(inProject(p.name, { kind: "run", runId: run.id, nodeId: run.nodeId }));
+    actions.push(inProject(p.name, { kind: "run-workspace", runId: run.id, nodeId: run.nodeId }));
   }
   const waiting: ClickTarget[] = [
     ...p.asks.map((ask): ClickTarget => inProject(p.name, { kind: "ask", askId: ask.id, sessionId: ask.sessionId, askKind: ask.kind })),
@@ -254,11 +264,70 @@ export function loungeVisitors(remote: BuildingResponse | null, activeProject: s
   return spots;
 }
 
+/** A global agent's character: a click opens its workspace; its menu adds
+ * Station's Global agents tab, its diff and its PR. Never a node, the run
+ * view in a node's drawer or another project: it has none of them. */
+export function globalActor(actor: Actor, run: Run | undefined): Actor {
+  const runId = actor.runId ?? "";
+  const target: ClickTarget = { kind: "run-workspace", runId, nodeId: "" };
+  const actions: ClickTarget[] = [target, { kind: "global-agents", runId }];
+  for (const action of actor.actions) {
+    if (action.kind === "run-diff" || action.kind === "pr") actions.push(action);
+  }
+  return {
+    ...actor,
+    global: true,
+    // Headless and still going: no board, so nobody it could ask.
+    cannotAsk: Boolean(run && !runInteractive(run) && !runFinal(run.status)),
+    target,
+    actions,
+  };
+}
+
+/** The global agents' office: their runs seated as in a project's office,
+ * with no node titles, asks, mail or meeting table. null while none of them
+ * has a seat. */
+export function globalOffice(
+  inputs: BuildingInputs,
+  runnerBusy: ReadonlyMap<string, number>,
+): { office: ProjectOffice; actors: Actor[]; loungeIds: string[] } | null {
+  const runs = dedupeRuns(inputs.globalRuns ?? []);
+  if (seatedRuns(runs, inputs.now).length === 0) return null;
+  const built = buildCurrentOffice({
+    project: GLOBAL_OFFICE,
+    label: "",
+    layout: "",
+    runs,
+    runners: inputs.runners,
+    sessions: [],
+    asks: [],
+    held: [],
+    messages: [],
+    pipelines: {},
+    budget: inputs.budget,
+    titles: new Map(),
+    now: inputs.now,
+    waitingItems: [],
+    runnerBusy,
+  });
+  const byId = new Map(runs.map((run) => [run.id, run]));
+  return {
+    // The runners' free slots are the project office's to show: once is enough.
+    office: { ...built.office, freeDesks: 0 },
+    actors: built.actors.map((actor) => globalActor(actor, actor.runId ? byId.get(actor.runId) : undefined)),
+    loungeIds: built.loungeIds,
+  };
+}
+
 export function buildBuilding(inputs: BuildingInputs): Building {
   const { now, remote, activeProject } = inputs;
   const others = (remote?.projects ?? []).filter((p) => p.name !== activeProject);
 
-  const racks = racksFor(inputs.runners, [...inputs.runs, ...others.flatMap((p) => p.runs)]);
+  const racks = racksFor(inputs.runners, [
+    ...inputs.runs,
+    ...(inputs.globalRuns ?? []),
+    ...others.flatMap((p) => p.runs),
+  ]);
   const runnerBusy = new Map(racks.map((rack) => [rack.runnerId, rack.busy]));
 
   const cap = inputs.budget?.budget.dailyTokens;
@@ -289,6 +358,8 @@ export function buildBuilding(inputs: BuildingInputs): Building {
       })
     : null;
 
+  const global = globalOffice(inputs, runnerBusy);
+
   const compact = others.map((p) => compactOffice(p, now));
   const busy = compact.filter((office) => office.busy).sort(busyOrder);
   const idle = compact
@@ -297,17 +368,19 @@ export function buildBuilding(inputs: BuildingInputs): Building {
 
   const lounge: LoungeSpot[] = [
     ...(current?.loungeIds ?? []).map((actorId) => ({ id: actorId, actorId })),
+    ...(global?.loungeIds ?? []).map((actorId) => ({ id: actorId, actorId })),
     ...loungeVisitors(remote, activeProject, now),
   ];
 
   return {
     current: current?.office ?? null,
+    global: global?.office ?? null,
     others: busy.slice(0, MAX_COMPACT),
     doorSigns: [...busy.slice(MAX_COMPACT), ...idle],
     lounge: lounge.slice(0, MAX_LOUNGE),
     loungeMore: Math.max(0, lounge.length - MAX_LOUNGE),
     racks,
-    actors: current?.actors ?? [],
+    actors: [...(current?.actors ?? []), ...(global?.actors ?? [])],
     energy,
     truncated: Boolean(remote?.truncated),
     total: Math.max(remote?.total ?? 0, compact.length + (activeProject ? 1 : 0)),

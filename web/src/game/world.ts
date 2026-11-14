@@ -21,6 +21,9 @@ export type ClickTarget =
   | { kind: "node"; nodeId: string }
   | { kind: "run"; runId: string; nodeId: string }
   | { kind: "run-diff"; runId: string; nodeId: string }
+  /** The run's agent workspace: its worktree, changes and terminal, with
+   * the owner's merge and discard. */
+  | { kind: "run-workspace"; runId: string; nodeId: string }
   /** An external session's changes on a node (SessionChange.sessionId is
    * AgentSession.id). */
   | { kind: "session-diff"; sessionId: string; nodeId: string }
@@ -36,7 +39,12 @@ export type ClickTarget =
   /** An autopilot's goal, in Station. */
   | { kind: "autopilot"; goalNodeId: string }
   /** The server room: Settings › Agents, the runners. */
-  | { kind: "runners" };
+  | { kind: "runners" }
+  /** Station's Global agents tab, with a global run highlighted. */
+  | { kind: "global-agents"; runId?: string };
+
+/** The project key of the global agents' office: they belong to no project. */
+export const GLOBAL_OFFICE = "";
 
 /** What an agent character is doing, most urgent first (see pose.ts for the
  * precedence). Every pose needs a non-colour cue in the drawing. */
@@ -133,6 +141,10 @@ export interface Actor {
   role?: string;
   /** The latest verify of its pipeline, for a Tester or Executor. */
   testState?: "red" | "green";
+  /** A global agent's run (no project, no node, no board). */
+  global?: boolean;
+  /** A global agent running headless: it has nobody to ask. */
+  cannotAsk?: boolean;
   /** What a click opens. */
   target: ClickTarget;
   /** Everything the character's popover offers, target first. */
@@ -257,6 +269,9 @@ export interface Rack {
 /** The workspace as a building: an office per project. */
 export interface Building {
   current: ProjectOffice | null;
+  /** The viewer's global agents' office (project GLOBAL_OFFICE), under the
+   * current one; null while none is seated. */
+  global: ProjectOffice | null;
   /** Other busy projects, busiest first, at most MAX_COMPACT. */
   others: CompactOffice[];
   /** Idle projects, and busy ones past MAX_COMPACT: door signs only. */
@@ -265,7 +280,7 @@ export interface Building {
   lounge: LoungeSpot[];
   loungeMore: number;
   racks: Rack[];
-  /** The current project's actors. */
+  /** The current project's actors, then the global agents'. */
   actors: Actor[];
   /** The caller's tokens today against their daily budget, when known. */
   energy?: Energy;

@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { api, type Run } from "../api";
 import type { ClickTarget } from "../game/world";
+import {
+  PREFERENCE_SCHEMA,
+  readPreference,
+  subscribePreferences,
+  writePreference,
+} from "../preferences";
 
 /** Something clicked in another project's office, done once Station has
  * switched there (StationView). */
@@ -14,12 +20,22 @@ export interface DeferredTarget {
 /** How long a deferred target waits for its project before it is dropped. */
 export const DEFER_TIMEOUT_MS = 10_000;
 
+/** Station's two faces: the project's agents, and the viewer's global
+ * agents (outside any project). */
+export type StationTab = "project" | "global";
+
+/** Where the tab last open is stored: a preference that follows the account. */
+export const STATION_TAB_KEY = PREFERENCE_SCHEMA.stationTab.key;
+
 /**
  * The project's recent runs, for Station's timeline and its "waiting on you"
  * strip (GET /api/runs: the newest runs the viewer may see). Loaded when
  * Station opens and refetched on runs-changed while it is open, coalesced.
  */
 export interface StationStoreState {
+  /** Which face Station shows; remembered in this browser. */
+  tab: StationTab;
+  setTab: (tab: StationTab) => void;
   runs: Run[];
   loaded: boolean;
   /** The autopilot goal Station shows in full, by node id; null: none. */
@@ -52,12 +68,21 @@ let inFlight: Promise<void> | null = null;
 let deferTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useStation = create<StationStoreState>((set, get) => ({
+  tab: readPreference("stationTab"),
+  setTab: (tab) => {
+    set({ tab });
+    writePreference("stationTab", tab);
+  },
   runs: [],
   loaded: false,
   watching: false,
   goal: null,
   goalProject: "",
-  focusGoal: (goal, project = "") => set({ goal, goalProject: goal ? project : "" }),
+  focusGoal: (goal, project = "") => {
+    set({ goal, goalProject: goal ? project : "" });
+    // A goal is the project's: its tab shows it.
+    if (goal && get().tab !== "project") get().setTab("project");
+  },
   project: "",
   openProject: (project) => {
     // A manual switch elsewhere drops what was waiting for another project.
@@ -131,3 +156,11 @@ export const useStation = create<StationStoreState>((set, get) => ({
     if (get().deferred) set({ deferred: null });
   },
 }));
+
+// The tab follows the account: a choice made in another tab, browser or
+// device (preferences/sync.ts) shows here too.
+subscribePreferences((key) => {
+  if (key !== "stationTab") return;
+  const tab = readPreference("stationTab");
+  if (useStation.getState().tab !== tab) useStation.setState({ tab });
+});

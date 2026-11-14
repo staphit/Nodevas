@@ -40,7 +40,7 @@ const prsFileName = "prs.json"
 
 // loadPRs reads prs.json. A runner without one watches nothing yet.
 func (j *jobs) loadPRs() {
-	dir, err := j.c.Config.RunDataDir()
+	dir, err := j.c.cfg().RunDataDir()
 	if err != nil {
 		j.c.logf("pull requests: %v", err)
 		return
@@ -75,7 +75,7 @@ func (j *jobs) loadPRs() {
 
 // savePRsLocked writes prs.json, owner-only, through a rename.
 func (j *jobs) savePRsLocked() {
-	dir, err := j.c.Config.RunDataDir()
+	dir, err := j.c.cfg().RunDataDir()
 	if err != nil {
 		return
 	}
@@ -121,6 +121,25 @@ func (j *jobs) watch(w watchedPR) {
 		j.watchOrder = append(j.watchOrder, w.RunID)
 	}
 	j.watched[w.RunID] = &w
+	j.savePRsLocked()
+}
+
+// unwatch stops watching a run's PR without touching the PR or its
+// worktree: a discarded revise or review run's entry, whose PR belongs to
+// the implement run.
+func (j *jobs) unwatch(runID string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.watched[runID] == nil {
+		return
+	}
+	delete(j.watched, runID)
+	for i, id := range j.watchOrder {
+		if id == runID {
+			j.watchOrder = append(j.watchOrder[:i], j.watchOrder[i+1:]...)
+			break
+		}
+	}
 	j.savePRsLocked()
 }
 

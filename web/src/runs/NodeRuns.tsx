@@ -1,27 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  runCancellable,
-  runFinal,
-  runWaitsForLimit,
-  type PipelineState,
-  type Run,
-  type RunAsk,
-  type RunEvent,
-} from "../api";
-import { useAgents } from "../agents/agentStore";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { runCancellable, runFinal, runWaitsForLimit, type PipelineState, type Run } from "../api";
 import { confirmCancelRun } from "./confirmCancelRun";
-import { IconFork, IconSend, IconTerminal } from "../icons";
+import { IconFolder, IconFork, IconSend, IconTerminal } from "../icons";
 
 import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
+import { useEdition } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
+import { openSettings } from "../settings/openSettings";
 import { relativeTime } from "../runners/RunnersModal";
 import {
   formatCompact,
   formatCost,
-  formatCount,
-  oneLine,
   paragraphs,
-  prettyInput,
   runHasChanges,
   totalTokens,
 } from "./runFormat";
@@ -30,11 +20,15 @@ import { MergeControl } from "./MergeApproval";
 import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
 import { RunModeTabs } from "./RunModeTabs";
-import { askOutcome, askSubject, interleaveAsks } from "./runAsks";
+import { RunTimeline } from "./RunTimeline";
 import { useRuns } from "./runStore";
+import { openRunWorkspace } from "./openWorkspace";
 import { useNodeType } from "../nodeTypeTheme";
-import { usePreference } from "../store";
 import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
+import { OfferAskCard, runAsksInApp } from "./OfferAskCard";
+import { declineFix, declineText } from "./offerReasons";
+
+export { RunAskItem, RunEventItem } from "./RunTimeline";
 
 /** The hub's cap on GET /api/runs. */
 const RUN_LIST_CAP = 50;
@@ -49,14 +43,42 @@ const KNOWN_STATUSES = new Set([
   "cancelled",
 ]);
 
-export function RunStatusBadge({ status }: { status: string }) {
+/** A run's status word. Given the run, an offered one says more: "Waiting
+ * for your OK" while the app's own runner asks, and in the single-user
+ * edition "Starting…" otherwise (nobody accepts anything there). */
+export function RunStatusBadge({ status, run }: { status: string; run?: Pick<Run, "status" | "ask"> | null }) {
   const { t } = useI18n();
+  const single = useEdition() === "single";
   const known = KNOWN_STATUSES.has(status);
+  const asking = status === "offered" && runAsksInApp(run);
+  const label = asking
+    ? t("runs.status.asking")
+    : status === "offered" && single && !run?.ask
+      ? t("runs.status.starting")
+      : known
+        ? t(`runs.status.${status}`)
+        : status;
   return (
-    <span className={`run-status run-status-${known ? status : "unknown"}`}>
-      {known ? t(`runs.status.${status}`) : status}
-    </span>
+    <span className={`run-status run-status-${known ? status : "unknown"}${asking ? " is-asking" : ""}`}>{label}</span>
   );
+}
+
+/** The detail's line under the status: what an offered run waits for, why
+ * a declined one did not start, in the edition's own words. */
+export function runStatusHint(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  run: Run,
+  single: boolean,
+): string {
+  if (!KNOWN_STATUSES.has(run.status)) return "";
+  if (run.status === "offered") {
+    // The ask card says it all.
+    if (run.ask) return "";
+    if (single) return t("runs.statusHint.offeredLocal");
+  }
+  if (run.status === "queued" && single && !runWaitsForLimit(run)) return t("runs.statusHint.queuedLocal");
+  if (run.status === "declined") return declineText(t, run, single) || t("runs.statusHint.declined");
+  return t(`runs.statusHint.${run.status}`);
 }
 
 function UsageText({ run }: { run: Run }) {
@@ -137,6 +159,18 @@ export function retryText(
   return reason ? t("runs.retryOfUnknownReason", { reason }) : t("runs.retryOfUnknown");
 }
 
+const WORKSPACE_STATES = new Set(["merged_local", "discarded"]);
+
+/** "Merged locally" or "Discarded": what the owner did with the run's
+ * worktree and branch. Nothing while they are as the run left them. */
+export function WorkspaceChip({ workspace }: { workspace?: string }) {
+  const { t } = useI18n();
+  if (!workspace || !WORKSPACE_STATES.has(workspace)) return null;
+  return (
+    <span className={`run-workspace-chip is-${workspace}`}>{t(`runWorkspace.state.${workspace}`)}</span>
+  );
+}
+
 /** The W5 line under a run: its job kind, a review's verdict, why it failed
  * and which run it falls back from. Nothing for a plain W1 run. */
 function RunTags({
@@ -155,10 +189,12 @@ function RunTags({
   const verdict = SHOWN_VERDICTS.has(run.verdict ?? "");
   const waiting = runWaitsForLimit(run);
   const handedTo = run.handoffBranch && next ? next : null;
-  if (!run.role && !kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
+  const workspace = WORKSPACE_STATES.has(run.workspace ?? "");
+  if (!run.role && !kind && !verdict && !failure && !retry && !waiting && !handedTo && !workspace) return null;
   return (
     <span className="run-row-tags">
       <RoleBadge role={run.role} />
+      <WorkspaceChip workspace={run.workspace} />
       <RunKindBadge kind={run.kind} />
       <VerdictChip verdict={run.verdict} />
       {failure && (
@@ -300,7 +336,7 @@ function RunRow({
         onClick={onSelect}
       >
         <span className="run-row-top">
-          <RunStatusBadge status={run.status} />
+          <RunStatusBadge status={run.status} run={run} />
           <strong className="run-row-agent">
             {number > 0 && (
               <span className="run-row-number">
@@ -332,195 +368,9 @@ function RunRow({
         </span>
       )}
       {hasSummary && summary}
+      <OfferAskCard run={run} className="run-row-ask" />
     </li>
   );
-}
-
-function Collapsible({
-  className,
-  summary,
-  children,
-  defaultOpen = false,
-}: {
-  className: string;
-  summary: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  return (
-    <details className={className} open={defaultOpen || undefined}>
-      <summary>{summary}</summary>
-      {children}
-    </details>
-  );
-}
-
-const HUB_PREFIX = "hub: ";
-
-export function RunEventItem({
-  event,
-  toolNames,
-}: {
-  event: RunEvent;
-  /** Tool name by tool id, so a result can say what it answers. */
-  toolNames?: Map<string, string>;
-}) {
-  const { t } = useI18n();
-  const text = event.text ?? "";
-  switch (event.type) {
-    case "text":
-      return (
-        <li className="run-ev run-ev-text" data-seq={event.seq}>
-          {paragraphs(text).map((part, index) => (
-            <p key={index}>{part}</p>
-          ))}
-        </li>
-      );
-    case "thinking":
-      return (
-        <li className="run-ev run-ev-thinking" data-seq={event.seq}>
-          <Collapsible
-            className="run-ev-fold"
-            summary={
-              <>
-                <b>{t("runs.thinking")}</b>
-                <span className="run-ev-preview">{oneLine(text)}</span>
-              </>
-            }
-          >
-            <div className="run-ev-prose">
-              {paragraphs(text).map((part, index) => (
-                <p key={index}>{part}</p>
-              ))}
-            </div>
-          </Collapsible>
-        </li>
-      );
-    case "tool_call": {
-      const input = event.input ?? "";
-      return (
-        <li className="run-ev run-ev-tool" data-seq={event.seq}>
-          <Collapsible
-            className="run-ev-fold"
-            summary={
-              <>
-                <b className="mono">{event.tool || t("runs.tool")}</b>
-                {input && <span className="run-ev-preview mono">{oneLine(input)}</span>}
-              </>
-            }
-          >
-            {input ? <pre>{prettyInput(input)}</pre> : <p className="run-ev-none">{t("runs.noInput")}</p>}
-          </Collapsible>
-        </li>
-      );
-    }
-    case "tool_result": {
-      const tool = event.toolId ? toolNames?.get(event.toolId) : undefined;
-      const label = event.isError ? t("runs.toolError") : t("runs.toolResult");
-      return (
-        <li
-          className={`run-ev run-ev-result${event.isError ? " is-error" : ""}`}
-          data-seq={event.seq}
-        >
-          <Collapsible
-            className="run-ev-fold"
-            summary={
-              <>
-                <b>{tool ? `${label} · ${tool}` : label}</b>
-                {text && <span className="run-ev-preview mono">{oneLine(text)}</span>}
-              </>
-            }
-          >
-            {text ? <pre>{text}</pre> : <p className="run-ev-none">{t("runs.emptyResult")}</p>}
-          </Collapsible>
-        </li>
-      );
-    }
-    case "usage": {
-      const usage = event.usage;
-      if (!usage) return null;
-      const parts = [
-        t("runs.usageIn", { count: formatCount(usage.inputTokens ?? 0) }),
-        t("runs.usageOut", { count: formatCount(usage.outputTokens ?? 0) }),
-      ];
-      if (usage.cacheReadTokens) {
-        parts.push(t("runs.usageCacheRead", { count: formatCount(usage.cacheReadTokens) }));
-      }
-      if (usage.cacheWriteTokens) {
-        parts.push(t("runs.usageCacheWrite", { count: formatCount(usage.cacheWriteTokens) }));
-      }
-      const cost = formatCost(usage.costUsd);
-      if (cost) parts.push(cost);
-      return (
-        <li className="run-ev run-ev-usage" data-seq={event.seq}>
-          <b>{t("runs.usage")}</b> {parts.join(" · ")}
-        </li>
-      );
-    }
-    case "error":
-      return (
-        <li className="run-ev run-ev-error" data-seq={event.seq} role="alert">
-          <b>{t("runs.error")}</b>
-          <pre>{text}</pre>
-        </li>
-      );
-    default:
-      // The hub's own notes on a run (W5: a fallback taken, a chain used up,
-      // a pipeline's end) arrive as log lines prefixed "hub: ".
-      if (event.type === "log" && text.startsWith(HUB_PREFIX)) {
-        return (
-          <li className="run-ev run-ev-hub" data-seq={event.seq}>
-            <b>{t("runs.hubNote")}</b> {text.slice(HUB_PREFIX.length)}
-          </li>
-        );
-      }
-      // "log", and anything a newer runner sends that this page predates.
-      return (
-        <li className="run-ev run-ev-log mono" data-seq={event.seq}>
-          {text || event.type}
-        </li>
-      );
-  }
-}
-
-/** One of the run's asks in its timeline: what it waits on, or how that
- * ended. Waiting on the viewer, it opens the agent panel, where its card is
- * answered. */
-export function RunAskItem({ ask }: { ask: RunAsk }) {
-  const { t } = useI18n();
-  // Station docks Agent chat (and lists what waits on you) beside the run
-  // view, with no floating panel to open from here.
-  const station = usePreference("projectMode") === "station";
-  const what = askSubject(t, ask);
-  if (ask.status === "pending") {
-    const text = t(ask.canAnswer ? "runs.ask.waitingYou" : "runs.ask.waiting", { what });
-    return (
-      <li className="run-ev run-ev-ask is-pending">
-        {ask.canAnswer && !station ? (
-          <button
-            type="button"
-            className="run-ev-ask-open"
-            title={t("runs.ask.open")}
-            onClick={() => useAgents.getState().setOpen(true)}
-          >
-            {text}
-          </button>
-        ) : (
-          text
-        )}
-      </li>
-    );
-  }
-  return (
-    <li className={`run-ev run-ev-ask is-${ask.decision || ask.status}`}>
-      {t("runs.ask.settled", { what, outcome: askOutcome(t, ask) })}
-    </li>
-  );
-}
-
-/** Whether a scroll box is (nearly) scrolled to its end. */
-function atEnd(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
 }
 
 export function RunDetail({
@@ -542,61 +392,26 @@ export function RunDetail({
   onSelect?: (runId: string) => void;
 }) {
   const { t, language } = useI18n();
-  const events = useRuns((s) => s.eventsByRun[run.id]);
-  const asks = useRuns((s) => s.asksByRun[run.id]);
-  const eventError = useRuns((s) => s.eventErrors[run.id]);
   const cancelError = useRuns((s) => s.cancelErrors[run.id]);
   const cancelling = useRuns((s) => Boolean(s.cancelling[run.id]));
   const stopRequested = useRuns((s) => Boolean(s.stopRequested[run.id])) && !runFinal(run.status);
-  const watchRun = useRuns((s) => s.watchRun);
   const cancelRun = useRuns((s) => s.cancelRun);
-
-  useEffect(() => watchRun(run.id), [run.id, watchRun]);
-
-  // A finished run's last events can land after the status flips; one more
-  // fetch on the flip picks them up without waiting for a push.
   const final = runFinal(run.status);
-  const loadEvents = useRuns((s) => s.loadEvents);
-  const wasFinal = useRef(final);
-  useEffect(() => {
-    if (final && !wasFinal.current) void loadEvents(run.id);
-    wasFinal.current = final;
-  }, [final, run.id, loadEvents]);
-
-  const list = events ?? [];
-  const items = useMemo(() => interleaveAsks(list, asks), [list, asks]);
-  const toolNames = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const event of list) {
-      if (event.type === "tool_call" && event.toolId && event.tool) names.set(event.toolId, event.tool);
-    }
-    return names;
-  }, [list]);
-
-  // Follow the end of the timeline while the reader is there; once they
-  // scroll up to read, stay put and offer a way back down.
-  const scroller = useRef<HTMLOListElement>(null);
-  const following = useRef(true);
-  const [behind, setBehind] = useState(false);
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (!element) return;
-    if (following.current) element.scrollTop = element.scrollHeight;
-    else setBehind(true);
-  }, [items.length]);
 
   const onCancel = async () => {
     if (await confirmCancelRun(t, run)) await cancelRun(run.id);
   };
 
-  const hintKey = KNOWN_STATUSES.has(run.status) ? `runs.statusHint.${run.status}` : "";
+  const single = useEdition() === "single";
+  const hint = runStatusHint(t, run, single);
+  const fix = single && run.status === "declined" ? declineFix(run.declineCode) : null;
   const [diffOpen, setDiffOpen] = useState(false);
   const closeDiff = useCallback(() => setDiffOpen(false), []);
 
   return (
     <section className="run-detail" aria-label={t("runs.detail")}>
       <div className="run-detail-head">
-        <RunStatusBadge status={run.status} />
+        <RunStatusBadge status={run.status} run={run} />
         <div className="run-detail-title">
           <strong>
             {run.agent}
@@ -606,9 +421,30 @@ export function RunDetail({
           {stopRequested ? (
             <span>{t("runs.stopRequested")}</span>
           ) : (
-            hintKey && <span>{t(hintKey)}</span>
+            hint && (
+              <span>
+                {hint}
+                {fix && (
+                  <>
+                    {" "}
+                    <button type="button" className="run-inline-link" onClick={() => openSettings("runners")}>
+                      {t(fix === "addRepo" ? "repoAdd.button" : "offerAsk.fixLocal")}
+                    </button>
+                  </>
+                )}
+              </span>
+            )
           )}
         </div>
+        <button
+          type="button"
+          className="run-workspace-open"
+          title={t("runWorkspace.openTitle")}
+          onClick={() => openRunWorkspace(run.id)}
+        >
+          <IconFolder size={13} />
+          <span>{t("runWorkspace.open")}</span>
+        </button>
         {runCancellable(run.status) && !stopRequested && !runWaitsForLimit(run) && (
           <button
             type="button"
@@ -646,10 +482,13 @@ export function RunDetail({
       {diffOpen && <RunDiffDialog run={run} onClose={closeDiff} />}
 
       <dl className="run-meta">
-        <div>
-          <dt>{t("runs.runner")}</dt>
-          <dd>{runnerDisplayName(t, run.runnerName) || run.runnerId}</dd>
-        </div>
+        {/* Single-user: there is one machine, this computer. */}
+        {!single && (
+          <div>
+            <dt>{t("runs.runner")}</dt>
+            <dd>{runnerDisplayName(t, run.runnerName) || run.runnerId}</dd>
+          </div>
+        )}
         <div>
           <dt>{t("runs.repo")}</dt>
           <dd>{run.repoName || run.repoId}</dd>
@@ -724,51 +563,7 @@ export function RunDetail({
       )}
 
       <RunModeTabs run={run}>
-      <div className="run-timeline-wrap">
-        <ol
-          ref={scroller}
-          className="run-events"
-          aria-label={t("runs.activity")}
-          onScroll={(event) => {
-            const end = atEnd(event.currentTarget);
-            following.current = end;
-            if (end) setBehind(false);
-          }}
-        >
-          {items.length === 0 ? (
-            <li className="run-ev run-ev-empty">
-              {eventError ? "" : events === undefined ? t("common.loading") : t("runs.noEvents")}
-            </li>
-          ) : (
-            items.map((item) =>
-              item.kind === "ask" ? (
-                <RunAskItem key={`ask-${item.ask.id}`} ask={item.ask} />
-              ) : (
-                <RunEventItem key={item.event.seq} event={item.event} toolNames={toolNames} />
-              ),
-            )
-          )}
-        </ol>
-        {behind && (
-          <button
-            type="button"
-            className="run-jump"
-            onClick={() => {
-              const element = scroller.current;
-              if (element) element.scrollTop = element.scrollHeight;
-              following.current = true;
-              setBehind(false);
-            }}
-          >
-            {t("runs.jumpLatest")}
-          </button>
-        )}
-      </div>
-      {eventError && (
-        <div className="notify-message error" role="status">
-          {eventError}
-        </div>
-      )}
+        <RunTimeline run={run} />
       </RunModeTabs>
     </section>
   );

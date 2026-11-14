@@ -3,6 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGate, SignIn, SignOutButton, useTeamServer, useViewer } from "./SignIn";
 import { AuthError, api } from "../api";
+import { PREFERENCE_SCHEMA, readPreference, writePreference } from "../preferences";
+import {
+  ACCOUNT_MARKER_KEY,
+  startPreferenceSync,
+  stopPreferenceSync,
+  type PreferenceTransport,
+} from "../preferences/sync";
 import { useApp } from "../store";
 
 /** The email field, in either interface language. */
@@ -461,5 +468,84 @@ describe("SignIn with an authenticator app", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This sign-in expired.");
     expect(screen.queryByLabelText("Authenticator code")).toBeNull();
     expect(screen.getByLabelText(EMAIL)).not.toHaveAttribute("readonly");
+  });
+});
+
+describe("AuthGate and the choices that follow the account", () => {
+  function fakeTransport(values: Record<string, string>) {
+    const saves: Record<string, string>[] = [];
+    const transport: PreferenceTransport = {
+      load: async () => ({ values: { ...values } }),
+      save: async (change) => {
+        saves.push({ ...change.set });
+        Object.assign(values, change.set);
+        return { values: { ...values } };
+      },
+      classify: () => "retry",
+    };
+    return { saves, transport };
+  }
+
+  afterEach(() => {
+    stopPreferenceSync();
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("shows nothing of the last account's choices to the next one", async () => {
+    localStorage.setItem(ACCOUNT_MARKER_KEY, "alice");
+    localStorage.setItem(PREFERENCE_SCHEMA.theme.key, "light");
+    const { transport } = fakeTransport({ [PREFERENCE_SCHEMA.editorFontSize.key]: "18" });
+    await startPreferenceSync({ transport });
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "accounts",
+      authenticated: true,
+      actor: { id: "bob", name: "Bob", role: "member" },
+    });
+    const firstRender: string[] = [];
+    function Probe() {
+      if (firstRender.length === 0) {
+        firstRender.push(readPreference("theme"), String(readPreference("editorFontSize")));
+      }
+      return <p>app</p>;
+    }
+
+    render(
+      <AuthGate>
+        <Probe />
+      </AuthGate>,
+    );
+
+    expect(await screen.findByText("app")).toBeInTheDocument();
+    expect(firstRender).toEqual(["dark", "18"]);
+    expect(localStorage.getItem(ACCOUNT_MARKER_KEY)).toBe("bob");
+  });
+
+  it("saves a choice made a moment ago before the session ends", async () => {
+    localStorage.setItem(ACCOUNT_MARKER_KEY, "u1");
+    const { saves, transport } = fakeTransport({});
+    await startPreferenceSync({ transport });
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "accounts",
+      authenticated: true,
+      actor: { id: "u1", name: "阿明", role: "member" },
+    });
+    const order: string[] = [];
+    mocked.logout.mockImplementation(async () => {
+      order.push(`logout after ${saves.length} save(s)`);
+      return { ok: true };
+    });
+    const user = userEvent.setup();
+    render(
+      <AuthGate>
+        <SignOutButton />
+      </AuthGate>,
+    );
+    const button = await screen.findByRole("button");
+    writePreference("theme", "light");
+    await user.click(button);
+
+    await vi.waitFor(() => expect(order).toEqual(["logout after 1 save(s)"]));
+    expect(saves).toEqual([{ [PREFERENCE_SCHEMA.theme.key]: "light" }]);
   });
 });

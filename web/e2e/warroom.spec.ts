@@ -456,7 +456,7 @@ test("war room: Station draws it straight away, a character opens its node and i
   await page.getByRole("textbox", { name: /Search projects, nodes/ }).fill("war room");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Station" })).toHaveAttribute("aria-pressed", "true");
-  const stage = page.getByRole("region", { name: "War room" });
+  const stage = page.getByRole("region", { name: "Agent activity" });
   await expect(stage).toBeVisible();
   // No view to pick: the room is the view.
   await expect(page.getByRole("button", { name: /^View: / })).toHaveCount(0);
@@ -518,7 +518,7 @@ test("station: what waits on you, the war room, who is working, Agent chat and t
   await expect(page.getByRole("button", { name: /^Station/ }).locator(".mode-switch-badge")).toHaveText(/\d+/);
   // Then the war room, drawn straight away, and right under it who worked on
   // what.
-  const room = page.getByRole("region", { name: "War room" });
+  const room = page.getByRole("region", { name: "Agent activity" });
   await expect(room).toBeVisible();
   await expect(room.getByRole("button", { name: /Claude opus in mac-mini: working/ })).toBeVisible();
   const order = await page.locator(".station-center > section").evaluateAll((sections) =>
@@ -540,7 +540,7 @@ test("station: what waits on you, the war room, who is working, Agent chat and t
   // Info is the board as it was: the cards, the explorer toggle back.
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await expect(page.locator(".lane-wrap.graph .board-inner")).toBeVisible();
-  await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Agent activity" })).toHaveCount(0);
 });
 
 const STYLES = ["default", "engineering", "study", "studio", "cafe"] as const;
@@ -566,7 +566,7 @@ test("war room: screenshots in every office style, both themes and on a phone", 
     for (const theme of ["light", "dark"] as const) {
       await page.evaluate((t) => localStorage.setItem("vised-theme", t), theme);
       await page.reload();
-      const room = page.getByRole("region", { name: "War room" });
+      const room = page.getByRole("region", { name: "Agent activity" });
       await expect(room).toBeVisible({ timeout: 15_000 });
       await expect(room.locator(`.px-office-room.px-style--${style}`)).toBeVisible();
       // Bubbles and badges settle.
@@ -598,7 +598,7 @@ test("war room: screenshots in every office style, both themes and on a phone", 
   const baseline = await pageOverflow();
   await page.evaluate(() => localStorage.setItem("vised-project-mode", "station"));
   await page.reload();
-  const room = page.getByRole("region", { name: "War room" });
+  const room = page.getByRole("region", { name: "Agent activity" });
   await expect(room).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(800);
   expect(await pageOverflow()).toBeLessThanOrEqual(baseline);

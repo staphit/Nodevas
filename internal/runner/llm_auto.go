@@ -52,9 +52,9 @@ func autoCopilotLLM(ctx context.Context, cfg *Config) (runnerwire.LLMInfo, bool)
 // modelCallSettings is Config.modelCallSettings plus the automatic local
 // model for copilot calls.
 func (c *Client) modelCallSettings(ctx context.Context, purpose string) (runnerwire.LLMInfo, string, string) {
-	info, key, reason := c.Config.modelCallSettings(purpose)
+	info, key, reason := c.cfg().modelCallSettings(purpose)
 	if reason != "" && purpose == runnerwire.LLMPurposeCopilot {
-		if auto, ok := autoCopilotLLM(ctx, c.Config); ok {
+		if auto, ok := autoCopilotLLM(ctx, c.cfg()); ok {
 			return auto, "", ""
 		}
 	}

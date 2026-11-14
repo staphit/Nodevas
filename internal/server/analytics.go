@@ -225,6 +225,10 @@ func changesScorecards(method, path string) bool {
 	if path == "/api/verdicts" || path == "/api/runs" {
 		return true
 	}
+	// Global agents count in the account's scorecards like any run.
+	if globalRunsPath(path) {
+		return true
+	}
 	rest, ok := strings.CutPrefix(path, "/api/runs/")
 	if !ok {
 		return false

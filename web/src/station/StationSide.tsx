@@ -14,8 +14,9 @@ import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
+import { openRunWorkspace } from "../runs/openWorkspace";
 import { openSettings } from "../settings/openSettings";
-import { reportError, useApp } from "../store";
+import { reportError, useApp, usePreference } from "../store";
 import { useUsage } from "../usage/usageStore";
 
 const POSE_TONE: Record<Actor["pose"], string> = {
@@ -44,10 +45,18 @@ function initial(agent: string): string {
   return AGENT_INITIAL[agent.toLowerCase()] ?? (agent || "?").slice(0, 1).toUpperCase();
 }
 
+/** Whether a roster line can open something: its node, or (a global
+ * agent, with no node) its run's workspace. */
+function actorOpens(actor: Actor): boolean {
+  return Boolean(actor.nodeId || (actor.global && actor.runId));
+}
+
 function openActor(actor: Actor) {
   if (actor.nodeId) {
     if (actor.runId) openNodeRuns(actor.nodeId, actor.runId);
     else void useApp.getState().openTab(actor.nodeId).catch(reportError);
+  } else if (actor.global && actor.runId) {
+    openRunWorkspace(actor.runId);
   }
 }
 
@@ -61,26 +70,11 @@ function dollars(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-/** A remembered open/closed state for this browser; closed when unknown. */
-function useRememberedOpen(key: string): [boolean, (open: boolean) => void] {
-  const [open, setOpen] = useState(() => {
-    try {
-      return localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const set = useCallback(
-    (next: boolean) => {
-      setOpen(next);
-      try {
-        localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        /* this visit only */
-      }
-    },
-    [key],
-  );
+/** Whether the agent network card is unfolded: a preference that follows the
+ * account; closed when never chosen. */
+function useNetworkOpen(): [boolean, (open: boolean) => void] {
+  const open = usePreference("stationNetworkOpen");
+  const set = useCallback((next: boolean) => useApp.getState().updateUIPreference("stationNetworkOpen", next), []);
   return [open, set];
 }
 
@@ -206,7 +200,7 @@ function StationToday({ world }: { world: World }) {
                   type="button"
                   className={`station-actor tone-${POSE_TONE[actor.pose]}`}
                   onClick={() => openActor(actor)}
-                  disabled={!actor.nodeId}
+                  disabled={!actorOpens(actor)}
                 >
                   <span className={`station-avatar agent-${agentColorKey(actor.agent)}`} aria-hidden="true">
                     {initial(actor.agent)}
@@ -272,7 +266,7 @@ function StationRunners() {
  * its way in whenever the floating button has nothing to show. */
 function StationNetwork() {
   const { t } = useI18n();
-  const [open, setOpen] = useRememberedOpen("nodevas-station-network-open");
+  const [open, setOpen] = useNetworkOpen();
   const count = useAgents((s) => unseenCount(s.messages, s.seenAt, s.viewer));
   const online = useAgents((s) => s.sessions.filter((session) => session.online).length);
   // What opens the floating panel on the board (Ctrl+Shift+A, a toast, a

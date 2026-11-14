@@ -12,6 +12,7 @@ import { useSignOut, useTeamServer, useViewer } from "../components/SignIn";
 import { localizedPlanStatusLabel, useI18n } from "../i18n";
 import { RunNotifySettings } from "../runs/RunToasts";
 import { useApp } from "../store";
+import { ThemePacksRow } from "../theme-pack/ThemePacksPanel";
 import { isBuiltinKind } from "../domain/graph/nodeTypes";
 import { defaultOfficeStyle } from "../game/officeStyle";
 import type { SettingsPage, SettingsRow } from "./openSettings";
@@ -37,6 +38,7 @@ export function GeneralSection({ row, toggleRow, leave }: SectionProps) {
         <h3>{t("settingsPage.part.appearance")}</h3>
         <ProjectSettings tab="appearance" />
       </section>
+      <ThemePacksRow open={row === "themePacks"} onToggle={() => toggleRow("themePacks")} />
       <SettingsDisclosure label={t("settingsPage.layout")} open={row === "layout"} onToggle={() => toggleRow("layout")}>
         <ProjectSettings tab="layout" />
       </SettingsDisclosure>

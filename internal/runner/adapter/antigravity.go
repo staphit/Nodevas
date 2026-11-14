@@ -96,7 +96,7 @@ func (Antigravity) CommandRelay(job runnerwire.Job, env RunEnv) (*exec.Cmd, bool
 	// Headless, nobody can approve a command: the gate turns what agy would
 	// refuse, ending the turn, into a denial the agent can work around.
 	readOnly := ReadOnly(job)
-	relay := env.PermissionRelay && !readOnly && PermissionRelayApplies("antigravity", env.PermissionMode, false)
+	relay := env.PermissionRelay && !env.NoBoard && !readOnly && PermissionRelayApplies("antigravity", env.PermissionMode, false)
 	var settings string
 	if relay {
 		var err error
@@ -170,8 +170,12 @@ func antigravityModeArgs(mode string) ([]string, error) {
 // antigravityEnv is what the agy process gets on top of jobEnv: the run's MCP
 // arguments and its node, which agy hands its hooks too (the gate's asks name
 // the node), and the session id its `nodevas mcp` reports (RunSessionEnv),
-// which the gate's asks carry too.
+// which the gate's asks carry too. A run with no board gets none of them:
+// its hooks are the plain gate.
 func antigravityEnv(job runnerwire.Job, env RunEnv) ([]string, error) {
+	if env.NoBoard {
+		return nil, nil
+	}
 	args, err := json.Marshal(env.MCP.Args)
 	if err != nil {
 		return nil, err
@@ -184,24 +188,27 @@ func antigravityEnv(job runnerwire.Job, env RunEnv) ([]string, error) {
 // antigravity_gate.go; relay has it ask Nodevas about shell commands), into
 // the temp dir and returns its path. relayGate reports whether the gate that
 // asks Nodevas is in it (relay outside a read-only run, and a hook path for
-// the nodevas binary).
+// the nodevas binary). A run with no board (RunEnv.NoBoard) defines no
+// server; env.MCP.Command is still the nodevas binary its gate runs.
 func writeAntigravityRoot(env RunEnv, gate, readOnly, relay bool) (root string, relayGate bool, err error) {
 	root = filepath.Join(env.TempDir, antigravityRootDir)
 	dir := filepath.Join(root, ".agents")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", false, fmt.Errorf("making the Antigravity config dir: %w", err)
 	}
-	config, err := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]any{
-			"nodevas": map[string]any{
-				"command": env.MCP.Command,
-				"args":    env.MCP.Args,
-				"env":     map[string]string{"NODEVAS_AGENT": "antigravity"},
-				// agy's three minutes would cut ask_user's wait short.
-				"timeoutSeconds": antigravityToolTimeoutSeconds,
-			},
+	servers := map[string]any{
+		"nodevas": map[string]any{
+			"command": env.MCP.Command,
+			"args":    env.MCP.Args,
+			"env":     map[string]string{"NODEVAS_AGENT": "antigravity"},
+			// agy's three minutes would cut ask_user's wait short.
+			"timeoutSeconds": antigravityToolTimeoutSeconds,
 		},
-	}, "", "  ")
+	}
+	if env.NoBoard {
+		servers = map[string]any{}
+	}
+	config, err := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
 	if err != nil {
 		return "", false, err
 	}

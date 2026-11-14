@@ -44,7 +44,7 @@ async function stage(page: Page, prefs: Record<string, string> = {}) {
 async function openStation(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible({ timeout: 20_000 });
-  const room = page.getByRole("region", { name: "War room" });
+  const room = page.getByRole("region", { name: "Agent activity" });
   await expect(room).toBeVisible({ timeout: 15_000 });
   await expect(room.getByRole("button", { name: /Claude opus in mac-mini: working/ })).toBeVisible();
   await page.waitForTimeout(1_500);
@@ -68,7 +68,7 @@ test("station stills", async ({ page }) => {
   // enough to hold it all.
   await page.setViewportSize({ width: 1440, height: 1400 });
   await page.waitForTimeout(800);
-  const room = page.getByRole("region", { name: "War room" });
+  const room = page.getByRole("region", { name: "Agent activity" });
   const box = await room.boundingBox();
   const ground = await room.locator(".px-ground").boundingBox();
   if (!box || !ground) throw new Error("stills: no war room");
@@ -175,13 +175,13 @@ test.describe("tour", () => {
     await page.getByRole("button", { name: "Close Agent chat" }).click();
 
     await page.getByRole("button", { name: /^Station/ }).click();
-    const room = page.getByRole("region", { name: "War room" });
+    const room = page.getByRole("region", { name: "Agent activity" });
     await expect(room).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(1_500);
     await shot("Station", "What waits on you, and who is at work.");
     await room.locator(".px-office-room").first().scrollIntoViewIfNeeded();
     await page.waitForTimeout(600);
-    await shot("The war room", "Every agent at its desk, in this project's office.", room.locator(".px-office-room").first(), 8, 760);
+    await shot("Agent activity", "Every agent at its desk, in this project's office.", room.locator(".px-office-room").first(), 8, 760);
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     const parts = page.getByRole("navigation", { name: "Settings" });

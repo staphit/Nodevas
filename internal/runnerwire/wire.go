@@ -103,6 +103,10 @@ type Envelope struct {
 	Merge       *MergeJob     `json:"merge,omitempty"`
 	MergeResult *MergeOutcome `json:"mergeResult,omitempty"`
 
+	// Agent workspace actions; see workspace.go.
+	WorkspaceAction *WorkspaceActionJob `json:"workspaceAction,omitempty"`
+	WorkspaceResult *WorkspaceOutcome   `json:"workspaceResult,omitempty"`
+
 	// Interactive terminal; see terminal.go.
 	Term *TermChunk `json:"term,omitempty"`
 
@@ -120,6 +124,20 @@ type Envelope struct {
 	// Read-only repo browsing; see repobrowse.go.
 	Repo     *RepoRequest `json:"repo,omitempty"`
 	RepoDone *RepoDone    `json:"repoDone,omitempty"`
+
+	// Runner settings from the hub; see settings.go.
+	Settings     *SettingsRequest `json:"settings,omitempty"`
+	SettingsDone *SettingsDone    `json:"settingsDone,omitempty"`
+
+	// Offer asks and answers; see offerask.go. Code is a decline's code
+	// (Decline* in runs.go), beside the English Reason.
+	OfferAsk    *OfferAsk    `json:"offerAsk,omitempty"`
+	OfferAnswer *OfferAnswer `json:"offerAnswer,omitempty"`
+	Code        string       `json:"code,omitempty"`
+
+	// Repo admin (single-user); see repoadmin.go.
+	RepoAdmin     *RepoAdminRequest `json:"repoAdmin,omitempty"`
+	RepoAdminDone *RepoAdminDone    `json:"repoAdminDone,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -130,6 +148,14 @@ type Welcome struct {
 	// OwnerID is the owner's account id: a runner answers copilot model
 	// calls (llm.go) for that account only.
 	OwnerID string `json:"ownerId,omitempty"`
+	// Edition is EditionSingle or EditionTeam (edition.go); "" from an older
+	// hub.
+	Edition string `json:"edition,omitempty"`
+	// BuiltIn is the hub's word that this runner is the one it started for
+	// itself on a single-user hub. The runner acts as the built-in runner
+	// only when its own checks agree too; the hub's word alone never relaxes
+	// anything.
+	BuiltIn bool `json:"builtIn,omitempty"`
 }
 
 // Info is what a runner reports about itself. The hub stores it as given and
@@ -146,6 +172,9 @@ type Info struct {
 	// MaxConcurrent is how many runs the runner takes at once; the hub keeps
 	// further jobs queued rather than offering them.
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
+	// MaxConcurrentCeiling is how high the hub may set MaxConcurrent
+	// (settings.go); 0 when the owner does not let the hub change it.
+	MaxConcurrentCeiling int `json:"maxConcurrentCeiling,omitempty"`
 	// AutoAccept is the runner's auto-accept allowlist (W6; remote.go).
 	AutoAccept *AutoAcceptPolicy `json:"autoAccept,omitempty"`
 	// LLM is the model the runner calls for its owner's copilot (llm.go),
@@ -159,6 +188,9 @@ type Info struct {
 	// prompts to Nodevas (runner config permissionRelay). Shown only; the
 	// owner changes it on the runner.
 	PermissionRelay bool `json:"permissionRelay,omitempty"`
+	// Local is the built-in runner's settings for the app (settings.go);
+	// nil from any other runner.
+	Local *LocalSettings `json:"local,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.
@@ -226,6 +258,9 @@ type Runner struct {
 	// LastSeenAt is RFC3339, or "" for a runner that never connected.
 	LastSeenAt string `json:"lastSeenAt"`
 	Online     bool   `json:"online"`
+	// BuiltIn: the runner the single-user hub started for itself (its
+	// welcome said so).
+	BuiltIn bool `json:"builtIn,omitempty"`
 	// Info is the last hello, or nil for a runner that never connected.
 	Info *Info `json:"info,omitempty"`
 }

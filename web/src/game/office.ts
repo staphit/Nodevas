@@ -142,10 +142,13 @@ export function dedupeRuns(runs: Run[]): Run[] {
  * one that still needs someone, and one that just succeeded, unless a later
  * run on its node replaced it (a fallback of it, or new work outside its
  * pipeline) or it finished more than FINISHED_RUN_SEAT_MS (a success:
- * FINISHED_SHOW_MS) ago. */
+ * FINISHED_SHOW_MS) ago. A run with no node (a global agent's) is never
+ * replaced: two global runs share no work. */
 export function seatedRuns(runs: Run[], now: number): Run[] {
   const retried = new Set(runs.map((run) => run.retryOf).filter(Boolean) as string[]);
   return runs.filter((run) => {
+    // Its owner threw the work away: nobody is at that desk any more.
+    if (run.workspace === "discarded") return false;
     if (!runFinal(run.status)) return true;
     if (retried.has(run.id)) return false;
     const finished = time(run.finishedAt);
@@ -154,6 +157,7 @@ export function seatedRuns(runs: Run[], now: number): Run[] {
     } else if (run.status !== "succeeded" || !Number.isFinite(finished) || now - finished > FINISHED_SHOW_MS) {
       return false;
     }
+    if (!run.nodeId) return true;
     const created = time(run.createdAt);
     return !runs.some(
       (other) =>
@@ -307,8 +311,14 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
     const session = join.byRun.get(run.id);
     const ask = pendingAskFor(inputs.asks, session?.id, run.id);
     const heldMail = heldFor(inputs.held, session);
-    const target: ClickTarget = { kind: "run", runId: run.id, nodeId: run.nodeId };
-    const actions: ClickTarget[] = [target, { kind: "node", nodeId: run.nodeId }];
+    // A click on a run's character opens its workspace; the run view in the
+    // drawer stays one entry down the menu.
+    const target: ClickTarget = { kind: "run-workspace", runId: run.id, nodeId: run.nodeId };
+    const actions: ClickTarget[] = [
+      target,
+      { kind: "run", runId: run.id, nodeId: run.nodeId },
+      { kind: "node", nodeId: run.nodeId },
+    ];
     if (hasChanges(run)) actions.push({ kind: "run-diff", runId: run.id, nodeId: run.nodeId });
     const prUrl = safePRUrl(run.prUrl);
     if (prUrl) actions.push({ kind: "pr", runId: run.id, url: prUrl });
@@ -327,7 +337,8 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
       runnerOnline: online,
       pose,
       nodeId: run.nodeId,
-      nodeTitle: titles.get(run.nodeId) ?? "",
+      // A global agent has no node: its task's first line names its work.
+      nodeTitle: titles.get(run.nodeId) || run.title || "",
       runId: run.id,
       sessionId: session?.id,
       sessionName: session?.name,

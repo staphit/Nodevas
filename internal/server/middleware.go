@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	prefsapi "nodevas/internal/httpapi/prefs"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
 	"nodevas/internal/logging"
@@ -120,7 +121,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 		if r.Method != http.MethodDelete && r.ContentLength != 0 {
 			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			multipartUpload := mediaType == "multipart/form-data" &&
-				(r.URL.Path == "/api/projects/import" ||
+				(r.URL.Path == "/api/projects/import" || r.URL.Path == "/api/themes" ||
 					(strings.HasPrefix(r.URL.Path, "/api/nodes/") &&
 						(strings.HasSuffix(r.URL.Path, "/files") ||
 							strings.HasSuffix(r.URL.Path, "/pages/import"))))
@@ -339,7 +340,10 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 		strings.HasPrefix(r.URL.Path, "/api/auth/") ||
 		// An agent session's presence, every 30 s: not a change anybody
 		// made, and a row each would bury the ones that are.
-		r.URL.Path == "/api/agents/heartbeat" {
+		r.URL.Path == "/api/agents/heartbeat" ||
+		// A person's own app preferences (a theme, a layout): theirs
+		// alone, saved as they click, and nothing anyone audits.
+		r.URL.Path == prefsapi.Path {
 		c.Next()
 		return
 	}
@@ -365,7 +369,9 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	if s.audit != nil {
 		note := annotated()
 		project := note.Project
-		if project == "" {
+		// A global agent belongs to no project: its writes are not the open
+		// one's, which is all StoreFor would name for them.
+		if project == "" && !globalRunsPath(r.URL.Path) {
 			if st := httpx.StoreFor(r, s.pm); st != nil {
 				project = st.Root()
 			}
@@ -390,6 +396,12 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 			ActorEmail: logging.UserEmailFrom(r.Context()),
 		})
 	}
+}
+
+// globalRunsPath reports whether path is under /api/global-runs, the global
+// agents' routes (httpapi/runs/global.go), which belong to no project.
+func globalRunsPath(path string) bool {
+	return path == "/api/global-runs" || strings.HasPrefix(path, "/api/global-runs/")
 }
 
 // stateChangingGET reports a GET that changes state: the method is the only

@@ -50,6 +50,9 @@ type API struct {
 	// asks is the agent network a run's asks live in (UseAsks); nil lists
 	// none.
 	asks *agents.Hub
+	// repo relays the agent workspace's browsing to runners (UseRepo); nil
+	// browses nothing.
+	repo *runners.RepoRelay
 }
 
 // AutoRoute decides the dispatch dialog's route: manual is what the
@@ -85,7 +88,16 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
 	api.POST("/runs/:id/retry-now", a.retryNow)
+	// A single-user hub's built-in runner asks in the app (offer.go).
+	api.POST("/runs/:id/offer", a.offer)
 	api.POST("/runs/:id/merge", a.merge)
+	// The agent workspace (workspace.go): the runner's owner only.
+	api.GET("/runs/:id/workspace", a.workspace)
+	api.GET("/runs/:id/workspace/tree", a.workspaceTree)
+	api.GET("/runs/:id/workspace/file", a.workspaceFile)
+	api.GET("/runs/:id/workspace/git/status", a.workspaceStatus)
+	api.POST("/runs/:id/workspace/merge", a.workspaceMerge)
+	api.POST("/runs/:id/workspace/discard", a.workspaceDiscard)
 	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
@@ -99,6 +111,8 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/verdicts", a.verdicts)
 	// A review or QA run's structured verdict, through its runner's proxy.
 	api.POST("/verdicts", a.submitVerdict)
+	// Global agents (global.go): no project, a person's own.
+	a.registerGlobal(api)
 }
 
 // missing is what notFound says is not there, in both languages.
@@ -194,7 +208,8 @@ func (a *API) create(c *gin.Context) {
 	}
 	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
 		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
-		SteppedUpAt: steppedUpAt,
+		// A person's click, never an agent's (refused above).
+		SteppedUpAt: steppedUpAt, Origin: runnerwire.OriginPerson,
 		// The project's roles (tool allowlists, custom roles) and the
 		// hook that locks the node's criteria when an Executor starts.
 		Roles:          graph.ResolvedAgentRoles(),
@@ -208,7 +223,7 @@ func (a *API) create(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, forReader(c, record.Run))
+	c.JSON(http.StatusCreated, a.forReader(c, record.Run))
 }
 
 // startFailed answers a refused or failed run start.
@@ -223,10 +238,17 @@ func startFailed(c *gin.Context, err error) {
 		notFound(c, refused.What)
 	case runs.StartPrecondition:
 		code := "FAILED_PRECONDITION"
+		var extras map[string]any
 		if refused.Reason != "" {
 			code = refused.Reason
 		}
-		httpx.Coded(c, http.StatusConflict, code, refused, nil)
+		if refused.Reason == runs.CodeGlobalRunsOff {
+			extras = map[string]any{"blocked": runnerwire.RunnerBlockedOff}
+		}
+		httpx.Coded(c, http.StatusConflict, code, refused, extras)
+	case runs.StartOutdated:
+		httpx.Coded(c, http.StatusPreconditionFailed, "RUNNER_OUTDATED", refused,
+			map[string]any{"blocked": runnerwire.RunnerBlockedOutdated})
 	case runs.StartBudget:
 		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
 			refused, map[string]any{"exceeded": refused.Budget.Exceeded})
@@ -234,7 +256,11 @@ func startFailed(c *gin.Context, err error) {
 		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, refused,
 			map[string]any{"nodeType": refused.NodeType, "agentMode": refused.AgentMode})
 	default:
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", refused, nil)
+		var extras map[string]any
+		if refused.Field != "" {
+			extras = map[string]any{"field": refused.Field}
+		}
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", refused, extras)
 	}
 }
 
@@ -353,15 +379,19 @@ func (a *API) list(c *gin.Context) {
 	}
 	out := runnerwire.RunListResponse{Runs: make([]runnerwire.Run, 0, len(records))}
 	for _, r := range records {
-		out.Runs = append(out.Runs, forReader(c, r.Run))
+		out.Runs = append(out.Runs, a.forReader(c, r.Run))
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, out)
 }
 
-// forReader is run as its reader sees it: its error in their language.
-func forReader(c *gin.Context, run runnerwire.Run) runnerwire.Run {
+// forReader is run as its reader sees it: its error in their language, and
+// while it is offered, what its runner asks (runs.Dispatcher.WithAsk).
+func (a *API) forReader(c *gin.Context, run runnerwire.Run) runnerwire.Run {
 	run.Error = runs.RenderError(run.Error, httpx.Language(c.Request))
+	if a.d != nil {
+		run = a.d.WithAsk(run)
+	}
 	return run
 }
 
@@ -380,16 +410,30 @@ func (a *API) reviewable(c *gin.Context) (runs.Record, bool) {
 }
 
 func (a *API) visibleTo(c *gin.Context, reviewers bool) (runs.Record, bool) {
+	// A global run (global.go) belongs to no project: under its own prefix
+	// it is shown to who may see it, and nothing else is shown there.
+	if globalRoute(c) {
+		r, err := a.d.Store().Get(c.Request.Context(), c.Param("id"))
+		if errors.Is(err, runs.ErrNotFound) || (err == nil && (!r.Global || !canSee(auth.ActorFrom(c.Request), r))) {
+			notFound(c, "run")
+			return runs.Record{}, false
+		}
+		if err != nil {
+			fail(c, err)
+			return runs.Record{}, false
+		}
+		return r, true
+	}
 	_, projectName, ok := a.requestProject(c)
 	if !ok {
 		return runs.Record{}, false
 	}
 	r, err := a.d.Store().Get(c.Request.Context(), c.Param("id"))
-	if err == nil && r.Project == projectName && !canSee(auth.ActorFrom(c.Request), r) &&
+	if err == nil && !r.Global && r.Project == projectName && !canSee(auth.ActorFrom(c.Request), r) &&
 		reviewers && a.anyEditorReviews(c, r.PipelineID) {
 		return r, true
 	}
-	if errors.Is(err, runs.ErrNotFound) || (err == nil && (r.Project != projectName || !canSee(auth.ActorFrom(c.Request), r))) {
+	if errors.Is(err, runs.ErrNotFound) || (err == nil && (r.Global || r.Project != projectName || !canSee(auth.ActorFrom(c.Request), r))) {
 		notFound(c, "run")
 		return runs.Record{}, false
 	}
@@ -406,7 +450,7 @@ func (a *API) get(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, forReader(c, r.Run))
+	c.JSON(http.StatusOK, a.forReader(c, r.Run))
 }
 
 func (a *API) events(c *gin.Context) {
@@ -519,7 +563,7 @@ func (a *API) cancel(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, forReader(c, updated.Run))
+	c.JSON(http.StatusOK, a.forReader(c, updated.Run))
 }
 
 // retryNow ends a run's wait for its agent's usage limit to reset: the run
@@ -546,5 +590,5 @@ func (a *API) retryNow(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, forReader(c, updated.Run))
+	c.JSON(http.StatusOK, a.forReader(c, updated.Run))
 }

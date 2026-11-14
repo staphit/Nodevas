@@ -159,6 +159,21 @@ func runnerUsage(w io.Writer) {
                                              prPollSeconds (30 or more);
                                              remote merge: remoteMerge (true|false, default false), mergeMethod
                                              (squash|merge|rebase), deleteBranchOnMerge (true|false);
+                                             agent workspace: workspaceActions (true|false, default true:
+                                             you may merge a run's branch into its base here, or discard
+                                             its worktree and branch, from the hub; only you),
+                                             globalRuns (on|off, default on: take global agents you start
+                                             from the hub in a repo here, with no project or board),
+                                             remoteSettings (on|off, default on: you may change
+                                             maxConcurrent from the hub; only you),
+                                             maxConcurrentCeiling (1-16, default 8 or maxConcurrent if
+                                             higher: the most the hub may set maxConcurrent to);
+                                             the runner serve starts for a single-user hub (it starts
+                                             runs you start in Nodevas right away): askEveryRun (on|off,
+                                             default off: ask in Nodevas before every run starts),
+                                             shellWithoutAsking (agent kinds, comma-separated, or none:
+                                             automatic runs of these agents start unasked although they
+                                             may run any command here; the default asks in Nodevas);
                                              copilot: copilotProvider (anthropic|openai|none|off: this runner
                                              makes your voice copilot's model calls with a key kept here;
                                              with none, a local Ollama or LM Studio is used when found;
@@ -239,17 +254,24 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if cfg.Hub == "" || cfg.Token == "" {
 		return fmt.Errorf("not logged in (%s): run nodevas runner login --hub <url> first", path)
 	}
-	// Read before runnerStopContext removes it: serve's own runner may use
-	// serve's plain-http loopback port (runner.Config.PlainLocalHubRefusal).
+	// Read before runnerStopContext removes them: serve's own runner may use
+	// serve's plain-http loopback port (runner.Config.PlainLocalHubRefusal),
+	// and the one serve starts for a single-user hub may act as its built-in
+	// runner (runner.Client.Edition).
 	underServe := os.Getenv(localRunnerUnderServeEnv) == "1"
+	edition := takeRunnerEdition()
 	ctx, stop := runnerStopContext()
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
-	// offers the auto-accept policy does not cover are declined at once.
+	// offers the auto-accept policy does not cover are declined at once. The
+	// built-in runner of a single-user hub starts runs right away instead,
+	// and asks in the app for the few it does not (runner.AppAccepter); this
+	// terminal answers too, first answer wins, when the owner asked to
+	// confirm every run.
 	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
-	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter,
-		ServeManaged: underServe}
+	client := &runner.Client{Config: cfg, ConfigPath: path, Commands: runnerCommands, Log: stderr, Accepter: accepter,
+		ServeManaged: underServe, Edition: edition, App: &runner.AppAccepter{Terminal: accepter}}
 	return client.Run(ctx)
 }
 
@@ -513,6 +535,33 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("remoteMerge", fmt.Sprintf("%t (%s)", cfg.RemoteMergeOn(), remote))
 	setting("mergeMethod", cfg.MergeMethodOrDefault())
 	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
+	workspace := "you may merge a run's branch into its base here, or discard its worktree and branch, from the hub's agent workspace"
+	if !cfg.WorkspaceActionsOn() {
+		workspace = "merging and discarding from the hub's agent workspace are refused"
+	} else if cfg.WorkspaceActions == nil {
+		workspace += " (the default)"
+	}
+	setting("workspaceActions", fmt.Sprintf("%t (%s)", cfg.WorkspaceActionsOn(), workspace))
+	global := "you may start global agents from the hub in a repo here: no project, no board, their branch kept here unless you ask for a PR"
+	if !cfg.GlobalRunsOn() {
+		global = "global agents are declined"
+	} else if cfg.GlobalRuns == nil {
+		global += " (the default)"
+	}
+	setting("globalRuns", fmt.Sprintf("%t (%s)", cfg.GlobalRunsOn(), global))
+	fmt.Fprintln(w, "settings from the hub:")
+	settings := fmt.Sprintf("you may change maxConcurrent from the hub, up to %d; only you", cfg.MaxConcurrentCeilingOrDefault())
+	if !cfg.RemoteSettingsOn() {
+		settings = "maxConcurrent is changed here only"
+	} else if cfg.RemoteSettings == nil {
+		settings += " (the default)"
+	}
+	setting("remoteSettings", fmt.Sprintf("%t (%s)", cfg.RemoteSettingsOn(), settings))
+	ceiling := fmt.Sprint(cfg.MaxConcurrentCeilingOrDefault())
+	if cfg.MaxConcurrentCeiling <= 0 {
+		ceiling += " (the default)"
+	}
+	setting("maxConcurrentCeiling", ceiling)
 	printAutoAccept(w, cfg)
 	printCopilot(w, cfg)
 	printAdvisor(w, cfg)

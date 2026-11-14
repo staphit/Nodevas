@@ -1,4 +1,5 @@
-import { req } from "./http";
+import { explorerGet, forgetReads, remembered, type RepoFile, type RepoGitStatus, type RepoListing } from "./explorer";
+import { req, RequestError, send } from "./http";
 
 // Mirrors internal/runnerwire/runs.go. A run is one agent CLI invocation on a
 // runner, for one board node, in its own git worktree. The hub records and
@@ -42,6 +43,43 @@ export const RUN_MODE_INTERACTIVE = "interactive";
 export function runInteractive(run: { mode?: string }): boolean {
   return run.mode === RUN_MODE_INTERACTIVE;
 }
+
+/** Mirrors runnerwire.AskReason: one reason a runner asks before it starts
+ * a run (the AskReason codes: shell_agent, ask_every_run, not_on_list,
+ * needs_step_up, verify_tests). */
+export interface AskReason {
+  code: string;
+  /** shell_agent: the agent kind. */
+  agent?: string;
+  /** shell_agent: the exact setting ("codexSandbox=danger-full-access"). */
+  setting?: string;
+  /** not_on_list: "repo" | "agent" | "mode". */
+  missing?: string;
+}
+
+/** Mirrors runnerwire.OfferAsk: the runner waits for an answer before it
+ * starts the run. `where` "app": this computer's built-in runner, answered
+ * in the app by its owner; "runner": on that PC (tray or terminal). */
+export interface OfferAsk {
+  runId: string;
+  where: "app" | "runner" | string;
+  reasons: AskReason[] | null;
+  /** RFC3339: no answer by then and it does not start. */
+  expiresAt: string;
+  /** The PC it waits on, as the runner names it. */
+  machine?: string;
+}
+
+/** Mirrors runnerwire.OfferAnswer's web half: POST /api/runs/:id/offer. */
+export interface OfferAnswer {
+  start: boolean;
+  /** Ticked "don't ask again for this agent's automatic runs". */
+  alwaysAllowShell?: boolean;
+}
+
+/** Mirrors the runnerwire Origin* values: who or what started a run. ""
+ * (unknown) counts as automatic. */
+export type RunOrigin = "person" | "autopilot" | "pipeline" | "handoff" | "";
 
 export interface RunUsage {
   inputTokens: number;
@@ -175,6 +213,32 @@ export interface Run {
   costEstimated?: boolean;
   nodeType?: string;
   acceptanceCount?: number;
+  /** Agent workspace: "" while the run's worktree and branch are as the run
+   * left them, "merged_local" once its runner merged the branch into its
+   * base, "discarded" once its owner threw the work away. Not a status: the
+   * run's outcome stays what it was. */
+  workspace?: RunWorkspaceState | string;
+  /** The base's head after a local merge. */
+  workspaceCommit?: string;
+  /** The latest workspace action on the run, like `merge`. */
+  workspaceAction?: RunWorkspaceAction | null;
+  /** Global agents (phase 2): a run in one of its runner's repositories for
+   * no project and no node (project and nodeId are ""), started by the
+   * runner's owner. Its routes live under /api/global-runs. */
+  global?: boolean;
+  /** A global run's title: its task's first line (at most 120 characters). */
+  title?: string;
+  /** A global run asked for no push and no pull request: its branch stays
+   * on the runner for a local merge or a discard. */
+  noPR?: boolean;
+  /** Single-user edition: the runner waits for an answer before it starts
+   * the run (an offered run only); absent while nothing is asked. */
+  ask?: OfferAsk | null;
+  /** Who or what started the run (RunOrigin). */
+  origin?: RunOrigin | string;
+  /** A declined run: why, as a runnerwire decline code (declined_in_app,
+   * timed_out, repo_not_added…). */
+  declineCode?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -240,6 +304,156 @@ export interface RunMergeRequest {
   requestedBy: string;
   createdAt: string;
   finishedAt?: string;
+}
+
+// ---- Agent workspace (phase 1). Mirrors internal/runnerwire/workspace.go.
+
+export type RunWorkspaceState = "" | "merged_local" | "discarded";
+export type WorkspaceActionKind = "merge_local" | "discard";
+export type WorkspaceActionStatus = "pending" | "done" | "failed" | "expired";
+
+/** Why the hub will not offer an action now (RunWorkspaceView gates). */
+export const WORKSPACE_GATE_CODES = [
+  "not_owner",
+  "running",
+  "discarded",
+  "merged_local",
+  "pr_merged",
+  "pending",
+  "kind",
+  "no_commit",
+  "outdated",
+  "actions_off",
+  "offline",
+  "in_use",
+] as const;
+export type WorkspaceGateCode = (typeof WORKSPACE_GATE_CODES)[number];
+
+/** Why the runner refused or failed an action it was asked for. */
+export const WORKSPACE_RUNNER_CODES = [
+  "refused",
+  "actions_off",
+  "running",
+  "not_own_branch",
+  "has_pr",
+  "no_branch",
+  "no_base",
+  "head_moved",
+  "unsaved_commits",
+  "dirty_worktree",
+  "dirty_base",
+  "base_elsewhere",
+  "merge_driver",
+  "signing_program",
+  "conflict",
+  "foreign_worktree",
+  "pr_close_failed",
+  "files_busy",
+  "git",
+] as const;
+export type WorkspaceRunnerCode = (typeof WORKSPACE_RUNNER_CODES)[number];
+
+/** Every code a workspace action can come back with, plus "expired" for one
+ * the runner never answered. */
+export type WorkspaceCode = WorkspaceGateCode | "head_moved" | WorkspaceRunnerCode | "expired";
+export const WORKSPACE_CODES: readonly WorkspaceCode[] = [
+  ...new Set<WorkspaceCode>([...WORKSPACE_GATE_CODES, "head_moved", ...WORKSPACE_RUNNER_CODES, "expired"]),
+];
+
+/** Mirrors runnerwire.RunWorkspaceAction: one merge or discard request. */
+export interface RunWorkspaceAction {
+  id: string;
+  runId: string;
+  action: WorkspaceActionKind | string;
+  status: WorkspaceActionStatus | string;
+  code?: WorkspaceCode | string;
+  /** The runner's English detail, shown under the translated code. */
+  reason?: string;
+  /** Done, with a caveat ("worktree kept: ..."). */
+  note?: string;
+  headSha?: string;
+  base?: string;
+  mergeCommit?: string;
+  requestedBy: string;
+  createdAt: string;
+  finishedAt?: string;
+}
+
+/** Mirrors runnerwire.RunWorkspaceInfo: the run's worktree and branch as its
+ * runner sees them now. */
+export interface RunWorkspaceInfo {
+  exists: boolean;
+  path?: string;
+  branch: string;
+  head?: string;
+  ownBranch: boolean;
+  branchExists: boolean;
+  branchHead?: string;
+  /** -1 when the runner could not read the worktree's status. */
+  uncommitted: number;
+  running: boolean;
+  kept: boolean;
+  baseCheckout: "repo" | "elsewhere" | "none" | "missing" | string;
+  baseClean: boolean;
+  watchedPr?: string;
+}
+
+export type WorkspaceFilesBlock = "" | "not_owner" | "offline" | "browse_off" | "outdated" | "no_worktree";
+
+/** GET /api/runs/:id/workspace: the panel's header and what it may offer. */
+export interface RunWorkspaceView {
+  runId: string;
+  /** The viewer owns the run's runner: actions and Files are theirs. */
+  owner: boolean;
+  runnerOnline: boolean;
+  files: { allowed: boolean; blocked: WorkspaceFilesBlock | string };
+  merge: { mode: "pr" | "local" | ""; blocked: WorkspaceGateCode | "" | string };
+  discard: { allowed: boolean; blocked: WorkspaceGateCode | "" | string };
+  info: RunWorkspaceInfo | null;
+  infoError: "" | "offline" | "outdated" | "timeout" | "not_owner" | string;
+}
+
+/** A refused workspace action: the hub's code, and for a 409 the gate that
+ * blocked it (`blocked`). */
+export class WorkspaceActionError extends Error {
+  status: number;
+  code: string;
+  blocked: string;
+  constructor(status: number, code: string, blocked: string, message: string) {
+    super(message);
+    this.name = "WorkspaceActionError";
+    this.status = status;
+    this.code = code;
+    this.blocked = blocked;
+  }
+}
+
+/** How long a workspace POST may take: the hub waits up to 30 s for the
+ * runner before it answers 202, so the usual 30 s limit would cut it off
+ * just before that answer. */
+const WORKSPACE_POST_TIMEOUT_MS = 45_000;
+
+/** POSTs a workspace action. 200 (answered) and 202 (still pending) both
+ * carry the run; a refusal keeps its code and gate, which req() drops. */
+async function workspacePost(url: string, body: unknown): Promise<Run> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WORKSPACE_POST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await send(url, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => ({}))) as { error?: unknown; code?: unknown; blocked?: unknown };
+    throw new WorkspaceActionError(
+      res.status,
+      typeof parsed.code === "string" ? parsed.code : "",
+      typeof parsed.blocked === "string" ? parsed.blocked : "",
+      typeof parsed.error === "string" && parsed.error ? parsed.error : `${res.status}`,
+    );
+  }
+  return (await res.json()) as Run;
 }
 
 /** Mirrors runnerwire.Budget: per owner, per UTC day; 0 means no limit. */
@@ -499,7 +713,52 @@ export const MAX_RUN_PROMPT_BYTES = 8 << 10;
 /** Events asked for per page: the hub's default (its maximum is 1000). */
 export const RUN_EVENTS_PAGE = 500;
 
-const runPath = (id: string) => `/api/runs/${encodeURIComponent(id)}`;
+// Global agents: their per-run routes mirror /api/runs/:id under
+// /api/global-runs/:id, and each prefix answers 404 for the other kind. A
+// run id is known to be global once a list, a fetch or a realtime event said
+// so; every per-run call below follows it from then on.
+const globalRunIds = new Set<string>();
+
+/** Remembers that `id` is a global run: its routes are /api/global-runs/:id. */
+export function rememberGlobalRun(id: string | undefined): void {
+  if (id) globalRunIds.add(id);
+}
+
+/** Remembers every global run among `runs`. */
+export function rememberGlobalRuns(runs: ReadonlyArray<Pick<Run, "id" | "global"> | null | undefined>): void {
+  for (const run of runs) if (run?.global) globalRunIds.add(run.id);
+}
+
+/** Whether `id` is a run known to be global. */
+export function isGlobalRun(id: string): boolean {
+  return globalRunIds.has(id);
+}
+
+/** Tests only: forget the global run ids. */
+export function forgetGlobalRuns(): void {
+  globalRunIds.clear();
+}
+
+/** A run's own route: /api/global-runs/:id for a global run, else /api/runs/:id. */
+export function runPath(id: string): string {
+  const prefix = globalRunIds.has(id) ? "/api/global-runs" : "/api/runs";
+  return `${prefix}/${encodeURIComponent(id)}`;
+}
+
+const workspacePath = (id: string) => `${runPath(id)}/workspace`;
+
+/** A run fetched by id, remembered as global when it is one. */
+async function fetchRun(id: string): Promise<Run> {
+  const run = await req<Run>(runPath(id));
+  rememberGlobalRuns([run]);
+  return run;
+}
+
+/** Drops a run's remembered workspace reads: after a merge or discard, or a
+ * Refresh, the worktree is not what was read. */
+export function forgetRunWorkspace(runId: string): void {
+  forgetReads(`${workspacePath(runId)}/`);
+}
 
 export const runsApi = {
   createRun: (body: CreateRunRequest) =>
@@ -513,7 +772,7 @@ export const runsApi = {
    * the other lists: the caller's own runs and runs on their runners, or
    * everyone's for an administrator. */
   listActiveRuns: () => req<RunListResponse>("/api/runs?active=1"),
-  getRun: (id: string) => req<Run>(runPath(id)),
+  getRun: (id: string) => fetchRun(id),
   getRunEvents: (id: string, after = 0, limit = RUN_EVENTS_PAGE) =>
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),
   /** The run's asks for its timeline, oldest first (the newest 200). */
@@ -527,6 +786,22 @@ export const runsApi = {
   /** Ends a run's wait for a usage limit to reset: it is offered as soon as
    * its runner has room (still within the budget). */
   retryRunNow: (id: string) => req<Run>(`${runPath(id)}/retry-now`, { method: "POST" }),
+  /** Answers the built-in runner's ask (its owner, in the app): start the
+   * run or not. A refusal is a RequestError whose code is the hub's
+   * (not_waiting, approve_on_runner…). The run as the hub has it after the
+   * answer, or null when the hub sent none (the realtime push follows). */
+  answerOffer: async (id: string, answer: OfferAnswer): Promise<Run | null> => {
+    const res = await send(`${runPath(id)}/offer`, { method: "POST", body: JSON.stringify(answer) });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const text = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : "");
+      throw new RequestError(res.status, text("error") || `${res.status}`, text("code") || text("blocked"));
+    }
+    const run = (typeof body.id === "string" ? body : body.run) as Run | undefined;
+    if (!run || typeof run.id !== "string") return null;
+    rememberGlobalRuns([run]);
+    return run;
+  },
   /** Approves merging the run's PR at `headSha`; 202 with the run, its
    * merge "pending" until the runner answers. */
   mergeRun: (id: string, headSha: string) =>
@@ -546,4 +821,33 @@ export const runsApi = {
     req<RouteSuggestion>(`/api/runs/route?nodeId=${encodeURIComponent(nodeId)}`),
   getPipeline: (id: string) =>
     req<PipelineState>(`/api/runs/pipelines/${encodeURIComponent(id)}`),
+  /** The workspace panel's header and gates; the live worktree info only
+   * for the runner's owner. */
+  getRunWorkspace: (id: string) =>
+    req<RunWorkspaceView>(workspacePath(id)),
+  /** One folder of the run's live worktree, read through its runner (owner
+   * only). Refusals are ExplorerErrors, as in the Explorer. */
+  workspaceTree: (id: string, path: string): Promise<RepoListing> => {
+    const url = `${workspacePath(id)}/tree?path=${encodeURIComponent(path)}`;
+    return remembered(url, () =>
+      explorerGet<RepoListing>(url).then((r) => ({ ...r, entries: r.entries ?? [] })),
+    );
+  },
+  workspaceFile: (id: string, path: string): Promise<RepoFile> => {
+    const url = `${workspacePath(id)}/file?path=${encodeURIComponent(path)}`;
+    return remembered(url, () => explorerGet<RepoFile>(url));
+  },
+  /** Uncommitted changes in the run's worktree, against its HEAD. */
+  workspaceStatus: (id: string): Promise<RepoGitStatus> =>
+    explorerGet<RepoGitStatus>(`${workspacePath(id)}/git/status`).then((r) => ({
+      ...r,
+      entries: r.entries ?? [],
+    })),
+  /** Asks the runner to merge the run's branch into its base locally, at
+   * the run commit the owner saw. 200 answered, 202 still pending. */
+  mergeRunLocal: (id: string, headSha: string) =>
+    workspacePost(`${workspacePath(id)}/merge`, { headSha }),
+  /** Asks the runner to remove the run's worktree and branch (and close its
+   * PR). Idempotent. */
+  discardRun: (id: string) => workspacePost(`${workspacePath(id)}/discard`, {}),
 };

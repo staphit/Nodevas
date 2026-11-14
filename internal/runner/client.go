@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -31,8 +33,15 @@ var ErrReplaced = errors.New("another runner connected with this token; stopping
 
 // Client keeps one runner connected to its hub.
 type Client struct {
-	Config   *Config
-	Commands CommandRunner
+	// Config is the settings the runner starts with. Once it runs, a change
+	// from the app replaces them whole (localsettings.go): read them with
+	// cfg(), never from here.
+	Config *Config
+	// ConfigPath is the settings file Config was read from: a maxConcurrent
+	// the owner changes from the hub (settings.go) is saved there. "" keeps
+	// such a change until the runner stops.
+	ConfigPath string
+	Commands   CommandRunner
 	// Log receives one line per connection event; nil discards them.
 	Log io.Writer
 
@@ -49,6 +58,13 @@ type Client struct {
 	// (NODEVAS_RUNNER_UNDER_SERVE): serve holds the hub's port for as long
 	// as this runner runs.
 	ServeManaged bool
+	// Edition is the edition serve started this runner for
+	// (NODEVAS_RUNNER_EDITION, read once by the CLI): runnerwire.EditionSingle
+	// for a single-user hub's built-in runner (builtin.go), else "".
+	Edition string
+	// App asks for the owner's OK in the app, for the built-in runner
+	// (appaccept.go); nil makes one that asks in the app only.
+	App *AppAccepter
 
 	// Accepter asks whether to take an offer the auto-accept policy does not
 	// cover; nil declines those.
@@ -77,6 +93,59 @@ type Client struct {
 	jobs *jobs
 	// limiter caps copilot model calls per minute across connections.
 	limiter llmLimiter
+	// maxRuns is maxConcurrent as the hub last set it (settings.go); 0 until
+	// then, the config's applying. settingsMu orders such changes.
+	maxRuns    atomic.Int32
+	settingsMu sync.Mutex
+	appOnce    sync.Once
+	adminOnce  sync.Once
+
+	// live is the config in effect (cfg): Config until a change from the
+	// app replaces it whole. Each run keeps the one it was offered under.
+	live atomic.Pointer[Config]
+	// builtIn: this connection's runner is the built-in one (builtin.go);
+	// builtInState remembers the last decision (1 classic, 2 built-in) so a
+	// reconnect logs only a change.
+	builtIn      atomic.Bool
+	builtInState atomic.Int32
+	// infoChanged asks the connection for a new hello: the settings the app
+	// shows changed outside a settings request (localsettings.go).
+	infoChanged chan struct{}
+	// admin lets one repo admin operation run at a time (repoadmin.go).
+	admin chan struct{}
+	// guard replaces the sensitive-folder rules in tests (repoguard.go).
+	guard *repoGuard
+}
+
+// cfg is the config in effect now. A run uses the one it was offered under
+// (run.cfg) instead, so a change from the app applies to the runs after it
+// and never to one already going.
+func (c *Client) cfg() *Config {
+	if cfg := c.live.Load(); cfg != nil {
+		return cfg
+	}
+	return c.Config
+}
+
+// app is the AppAccepter, made on first use.
+func (c *Client) app() *AppAccepter {
+	c.appOnce.Do(func() {
+		if c.App == nil {
+			c.App = &AppAccepter{}
+		}
+	})
+	return c.App
+}
+
+// changedInfo asks the connection for a new hello.
+func (c *Client) changedInfo() {
+	if c.infoChanged == nil {
+		return
+	}
+	select {
+	case c.infoChanged <- struct{}{}:
+	default:
+	}
 }
 
 func (c *Client) llmLimiter() *llmLimiter { return &c.limiter }
@@ -103,6 +172,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if err := c.Config.PlainLocalHubRefusal(c.ServeManaged); err != nil {
 		return err
 	}
+	c.live.Store(c.Config)
+	c.infoChanged = make(chan struct{}, 1)
 	if c.Config.LegacyAutoAccept() {
 		// The CLI migrates and saves before this; a Config built elsewhere
 		// is migrated here, in memory.
@@ -120,6 +191,7 @@ func (c *Client) Run(ctx context.Context) error {
 	defer c.jobs.shutdown()
 	c.jobs.loadPRs()
 	c.jobs.loadMerges()
+	c.jobs.loadWorkspaceActions()
 	c.jobs.wg.Add(1)
 	go c.jobs.watchPRs(c.prPollInterval)
 	backoff := c.backoffMin()
@@ -149,15 +221,16 @@ func (c *Client) Run(ctx context.Context) error {
 // until something ends it. welcomed reports whether the hub accepted the
 // runner, which is what resets the backoff.
 func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
-	target, err := connectURL(c.Config.Hub)
+	cfg := c.cfg()
+	target, err := connectURL(cfg.Hub)
 	if err != nil {
 		return false, err
 	}
 	header := http.Header{}
-	header.Set("Authorization", "Bearer "+c.Config.Token)
-	if c.Config.AccessClientID != "" {
-		header.Set(runnerwire.AccessClientIDHeader, c.Config.AccessClientID)
-		header.Set(runnerwire.AccessClientSecretHeader, c.Config.AccessClientSecret)
+	header.Set("Authorization", "Bearer "+cfg.Token)
+	if cfg.AccessClientID != "" {
+		header.Set(runnerwire.AccessClientIDHeader, cfg.AccessClientID)
+		header.Set(runnerwire.AccessClientSecretHeader, cfg.AccessClientSecret)
 	}
 	conn, resp, err := websocket.Dial(ctx, target, &websocket.DialOptions{
 		HTTPHeader: header,
@@ -171,7 +244,13 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	// except a copilot model call, which carries a whole conversation.
 	conn.SetReadLimit(max(runnerwire.MaxMessageBytes, runnerwire.MaxLLMRequestBytes))
 
-	info := BuildInfo(ctx, c.Commands, c.Config)
+	// Until the welcome settles it (builtin.go), this runner is the built-in
+	// one only if the hub said so last time and its own side still holds:
+	// never on its own word, so a run reaching its question before a welcome
+	// that never comes is asked as a classic runner's would be.
+	claim, _ := c.builtInClaim()
+	c.builtIn.Store(claim && c.builtIn.Load())
+	info := c.buildInfo(ctx)
 	if err := c.hello(ctx, conn, info); err != nil {
 		return false, err
 	}
@@ -215,9 +294,12 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				if msg.Welcome != nil {
 					ownerID = msg.Welcome.OwnerID
 					c.jobs.setHubName(msg.Welcome.Name)
-					c.logf("connected to %s as %q (owner %s)", c.Config.Hub, msg.Welcome.Name, msg.Welcome.Owner)
+					c.logf("connected to %s as %q (owner %s)", cfg.Hub, msg.Welcome.Name, msg.Welcome.Owner)
 				} else {
-					c.logf("connected to %s", c.Config.Hub)
+					c.logf("connected to %s", cfg.Hub)
+				}
+				if c.decideBuiltIn(msg.Welcome) {
+					c.migrateBuiltIn(info.Agents)
 				}
 			case runnerwire.TypeBye:
 				return false, byeError(msg.Reason)
@@ -230,6 +312,10 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	defer llm.stop()
 	// Repo browsing answers (repobrowse.go) go out on this connection.
 	repoOut := make(chan runnerwire.Envelope, 8)
+	// So do settings answers (settings.go) and repo admin answers
+	// (repoadmin.go), each after a hello.
+	settingsOut := make(chan settingsAnswer, 4)
+	adminOut := make(chan repoAdminAnswer, 4)
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
@@ -237,9 +323,19 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	flushTick := time.NewTicker(c.flushInterval())
 	defer flushTick.Stop()
 	lastHeard := time.Now()
+	// The welcome settled what the first hello could only claim: say so when
+	// they differ (builtin.go).
+	if next := c.refreshInfo(info); !reflect.DeepEqual(next, info) {
+		info = next
+		if err := c.hello(ctx, conn, info); err != nil {
+			return true, err
+		}
+	}
 	// Whatever runs said while the runner was away goes out first, then the
-	// latest of every watched PR, once, in case the hub missed a change.
+	// latest of every watched PR, once, in case the hub missed a change; and
+	// every offer still waiting for a person, so the hub says why again.
 	c.jobs.resendPRs()
+	c.jobs.resendAsks()
 	flush := func() error {
 		write := func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) }
 		// Terminal output first, so a run's last screen arrives before its finish.
@@ -269,6 +365,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
 			case runnerwire.TypeMerge:
 				c.jobs.merge(msg.RunID, msg.Merge)
+			case runnerwire.TypeWorkspaceAction:
+				c.jobs.workspaceAction(ownerID, msg.WorkspaceAction)
 			case runnerwire.TypeTermIn:
 				c.jobs.termInput(msg.RunID, msg.Term)
 			case runnerwire.TypeTermResize:
@@ -279,11 +377,47 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				llm.cancel(msg.LLMID)
 			case runnerwire.TypeDecideRequest:
 				llm.decide(msg.Decide)
+			case runnerwire.TypeSettingsRequest:
+				if msg.Settings != nil {
+					req := *msg.Settings
+					go func() {
+						answer := settingsAnswer{done: c.applySettings(ownerID, req)}
+						if req.Redetect && answer.done.Code == "" {
+							// Look for the agent CLIs again before answering.
+							next := c.buildInfo(ctx)
+							answer.info = &next
+						}
+						select {
+						case settingsOut <- answer:
+						case <-ctx.Done():
+						}
+					}()
+				}
+			case runnerwire.TypeOfferAnswer:
+				// The built-in runner's, from its owner only (appaccept.go).
+				c.offerAnswer(ownerID, msg.OfferAnswer)
+			case runnerwire.TypeRepoAdmin:
+				if msg.RepoAdmin != nil {
+					req := *msg.RepoAdmin
+					go func() {
+						answer := c.repoAdmin(ctx, ownerID, req)
+						select {
+						case adminOut <- answer:
+						case <-ctx.Done():
+						}
+					}()
+				}
 			case runnerwire.TypeRepoRequest:
 				if msg.Repo != nil {
 					req := *msg.Repo
 					go func() {
-						done := BrowseRepo(ctx, c.Config, ownerID, req)
+						var done runnerwire.RepoDone
+						if runnerwire.RunRepoOp(req.Op) {
+							// One run's worktree (workspace.go).
+							done = c.jobs.browseRun(ctx, ownerID, req)
+						} else {
+							done = BrowseRepo(ctx, c.cfg(), ownerID, req)
+						}
 						select {
 						case repoOut <- runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &done}:
 						case <-ctx.Done():
@@ -298,6 +432,45 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		case env := <-repoOut:
 			if err := c.write(ctx, conn, env); err != nil {
 				return true, err
+			}
+		case answer := <-settingsOut:
+			// The hello with the settings in effect first: by the time the
+			// hub hears the change is done, it offers by the new limit. The
+			// last hello with only the settings changed (refreshInfo), not
+			// BuildInfo: probing every agent CLI again can take longer than
+			// the hub waits for the answer; the next redetect looks at them
+			// as usual, unless the owner asked to look again now.
+			if answer.info != nil {
+				info = c.refreshInfo(*answer.info)
+			} else {
+				info = c.refreshInfo(info)
+			}
+			if err := c.hello(ctx, conn, info); err != nil {
+				return true, err
+			}
+			done := answer.done
+			if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeSettingsDone, SettingsDone: &done}); err != nil {
+				return true, err
+			}
+		case answer := <-adminOut:
+			// As settings: the new repos in a hello first, so the hub knows a
+			// repo by the time it hears it was added.
+			if answer.changed {
+				info = c.refreshInfo(info)
+				if err := c.hello(ctx, conn, info); err != nil {
+					return true, err
+				}
+			}
+			done := answer.done
+			if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeRepoAdminDone, RepoAdminDone: &done}); err != nil {
+				return true, err
+			}
+		case <-c.infoChanged:
+			if next := c.refreshInfo(info); !reflect.DeepEqual(next, info) {
+				info = next
+				if err := c.hello(ctx, conn, info); err != nil {
+					return true, err
+				}
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {
@@ -319,7 +492,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				return true, err
 			}
 		case <-redetect.C:
-			next := BuildInfo(ctx, c.Commands, c.Config)
+			next := c.buildInfo(ctx)
 			if reflect.DeepEqual(next, info) {
 				continue
 			}
@@ -417,8 +590,8 @@ func (c *Client) logf(format string, args ...any) {
 		return
 	}
 	prefix := "runner: "
-	if c.Config.Name != "" {
-		prefix = "runner " + c.Config.Name + ": "
+	if name := c.cfg().Name; name != "" {
+		prefix = "runner " + name + ": "
 	}
 	// One line, whatever it quotes: run ids, names and errors come from the
 	// hub or an agent, and reach the terminal next to the accept question.
@@ -455,25 +628,31 @@ func (c *Client) startRunTimer(timeout time.Duration) (<-chan time.Time, func() 
 	return timer.C, timer.Stop
 }
 
-func (c *Client) runTimeout(kind string) time.Duration {
+// runTimeout is how long a run of kind may take under cfg, the run's own.
+func (c *Client) runTimeout(cfg *Config, kind string) time.Duration {
 	if c.RunTimeout > 0 {
 		return c.RunTimeout
 	}
-	return c.Config.RunTimeoutFor(kind)
+	return cfg.RunTimeoutFor(kind)
 }
 
 func (c *Client) prPollInterval() time.Duration {
 	if c.PRPollInterval > 0 {
 		return c.PRPollInterval
 	}
-	return c.Config.PRPollInterval()
+	return c.cfg().PRPollInterval()
 }
 
 func (c *Client) adapterFor(kind string) adapter.Adapter {
+	return c.adapterUnder(c.cfg(), kind)
+}
+
+// adapterUnder is adapterFor under cfg, a run's own.
+func (c *Client) adapterUnder(cfg *Config, kind string) adapter.Adapter {
 	if c.Adapter != nil {
 		return c.Adapter(kind)
 	}
-	if kind == "opencode" && c.Config != nil && c.Config.OpenCodeProtocol == "acp" {
+	if kind == "opencode" && cfg != nil && cfg.OpenCodeProtocol == "acp" {
 		return adapter.OpenCodeACP{}
 	}
 	return adapter.For(kind)

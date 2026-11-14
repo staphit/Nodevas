@@ -21,7 +21,7 @@ func hubSecretEnv(t *testing.T) {
 func TestLocalRunnerGetsNoHubSecrets(t *testing.T) {
 	hubSecretEnv(t)
 	t.Setenv("NODEVAS_COPILOT_API_KEY", "runner-copilot-key")
-	env := localRunnerEnv()
+	env := localRunnerEnv(false)
 	for _, kv := range env {
 		if strings.Contains(kv, "hub-secret-") {
 			t.Errorf("the local runner inherits %q", kv)
@@ -34,6 +34,16 @@ func TestLocalRunnerGetsNoHubSecrets(t *testing.T) {
 	// The runner-side copilot reads the same key by design.
 	if !strings.Contains(joined, "NODEVAS_COPILOT_API_KEY=runner-copilot-key") {
 		t.Error("the local runner lost NODEVAS_COPILOT_API_KEY")
+	}
+	// Only a standalone hub's runner is told it is the single-user
+	// edition's.
+	if strings.Contains(joined, localRunnerEditionEnv) {
+		t.Error("a runner for a hub that is not standalone is marked single-user")
+	}
+	single := strings.Join(localRunnerEnv(true), "\n")
+	if !strings.Contains(single, localRunnerEditionEnv+"=single") || !strings.Contains(single, localRunnerUnderServeEnv+"=1") ||
+		strings.Contains(single, "hub-secret-") {
+		t.Error("the standalone hub's runner is not marked single-user, or got hub secrets")
 	}
 }
 

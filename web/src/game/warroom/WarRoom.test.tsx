@@ -2,10 +2,12 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api } from "../../api";
 import type { BuildingProject, BuildingResponse } from "../../api/station";
 import { readPreferences } from "../../preferences";
 import type { ControlRow } from "../../station/control";
 import { useApp } from "../../store";
+import { useThemePacks } from "../../theme-pack/themePackStore";
 import { buildBuilding, type BuildingInputs } from "../building";
 import { GameActionsProvider } from "../GameActions";
 import { ago, makeAsk, makeMessage, makeRun, makeRunner, makeSession, NOW } from "../testFixtures";
@@ -98,6 +100,9 @@ const remoteOf = (...projects: BuildingProject[]): BuildingResponse => ({
 beforeEach(() => {
   reducedMotion(false);
   openSettings.mockReset();
+  // No theme pack: the built-in pixel people, and no request for a list.
+  vi.spyOn(api, "listThemePacks").mockResolvedValue({ packs: [], default: "" });
+  useThemePacks.getState().reset();
   useApp.setState({
     activeProject: "main",
     graph: GRAPH as never,
@@ -361,7 +366,7 @@ describe("the building", () => {
     useApp.setState({ preferences: { ...useApp.getState().preferences, agentWorkstation: false } });
     mount(building());
     expect(screen.queryByRole("region", { name: "Office Main" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("The war room shows your agent workstation");
+    expect(screen.getByRole("status")).toHaveTextContent("Agent activity shows your agent workstation");
   });
 });
 
@@ -420,5 +425,56 @@ describe("role badges", () => {
     const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, role: "tester" } })).toBe(false);
     expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, testState: "red" } })).toBe(false);
+  });
+});
+
+describe("the global agents' office", () => {
+  const global = (over: Parameters<typeof makeRun>[0] = {}) =>
+    makeRun({ project: "", nodeId: "", global: true, title: "Bump the deps", ...over });
+
+  it("is a second full office under the project's, with a plain sign and only the rooms in use", () => {
+    mount(
+      building({
+        runs: [makeRun({ id: "w1", nodeId: "login", status: "running" })],
+        globalRuns: [global({ id: "g1", status: "running" })],
+      }),
+    );
+    const offices = screen.getAllByRole("region", { name: /^Office / });
+    expect(offices.map((office) => office.getAttribute("aria-label"))).toEqual(["Office Main", "Office Global agents"]);
+    const office = offices[1];
+    expect(office).toHaveClass("is-global");
+    // Its sign names it; there is no style to pick for it.
+    expect(within(office).getByText("Global agents")).toBeInTheDocument();
+    expect(within(office).queryByRole("button", { name: /style/i })).not.toBeInTheDocument();
+    // Nobody asks there and nobody waits at its door: neither room is drawn.
+    expect(within(office).queryByRole("group", { name: "Meeting room" })).not.toBeInTheDocument();
+    expect(within(office).queryByRole("group", { name: "Entrance" })).not.toBeInTheDocument();
+    const work = within(office).getByRole("group", { name: "Work area" });
+    const desk = within(work).getByRole("button", { name: /Claude opus in mac-mini: working, on “Bump the deps”.*cannot ask you anything/ });
+    expect(desk.querySelector(".px-badge.is-noask")).not.toBeNull();
+  });
+
+  it("offers its workspace and the Global agents tab, no node or run view", () => {
+    mount(building({ globalRuns: [global({ id: "g1", status: "running" })] }));
+    const office = screen.getByRole("region", { name: "Office Global agents" });
+    fireEvent.click(within(office).getByRole("button", { name: /on “Bump the deps”/ }));
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items).toEqual(["Open workspace", "Show in Global agents"]);
+  });
+
+  it("draws the building for global agents with no project open, and says it in words", () => {
+    useApp.setState({ activeProject: "" });
+    mount(building({ activeProject: "", globalRuns: [global({ id: "g1", status: "offered" })] }));
+    expect(screen.queryByText("No runners or agents yet.")).not.toBeInTheDocument();
+    const office = screen.getByRole("region", { name: "Office Global agents" });
+    expect(within(office).getByRole("group", { name: "Entrance" })).toBeInTheDocument();
+    const text = screen.getByTestId("war-room-text");
+    expect(within(text).getByRole("heading", { name: "Office Global agents" })).toBeInTheDocument();
+    expect(within(text).getByText(/waiting to be accepted, on “Bump the deps”/)).toBeInTheDocument();
+  });
+
+  it("has no second office while no global agent is seated", () => {
+    mount(building({ globalRuns: [] }));
+    expect(screen.queryByRole("region", { name: "Office Global agents" })).not.toBeInTheDocument();
   });
 });

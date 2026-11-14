@@ -30,7 +30,12 @@ export function runPose(run: Run, ctx: RunPoseContext): Pose {
   if (ctx.asking) return "asking-user";
   if (run.status === "failed" || openPRWithCI(run, "failure")) return "failed";
   if (runWaitsForLimit(run)) return "limit";
-  if (run.status === "queued" || run.status === "offered" || run.merge?.status === "pending") {
+  if (
+    run.status === "queued" ||
+    run.status === "offered" ||
+    run.merge?.status === "pending" ||
+    run.workspaceAction?.status === "pending"
+  ) {
     return "awaiting-accept";
   }
   if (openPRWithCI(run, "pending")) return "waiting-ci";
@@ -60,5 +65,6 @@ export function finishedRunStaysInRoom(run: Run): boolean {
   if (!runFinal(run.status)) return true;
   if (run.status === "failed") return true;
   if (run.merge?.status === "pending") return true;
+  if (run.workspaceAction?.status === "pending") return true;
   return openPRWithCI(run, "failure") || openPRWithCI(run, "pending");
 }

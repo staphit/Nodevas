@@ -2,9 +2,12 @@ import { create } from "zustand";
 import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
+import { agentName, agentWho } from "../game/labels";
 import { useApp } from "../store";
 import { openNodeRuns } from "./openRuns";
+import { openRunWorkspace } from "./openWorkspace";
 import { useRuns } from "./runStore";
+import { workspaceCodeText } from "./workspaceStore";
 
 /**
  * run-notify: the hub says a run finished, its CI turned red, or its merge
@@ -16,6 +19,10 @@ import { useRuns } from "./runStore";
  * says so rather than plain "failed". And since a run's end is when the
  * viewer's daily budget can run out, each run-notify also checks it, telling
  * once per UTC day and limit.
+ *
+ * Single-user edition: the app's own runner asking before it starts a run
+ * (the hub sends run-notify for an offer's first ask) is told too, so the
+ * person sees "Waiting for your OK" even with no run list on screen.
  */
 export type RunNotifyKind =
   | "succeeded"
@@ -31,7 +38,19 @@ export type RunNotifyKind =
   | "pipeline-approved"
   | "pipeline-changes-left"
   | "pipeline-failed"
-  | "pipeline-cancelled";
+  | "pipeline-cancelled"
+  // Agent workspace: the runner answered the owner's local merge or discard.
+  | "workspace-merged"
+  | "workspace-discarded"
+  | "workspace-failed"
+  // The app's own runner waits for its owner's OK before it starts the run.
+  | "ask";
+
+const WORKSPACE_KINDS: ReadonlySet<RunNotifyKind> = new Set([
+  "workspace-merged",
+  "workspace-discarded",
+  "workspace-failed",
+]);
 
 const PIPELINE_KINDS: Record<string, RunNotifyKind> = {
   approved: "pipeline-approved",
@@ -44,6 +63,8 @@ export interface RunToast {
   id: number;
   runId: string;
   nodeId: string;
+  /** A global agent's run: no node to open, its workspace instead. */
+  global?: boolean;
   kind: RunNotifyKind;
   title: string;
   body: string;
@@ -71,6 +92,24 @@ export function runNotifyKind(
   now = Date.now(),
   pipeline: PipelineState | null = null,
 ): { kind: RunNotifyKind; key: string } | null {
+  // Waiting for an answer in this app: nothing else has happened to it yet.
+  if (run.status === "offered" && run.ask?.where === "app") {
+    return { kind: "ask", key: `${run.id}:ask:${run.ask.expiresAt}` };
+  }
+  // The owner's workspace action is the newest step a run can take.
+  const action = run.workspaceAction;
+  const actionEnded = action?.status === "done" || action?.status === "failed" || action?.status === "expired";
+  if (action && actionEnded && fresh(action.finishedAt, now)) {
+    return {
+      kind:
+        action.status !== "done"
+          ? "workspace-failed"
+          : action.action === "discard"
+            ? "workspace-discarded"
+            : "workspace-merged",
+      key: `${run.id}:workspace:${action.id}`,
+    };
+  }
   const merge = run.merge;
   const mergeEnded =
     merge?.status === "merged" || merge?.status === "failed" || merge?.status === "expired";
@@ -113,6 +152,11 @@ function nodeTitle(nodeId: string): string {
   return node?.title || nodeId;
 }
 
+/** What the run worked on: a global agent's task title, else its node's. */
+function runSubject(run: Run): string {
+  return run.global ? run.title || run.branch || run.id : nodeTitle(run.nodeId);
+}
+
 /** The toast's two lines, in the reader's language. */
 export function runNotifyText(
   run: Run,
@@ -121,9 +165,21 @@ export function runNotifyText(
 ): { title: string; body: string } {
   const t = (key: string, values?: Record<string, string | number>) =>
     translate(key, undefined, values);
-  const name = nodeTitle(run.nodeId);
+  const name = runSubject(run);
   const pr = run.prNumber ? t("runs.pr", { number: run.prNumber }) : "";
+  // A global agent has no node to name: the toast says whose task it was.
+  if (run.global && (kind === "succeeded" || kind === "failed")) {
+    const agent = agentWho(run.agent, run.model);
+    return kind === "succeeded"
+      ? { title: t("globalAgents.toast.finished", { agent, title: name }), body: pr }
+      : { title: t("globalAgents.toast.failed", { agent, title: name }), body: run.error ?? "" };
+  }
   switch (kind) {
+    case "ask":
+      return {
+        title: t("offerAsk.notify", { agent: agentName(run.agent), repo: run.repoName || run.repoId }),
+        body: name,
+      };
     case "succeeded":
       return { title: t("runNotify.succeeded", { name }), body: pr };
     case "failed":
@@ -163,6 +219,25 @@ export function runNotifyText(
       const detail = kind === "pipeline-failed" ? (run.error ?? "") : pr;
       return { title: t(key, { name }), body: [rounds, detail].filter(Boolean).join(" · ") };
     }
+    case "workspace-merged":
+      return {
+        title: t("runWorkspace.toast.merged", { branch: run.branch, base: run.workspaceAction?.base || run.base }),
+        body: name,
+      };
+    case "workspace-discarded":
+      return { title: t("runWorkspace.toast.discarded", { agent: agentWho(run.agent, run.model) }), body: name };
+    case "workspace-failed": {
+      const action = run.workspaceAction;
+      const code = action?.status === "expired" ? "expired" : (action?.code ?? "");
+      const reason = workspaceCodeText(code, { base: run.base }) || action?.reason || "";
+      return {
+        title: t("runWorkspace.toast.failed", {
+          action: t(action?.action === "discard" ? "runWorkspace.action.discard" : "runWorkspace.action.merge_local"),
+          agent: agentWho(run.agent, run.model),
+        }),
+        body: [reason, name].filter(Boolean).join(" · "),
+      };
+    }
     case "merge-failed": {
       const reason =
         run.merge?.status === "expired"
@@ -187,9 +262,13 @@ export interface RunToastState {
 }
 
 /** Opens what a toast is about. */
-function openToast(toast: Pick<RunToast, "kind" | "nodeId" | "runId">): void {
+function openToast(toast: Pick<RunToast, "kind" | "nodeId" | "runId" | "global">): void {
   if (toast.kind === "budget") {
     window.dispatchEvent(new CustomEvent("nodevas-open-budget"));
+    return;
+  }
+  if (toast.global || WORKSPACE_KINDS.has(toast.kind) || (toast.kind === "ask" && !toast.nodeId)) {
+    openRunWorkspace(toast.runId);
     return;
   }
   openNodeRuns(toast.nodeId, toast.runId);
@@ -254,6 +333,11 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
       // A run this viewer may not read, or the hub went away: nothing to say.
       return;
     }
+    // A workspace action's answer: the open panel and the rows follow it now,
+    // before the list refresh. A global run is held either way: its toast
+    // opens its workspace, which reads it from the store. So is a run that
+    // waits for an answer, so its card shows wherever the run does.
+    if (run.workspaceAction || run.global || run.ask) useRuns.getState().putRun(run);
     // A pipeline step: whether the pipeline ended decides what to tell.
     let pipeline: PipelineState | null = null;
     if (run.pipelineId) {
@@ -271,7 +355,7 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
     told.add(what.key);
     const { title, body } = runNotifyText(run, what.kind, pipeline);
     get().push(
-      { runId: run.id, nodeId: run.nodeId, kind: what.kind, title, body },
+      { runId: run.id, nodeId: run.nodeId, kind: what.kind, title, body, ...(run.global ? { global: true } : {}) },
       `nodevas-run-${what.key}`,
     );
   },

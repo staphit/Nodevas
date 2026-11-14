@@ -27,6 +27,7 @@ import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
 import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
 import { openSettings, type SettingsSection } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
+import { openGlobalAgents } from "../station/openGlobalAgents";
 import { setProjectMode } from "../station/projectMode";
 import { confirmAction } from "./ConfirmDialog";
 import { useNodeDetailView } from "./drawer/openNodeDetail";
@@ -400,11 +401,20 @@ export function CommandPalette() {
         key: "open-station",
         title: t("topbar.cmd.openStation"),
         detail: t("mode.station.detail"),
-        keywords: "station agents waiting runs today war room 工作站 等你 執行 戰情室",
+        keywords: "station agents waiting runs today agent activity war room 工作站 等你 執行 動態 戰情室",
         icon: <IconSpark size={15} />,
         run: () => setProjectMode("station"),
       });
     }
+    // Global agents work outside any project: Station's other tab.
+    list.push({
+      key: "open-global-agents",
+      title: t("topbar.cmd.openGlobalAgents"),
+      detail: t("globalAgents.intro"),
+      keywords: "global agents repository runner task outside project 全域 agent 儲存庫 任務",
+      icon: <IconSpark size={15} />,
+      run: () => openGlobalAgents(),
+    });
     // The top bar's Runners and Usage icons went into its runner pill; these
     // reach their pages, and the agent controls with them, by name.
     if (workstation) {

@@ -34,6 +34,18 @@ const openCodeConfigTimeout = 30 * time.Second
 // sources rather than the merged config: [{"type": …, "path": …, "info":
 // {"mcp": {"servers": {…}}}}] (checked against opencode 2.1.4).
 func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]string, error) {
+	return openCodeMCPServers(ctx, bin, dir, readOnly, false)
+}
+
+// OpenCodeEveryMCPServer is OpenCodeMCPServers with "nodevas" too, when
+// OpenCode loads one (the owner's, from `nodevas setup-agent`): what a run
+// with no board (RunEnv.NoBoard) switches off, having no server of its own
+// to put in that one's place.
+func OpenCodeEveryMCPServer(ctx context.Context, bin, dir string, readOnly bool) ([]string, error) {
+	return openCodeMCPServers(ctx, bin, dir, readOnly, true)
+}
+
+func openCodeMCPServers(ctx context.Context, bin, dir string, readOnly, withNodevas bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, openCodeConfigTimeout)
 	defer cancel()
 	if readOnly {
@@ -57,7 +69,7 @@ func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("opencode debug config: %v: %s", err, Truncate(strings.TrimSpace(stderr.String()), 300))
 	}
-	names, err := openCodeServerNames([]byte(stdout.String()))
+	names, err := openCodeServerNames([]byte(stdout.String()), withNodevas)
 	if err != nil {
 		return nil, fmt.Errorf("opencode debug config: %w", err)
 	}
@@ -81,8 +93,9 @@ func openCodeEmptyDir() (string, error) {
 	return empty, nil
 }
 
-// openCodeServerNames reads `opencode debug config`'s output, either shape.
-func openCodeServerNames(out []byte) ([]string, error) {
+// openCodeServerNames reads `opencode debug config`'s output, either shape:
+// every server's name but nodevas, unless withNodevas.
+func openCodeServerNames(out []byte, withNodevas bool) ([]string, error) {
 	type mcpConfig struct {
 		MCP map[string]json.RawMessage `json:"mcp"`
 	}
@@ -118,7 +131,7 @@ func openCodeServerNames(out []byte) ([]string, error) {
 	}
 	var names []string
 	for name := range seen {
-		if name != "nodevas" {
+		if name != "nodevas" || withNodevas {
 			names = append(names, name)
 		}
 	}

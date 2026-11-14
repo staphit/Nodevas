@@ -38,6 +38,12 @@ describe("runPose", () => {
       merge: { id: "m", runId: "r", headSha: "h", status: "pending", requestedBy: "bea", createdAt: "" },
     });
     expect(runPose(merging, here)).toBe("awaiting-accept");
+    // A local merge or discard waiting for the runner reads the same.
+    const local = makeRun({
+      status: "succeeded",
+      workspaceAction: { id: "w", runId: "r", action: "merge_local", status: "pending", requestedBy: "bea", createdAt: "" },
+    });
+    expect(runPose(local, here)).toBe("awaiting-accept");
   });
 
   it("waits for CI on an open PR with CI pending", () => {

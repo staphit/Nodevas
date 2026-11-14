@@ -3,7 +3,10 @@
 // shape of a node card) with the one action that unblocks it and, where it
 // helps, a second. The answers themselves happen
 // where they always did: the war room's ask and held-mail dialogs, a
-// goal's review, a node's Runs tab.
+// goal's review, a node's Runs tab. An offer the app's own runner asks about
+// (single-user edition) is answered right in its tile.
+
+import type { ReactNode } from "react";
 
 import { excerpt } from "../agents/agentStore";
 import type { Run } from "../api";
@@ -13,6 +16,8 @@ import { agentWho } from "../game/labels";
 import { useI18n } from "../i18n";
 import { runnerDisplayName } from "../runners/runnerName";
 import { confirmCancelRun } from "../runs/confirmCancelRun";
+import { OfferAskCard, runAsksInApp } from "../runs/OfferAskCard";
+import { askMachine } from "../runs/offerReasons";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
@@ -32,8 +37,10 @@ interface Row {
   sub?: string;
   /** The node it is about: its tile shows the node's type. */
   nodeId?: string;
-  primary: Action;
+  primary?: Action;
   secondary?: Action;
+  /** In place of the buttons: the ask card. */
+  body?: ReactNode;
 }
 
 export function StationWaiting() {
@@ -118,9 +125,19 @@ export function StationWaiting() {
             : undefined,
         };
       case "offer":
+        if (runAsksInApp(item.run)) {
+          return {
+            text: titleOf(item.run.nodeId),
+            sub: agentWho(item.run.agent, item.run.model),
+            nodeId: item.run.nodeId,
+            body: <OfferAskCard run={item.run} className="station-waiting-ask" />,
+          };
+        }
         return {
           text: t("station.waiting.offer", { runner: runnerDisplayName(t, item.run.runnerName) || "—", name: titleOf(item.run.nodeId) }),
-          sub: `${agentWho(item.run.agent, item.run.model)} · ${t("station.waiting.offerHint")}`,
+          sub: `${agentWho(item.run.agent, item.run.model)} · ${
+            item.run.ask ? t("offerAsk.waitingOn", { machine: askMachine(t, item.run) }) : t("station.waiting.offerHint")
+          }`,
           nodeId: item.run.nodeId,
           primary: openRun(item.run),
           secondary: {
@@ -158,7 +175,7 @@ export function StationWaiting() {
       ) : (
         <StationTiles label={t("station.waiting.title")}>
           {items.map((item) => {
-            const { text, sub, nodeId, primary, secondary } = row(item);
+            const { text, sub, nodeId, primary, secondary, body } = row(item);
             return (
               <StationTile
                 key={waitingKey(item)}
@@ -168,16 +185,24 @@ export function StationWaiting() {
                 nodeId={nodeId}
                 meta={sub}
               >
-                <span className="station-waiting-actions">
-                  <button type="button" className="ap-btn is-primary" disabled={primary.disabled} onClick={primary.run}>
-                    {primary.label}
-                  </button>
-                  {secondary && (
-                    <button type="button" className="ap-btn" disabled={secondary.disabled} onClick={secondary.run}>
-                      {secondary.label}
+                {body}
+                {primary && (
+                  <span className="station-waiting-actions">
+                    <button
+                      type="button"
+                      className="ap-btn is-primary"
+                      disabled={primary.disabled}
+                      onClick={primary.run}
+                    >
+                      {primary.label}
                     </button>
-                  )}
-                </span>
+                    {secondary && (
+                      <button type="button" className="ap-btn" disabled={secondary.disabled} onClick={secondary.run}>
+                        {secondary.label}
+                      </button>
+                    )}
+                  </span>
+                )}
               </StationTile>
             );
           })}

@@ -557,6 +557,18 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* The global agents' office: a plain plate, nothing to pick (it has no
+   project and no style of its own). */
+.px-sign.is-global {
+  cursor: default;
+}
+.px-office-room.is-global .px-areas {
+  grid-template-columns: minmax(0, 1fr);
+}
+.px-office-room.is-global .px-area.is-meeting {
+  border-left: 0;
+  border-top: calc(2 * var(--px)) solid var(--px-wall-trim);
+}
 .px-sign-name {
   max-width: 100%;
   overflow: hidden;
@@ -854,6 +866,15 @@
 .px-badge.is-swap {
   left: 0;
   bottom: calc(4 * var(--px));
+}
+/* A headless global agent cannot ask: a quiet tag, bottom left. */
+.px-badge.is-noask {
+  left: 0;
+  bottom: calc(1 * var(--px));
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 9px;
+  line-height: 11px;
 }
 /* The run's role, top right of its desk: a short pixel-font tag. */
 .px-badge.is-role {
@@ -1294,6 +1315,1021 @@
   position: relative;
 }
 
+/* ---------- a theme pack's pictures ---------- */
+.px-figure-art {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+.px-figure-art > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* A clip fills the scene's own rectangle; ThemeFigure places it. */
+.px-figure-art > video {
+  position: absolute;
+  display: block;
+  object-fit: cover;
+}
+/* A click clip waits unseen over her, and shows only while it plays: it
+   starts and ends on her still, so it fades in and out without a seam. */
+.px-figure-art > video.px-figure-click {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+.px-figure-art > video.px-figure-click.is-playing {
+  opacity: 1;
+}
+/* Her sign, over her head: it drifts up and back, and nothing else moves
+   on its own. */
+.px-figure-sign {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  opacity: 0.82;
+  pointer-events: none;
+  user-select: none;
+}
+.px-office[data-motion="full"] .px-figure-sign {
+  animation: px-sign-drift 3400ms ease-in-out infinite;
+}
+.px-office[data-paused="true"] .px-figure-sign {
+  animation-play-state: paused;
+}
+@keyframes px-sign-drift {
+  0%,
+  100% {
+    transform: translate(-50%, -50%);
+    opacity: 0.82;
+  }
+  50% {
+    transform: translate(-50%, -58%);
+    opacity: 1;
+  }
+}
+
+/* ---------- a theme pack's story ----------
+   With a pack on, the building is a story: places down the side, a stage of
+   the pack's pictures, a dialogue box. The stage is night whatever the app's
+   theme, as the pictures are; a pack's skin gives it its own accent, and a
+   dark one its night and ink (StoryRoom sets the --story-* it has). */
+.px-story {
+  --story-night: #150e08;
+  --story-deep: #261a10;
+  --story-ink: #efe6d0;
+  --story-soft: #b3a48c;
+  --story-accent: #d9b86c;
+  --story-alert: #ff8a7a;
+  --story-ask: #ffd27a;
+  --story-bronze: #b0733a;
+  --story-panel: color-mix(in srgb, var(--story-night) 86%, transparent);
+  --story-line: color-mix(in srgb, var(--story-accent) 22%, transparent);
+  --story-dim: color-mix(in srgb, var(--story-accent) 58%, var(--story-night));
+  container-type: inline-size;
+  min-width: 0;
+  color: var(--story-ink);
+}
+.px-story button {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.px-story button:focus-visible {
+  outline: 2px solid var(--story-accent);
+  outline-offset: 2px;
+}
+.px-story-world {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: clamp(540px, calc(100vh - 200px), 880px);
+  border: 1px solid var(--story-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--story-night);
+}
+
+/* The places. */
+.px-story-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--story-line);
+  background: color-mix(in srgb, var(--story-night) 88%, #000);
+}
+.px-story-project {
+  margin: 0 6px;
+  overflow: hidden;
+  color: var(--story-accent);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-places {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.px-story-place {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 68px;
+  padding: 0;
+  border: 1px solid var(--story-line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--story-deep);
+  text-align: left;
+}
+.px-story-place:hover {
+  border-color: var(--story-dim);
+}
+.px-story-place.is-on {
+  border-color: var(--story-accent);
+  box-shadow:
+    0 0 0 1px var(--story-accent),
+    0 0 18px color-mix(in srgb, var(--story-accent) 25%, transparent);
+}
+.px-story-thumb,
+.px-story-shade {
+  position: absolute;
+  inset: 0;
+}
+.px-story-thumb {
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  filter: saturate(0.9);
+}
+.px-story-place:is(:hover, .is-on) .px-story-thumb {
+  opacity: 0.9;
+}
+.px-story-shade {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--story-night) 94%, transparent) 0%,
+    color-mix(in srgb, var(--story-night) 60%, transparent) 55%,
+    color-mix(in srgb, var(--story-night) 13%, transparent) 100%
+  );
+}
+.px-story-place-name,
+.px-story-place-sub {
+  position: absolute;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-place-name {
+  top: 10px;
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 4px #000;
+}
+.px-story-place-sub {
+  bottom: 9px;
+  color: var(--story-soft);
+  font-size: 12px;
+}
+.px-story-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 11px;
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+.px-story-mark.is-ask {
+  background: var(--story-ask);
+  color: #2a1c00;
+}
+.px-story-mark.is-fail {
+  background: var(--story-alert);
+  color: #2a0500;
+}
+.px-story-elsewhere {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.px-story-rail-title,
+.px-story-rail-note {
+  margin: 4px 6px 0;
+  color: var(--story-dim);
+  font-size: 12px;
+}
+.px-story-rail-title {
+  letter-spacing: 0.3em;
+}
+.px-story-door-menu {
+  display: flex;
+}
+.px-story-door {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--story-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--story-soft) !important;
+  font-size: 12px !important;
+  text-align: left;
+}
+.px-story-door.is-busy {
+  color: var(--story-ink) !important;
+}
+.px-story-door:hover,
+.px-story-door[aria-expanded="true"] {
+  border-color: var(--story-accent);
+}
+.px-story-door-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-door-counts {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 11px;
+}
+.px-story-door-counts .is-ask {
+  color: var(--story-ask);
+}
+.px-story .px-hud {
+  margin-top: auto;
+  padding: 10px 6px 0;
+  color: var(--story-soft);
+}
+.px-story .px-hud-value {
+  color: var(--story-ink);
+}
+.px-story .px-meter {
+  background: var(--story-line);
+}
+.px-story .px-meter.is-wide {
+  width: 100%;
+  max-width: none;
+  border-color: var(--story-dim);
+}
+
+/* The stage. */
+.px-story-stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.px-story-backdrop {
+  position: absolute;
+  inset: -40px;
+  background-repeat: no-repeat;
+  filter: blur(26px) brightness(0.42) saturate(1.1);
+}
+.px-office[data-motion="full"] .px-story-backdrop {
+  animation: px-story-fade 600ms ease-out;
+}
+@keyframes px-story-fade {
+  from {
+    opacity: 0;
+  }
+}
+.px-story-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 40%, transparent 30%, #0a0603cc 100%);
+}
+/* The place's name, and the switch between the stage and the list beside it:
+   clear of the roster on the right. */
+.px-story-head {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 262px);
+}
+.px-story-banner {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 34px 8px 22px;
+  border-left: 3px solid var(--story-accent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--story-night) 90%, transparent) 60%, transparent);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.3em;
+}
+.px-story-banner small {
+  display: block;
+  margin-top: 2px;
+  color: var(--story-soft);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+.px-story-layout {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--story-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--story-night) 79%, transparent);
+}
+.px-story-layout > button {
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12px;
+  line-height: 18px;
+}
+.px-story-layout > button:hover {
+  color: var(--story-ink);
+}
+.px-story-layout > button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--story-accent) 22%, transparent);
+  color: var(--story-ink);
+}
+
+/* Who is here: a face each, the one the stage is turned to lit. */
+.px-story-roster {
+  position: absolute;
+  top: 22px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 230px;
+  max-height: calc(100% - 250px);
+  padding: 3px;
+  overflow-y: auto;
+}
+/* In the list, no dialogue box is under it. */
+.px-story-stage[data-layout="list"] .px-story-roster {
+  max-height: calc(100% - 44px);
+}
+.px-story-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 4px 4px;
+  border: 1px solid var(--story-line);
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--story-night) 79%, transparent);
+  font-size: 13px;
+  text-align: left;
+}
+.px-story-who:hover {
+  border-color: var(--story-dim);
+}
+.px-story-who.is-fail {
+  border-color: var(--story-alert);
+}
+.px-story-who.is-ask {
+  border-color: var(--story-ask);
+}
+.px-story-who.is-on {
+  border-color: var(--story-accent);
+  box-shadow: 0 0 0 1px var(--story-accent);
+}
+.px-story-face {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background-color: color-mix(in srgb, var(--story-deep) 70%, var(--story-bronze));
+  background-repeat: no-repeat;
+}
+.px-story-face.is-unnamed {
+  display: grid;
+  place-items: center;
+  color: #ffffff60;
+  font-size: 20px;
+}
+.px-story-who-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.px-story-who-name,
+.px-story-who-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-who-what {
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 11px;
+}
+
+/* What lies on the meeting table for the viewer. */
+.px-story-notices {
+  position: absolute;
+  top: 100px;
+  left: 22px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 230px;
+  max-height: calc(100% - 320px);
+  margin: 0;
+  padding: 3px;
+  overflow-y: auto;
+  list-style: none;
+}
+.px-story-notice-menu {
+  display: flex;
+}
+.px-story-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--story-ask) 60%, transparent);
+  border-radius: 6px;
+  background: var(--story-panel);
+  text-align: left;
+}
+.px-story-notice:hover,
+.px-story-notice[aria-expanded="true"] {
+  border-color: var(--story-ask);
+}
+.px-story-notice-kind {
+  color: var(--story-ask);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 11px;
+}
+.px-story-notice-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The people: the one turned to in front, the others behind to either side. */
+.px-story-people {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 0;
+  padding-top: 18px;
+}
+.px-story-figure {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  height: 97%;
+  padding: 0;
+  border: 0;
+  background: none;
+  transform-origin: 50% 100%;
+}
+.px-office[data-motion="full"] .px-story-figure {
+  transition:
+    transform 450ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    filter 450ms,
+    opacity 450ms;
+}
+.px-story-figure:focus-visible {
+  outline: none !important;
+}
+.px-story-art {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px 10px 0 0;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--story-accent) 40%, transparent),
+    0 18px 60px #000c;
+}
+.px-story-figure.is-side {
+  filter: brightness(0.45) saturate(0.7);
+}
+.px-story-figure.is-side:hover {
+  filter: brightness(0.7) saturate(0.9);
+}
+.px-story-figure.is-far {
+  opacity: 0;
+  pointer-events: none;
+}
+.px-story-count {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 2px 12px;
+  border: 1px solid var(--story-accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--story-night) 85%, transparent);
+  color: var(--story-accent);
+  font-size: 18px;
+}
+/* Someone the pack has no picture for. */
+.px-story-unnamed {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(
+    ellipse at 50% 30%,
+    color-mix(in srgb, var(--story-deep) 70%, var(--story-bronze)),
+    var(--story-night) 70%
+  );
+  color: #ffffff30;
+  font-size: 180px;
+  line-height: 1;
+}
+.px-story-unnamed small {
+  position: absolute;
+  right: 0;
+  bottom: 30%;
+  left: 0;
+  color: var(--story-soft);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
+/* The people as a list: a row each, her card on the left and her dialogue
+   box on the right, pointing at it. The list scrolls under the place's name
+   and beside the roster, never under them. */
+.px-story-list {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  margin: 96px 262px 0 0;
+  padding: 22px 12px 26px 26px;
+  overflow-y: auto;
+  scroll-padding: 22px 0 26px;
+  container: story-list / inline-size;
+}
+.px-story-list > .px-story-notices {
+  position: static;
+  flex-flow: row wrap;
+  width: auto;
+  max-height: none;
+  margin: 0 0 30px;
+  padding: 0;
+  overflow: visible;
+}
+.px-story-list > .px-story-notices > li {
+  flex: 0 1 230px;
+  min-width: 0;
+}
+.px-story-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.px-story-row {
+  display: grid;
+  grid-template-columns: clamp(220px, 30%, 260px) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  cursor: pointer;
+}
+.px-story-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.px-story-card:focus-visible {
+  outline: none !important;
+}
+.px-story-card .px-story-art {
+  border-radius: 10px;
+}
+.px-story-row.is-on .px-story-art {
+  box-shadow:
+    0 0 0 2px var(--story-accent),
+    0 18px 60px #000c;
+}
+.px-story-row:not(.is-on) .px-story-card {
+  filter: brightness(0.7) saturate(0.85);
+}
+.px-story-row:not(.is-on):hover .px-story-card {
+  filter: brightness(0.85) saturate(0.95);
+}
+.px-office[data-motion="full"] .px-story-card {
+  transition: filter 300ms;
+}
+.px-story-card .px-story-count {
+  top: 8px;
+  right: 8px;
+  padding: 1px 9px;
+  font-size: 14px;
+}
+.px-story-card .px-story-unnamed {
+  font-size: 110px;
+}
+.px-story-row .px-story-talk {
+  min-height: 0;
+  margin: 17px 0 0;
+}
+.px-story-row .px-story-choices {
+  width: 180px;
+}
+/* The tail, on the box's left edge, at her card. */
+.px-story-row .px-story-talk::after {
+  position: absolute;
+  top: 34px;
+  left: -8px;
+  width: 14px;
+  height: 14px;
+  border-bottom: 1px solid var(--story-dim);
+  border-left: 1px solid var(--story-dim);
+  background: var(--story-night);
+  transform: rotate(45deg);
+  content: "";
+}
+.px-story-row .px-story-talk.is-fail::after {
+  border-color: var(--story-alert);
+}
+.px-story-row .px-story-talk.is-ask::after {
+  border-color: var(--story-ask);
+}
+/* A narrower list: the choices under the line, then the box under the card. */
+@container story-list (max-width: 860px) {
+  .px-story-row .px-story-talk {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .px-story-row .px-story-choices {
+    flex-flow: row wrap;
+    grid-column: 1;
+    width: auto;
+  }
+  .px-story-row .px-story-choices > * {
+    flex: 1 1 140px;
+    width: auto;
+  }
+}
+@container story-list (max-width: 520px) {
+  .px-story-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .px-story-card {
+    justify-self: center;
+    width: min(240px, 100%);
+  }
+  .px-story-row .px-story-talk::after {
+    display: none;
+  }
+}
+
+/* The runners. */
+.px-story-tower {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: center;
+  justify-content: center;
+  gap: 18px;
+  max-height: 100%;
+  padding: 80px 24px 24px;
+  overflow-y: auto;
+}
+.px-story-rack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 190px;
+  padding: 16px 18px;
+  border: 1px solid var(--story-dim);
+  border-radius: 8px;
+  background: var(--story-panel);
+  text-align: center;
+}
+.px-story-rack:hover {
+  border-color: var(--story-accent);
+}
+.px-story-rack.is-off {
+  opacity: 0.55;
+}
+.px-story-rack.is-more {
+  width: auto;
+  justify-content: center;
+  font-size: 18px;
+}
+.px-story-rack-name {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.px-story-slots > span {
+  height: 10px;
+  border-radius: 5px;
+  background: #ffffff14;
+}
+.px-story-slots > .is-busy {
+  background: linear-gradient(90deg, var(--story-bronze), #f0c878);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--story-bronze) 53%, transparent);
+}
+.px-story-rack.is-off .px-story-slots > .is-busy {
+  background: #ffffff40;
+  box-shadow: none;
+}
+.px-story-rack-load {
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12px;
+}
+
+/* The dialogue box. The blur is a layer of its own: on the box itself it
+   would catch the menu "More…" opens, which is placed on the viewport. */
+.px-story-talk {
+  position: relative;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 26px;
+  min-height: 148px;
+  margin: 0 26px 22px;
+  padding: 22px 26px 18px;
+  border: 1px solid var(--story-dim);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--story-night) 60%, transparent),
+    0 10px 40px #000a;
+}
+.px-story-talk::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--story-panel);
+  backdrop-filter: blur(6px);
+  content: "";
+}
+.px-story-talk.is-fail {
+  border-color: var(--story-alert);
+}
+.px-story-talk.is-ask {
+  border-color: var(--story-ask);
+}
+.px-story-plate {
+  position: absolute;
+  top: -17px;
+  left: 22px;
+  max-width: calc(100% - 44px);
+  margin: 0;
+  padding: 4px 20px;
+  border: 1px solid var(--story-accent);
+  border-radius: 4px;
+  overflow: hidden;
+  background: linear-gradient(
+    color-mix(in srgb, var(--story-deep) 70%, var(--story-bronze) 30%),
+    var(--story-deep)
+  );
+  color: var(--story-accent);
+  font-size: 17px;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Her sign before her name: the name's own size, and still. */
+.px-story-plate-sign {
+  height: 1.2em;
+  width: auto;
+  margin: -0.1em 8px 0 0;
+  vertical-align: middle;
+  user-select: none;
+}
+.px-story-plate small {
+  margin-left: 10px;
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.px-story-said {
+  grid-column: 1;
+  min-width: 0;
+}
+.px-story-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.px-story-member {
+  max-width: 220px;
+  padding: 1px 10px;
+  border: 1px solid var(--story-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: transparent;
+  color: var(--story-soft) !important;
+  font-size: 12px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-member.is-fail {
+  border-color: var(--story-alert);
+}
+.px-story-member.is-ask {
+  border-color: var(--story-ask);
+}
+.px-story-member[aria-pressed="true"] {
+  border-color: var(--story-accent);
+  color: var(--story-ink) !important;
+}
+.px-story-line {
+  min-height: 66px;
+  max-height: 166px;
+  margin: 0;
+  overflow-y: auto;
+  font-size: 19px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.px-story-untyped {
+  visibility: hidden;
+}
+.px-story-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12px;
+  list-style: none;
+}
+.px-story-meta b {
+  color: var(--story-ink);
+  font-weight: 400;
+}
+.px-story-choices {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  gap: 7px;
+  justify-content: center;
+  width: 220px;
+}
+.px-story-more {
+  display: flex;
+}
+.px-story-choice {
+  width: 100%;
+  padding: 7px 18px;
+  border: 1px solid var(--story-line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #ffffff0a;
+  font-size: 14px !important;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-story-choice::before {
+  color: var(--story-dim);
+  font-size: 10px;
+  content: "◆ ";
+}
+.px-story-choice.is-main {
+  border-color: var(--story-dim);
+}
+.px-story-choice.is-danger {
+  color: var(--story-alert) !important;
+}
+.px-story-choice[aria-pressed="true"]::before {
+  color: var(--story-accent);
+  content: "✓ ";
+}
+.px-story-choice:is(:hover, [aria-expanded="true"]):not(:disabled) {
+  border-color: var(--story-accent);
+  background: color-mix(in srgb, var(--story-accent) 13%, transparent);
+}
+.px-story-choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A narrow page: the places across the top, the faces alone, the choices
+   under the line. */
+@container (max-width: 760px) {
+  .px-story-world {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+  }
+  .px-story-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--story-line);
+    overflow: visible;
+  }
+  .px-story-places {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .px-story-places > li {
+    flex: 0 0 132px;
+  }
+  .px-story-place {
+    height: 56px;
+  }
+  .px-story-place-name {
+    top: 6px;
+    font-size: 15px;
+  }
+  .px-story-place-sub {
+    bottom: 5px;
+  }
+  .px-story-elsewhere {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .px-story-door-menu,
+  .px-story-door {
+    width: auto;
+  }
+  .px-story-stage {
+    height: min(640px, 100vh - 120px);
+    min-height: 480px;
+  }
+  .px-story-who {
+    padding: 4px;
+  }
+  .px-story-who-text {
+    display: none;
+  }
+  .px-story-head {
+    max-width: calc(100% - 66px);
+  }
+  .px-story-list {
+    margin: 90px 64px 0 0;
+    padding: 22px 6px 18px 10px;
+  }
+  .px-story-notices {
+    width: 170px;
+  }
+  .px-story-talk {
+    grid-template-columns: minmax(0, 1fr);
+    margin: 0 10px 12px;
+    padding: 20px 14px 12px;
+  }
+  .px-story-line {
+    min-height: 0;
+    font-size: 16px;
+  }
+  .px-story-choices {
+    flex-direction: row;
+    flex-wrap: wrap;
+    grid-column: 1;
+    width: auto;
+  }
+  .px-story-choices > * {
+    flex: 1 1 140px;
+    width: auto;
+  }
+}
+
 /* ---------- animation: frames that take turns ---------- */
 .px-f {
   opacity: 0;
@@ -1336,7 +2372,8 @@
   animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .px-office .px-f {
+  .px-office .px-f,
+  .px-office .px-figure-sign {
     animation: none !important;
   }
   .px-desk:hover .px-art,

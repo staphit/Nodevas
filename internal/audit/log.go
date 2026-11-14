@@ -114,6 +114,7 @@ var settingsActions = map[string]bool{
 	"PUT runs/budget":      true,
 	"PUT runs/routing":     true,
 	"PUT usage/prices":     true,
+	"PUT themes/default":   true,
 }
 
 // reasonNames turns the reasons the handlers store into the log's kebab-case

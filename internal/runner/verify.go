@@ -402,12 +402,12 @@ func (c Config) MarshalJSON() ([]byte, error) {
 // job names, in a throwaway worktree. No agent, no MCP, no model.
 func (j *jobs) executeVerify(ctx context.Context, r *run, pr prCheck) {
 	job := r.job
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	if err != nil {
 		j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, Error: err.Error()})
 		return
 	}
-	req, reason := verifyRequestFor(j.c.Config, job, r.repo, pr.Head, filepath.Join(dataDir, "verify"))
+	req, reason := verifyRequestFor(j.runCfg(r), job, r.repo, pr.Head, filepath.Join(dataDir, "verify"))
 	if reason != "" {
 		j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: runnerwire.FailureTask, Error: reason})
 		return
@@ -443,7 +443,7 @@ func (j *jobs) executeVerify(ctx context.Context, r *run, pr prCheck) {
 // fail. A goal judge runs the repo's tests first and is given their result.
 func (j *jobs) executeJudge(ctx context.Context, r *run) {
 	job := r.job
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	var wt Worktree
 	if err == nil {
 		wt, err = CreateWorktree(ctx, r.repo.Path, dataDir, job.RunID, job.NodeID, job.Base)
@@ -473,7 +473,7 @@ func (j *jobs) executeJudge(ctx context.Context, r *run) {
 	if job.Verify != nil && job.Verify.Phase == runnerwire.VerifyGoal {
 		head, err := git(ctx, wt.Path, "rev-parse", "HEAD")
 		head = strings.TrimSpace(head)
-		command, timeout := j.c.Config.RepoTestCommand(r.repo.ID)
+		command, timeout := j.runCfg(r).RepoTestCommand(r.repo.ID)
 		if err == nil {
 			res, verr := RunVerify(ctx, VerifyRequest{RepoPath: r.repo.Path, WorkRoot: filepath.Join(dataDir, "verify"),
 				Phase: runnerwire.VerifyGoal, Head: head, PRHead: head, Command: command, Timeout: timeout})

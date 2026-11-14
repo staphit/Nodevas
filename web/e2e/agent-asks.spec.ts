@@ -523,7 +523,7 @@ test("Station: Waiting on you and the war room list a permission ask, each with 
   await expect(dialog).toHaveCount(0);
 
   // The war room: the agent sits in the meeting room with its hand up.
-  const room = page.getByRole("region", { name: "War room" });
+  const room = page.getByRole("region", { name: "Agent activity" });
   const asking = room.getByRole("button", { name: /waiting for your answer/ });
   await expect(asking).toBeVisible({ timeout: 15_000 });
   await expect(asking).toHaveAccessibleName(/e2e-claude wants to run Bash/);

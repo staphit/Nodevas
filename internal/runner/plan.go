@@ -17,7 +17,7 @@ import (
 // request, and the worktree and its branch go when it ends.
 func (j *jobs) executePlan(ctx context.Context, r *run) {
 	job := r.job
-	dataDir, err := j.c.Config.RunDataDir()
+	dataDir, err := j.runCfg(r).RunDataDir()
 	var wt Worktree
 	if err == nil {
 		wt, err = CreateWorktree(ctx, r.repo.Path, dataDir, job.RunID, job.NodeID, job.Base)

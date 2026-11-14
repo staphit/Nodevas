@@ -294,6 +294,12 @@ WHERE id = ? AND status IN (?, ?)`,
 // headSHA, or returns nil.
 func CheckMergeable(r Record, headSHA string) error {
 	switch {
+	// The agent workspace has the run's branch in hand, or already merged
+	// it. A discard that left the PR open (a review run's, or one its
+	// runner did not watch) leaves it to merge; one that closed it is
+	// caught below once the runner says so, and gh refuses a closed PR.
+	case r.Workspace == runnerwire.RunWorkspaceMergedLocal || workspacePending(r):
+		return Precondition(MsgWorkspaceBusy)
 	case r.PRURL == "" || r.PRState != runnerwire.PROpen:
 		return Precondition(MsgNoOpenPR)
 	case r.CIStatus != runnerwire.CISuccess:

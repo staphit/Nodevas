@@ -1,0 +1,298 @@
+/* Single-user edition (phase S): This computer (Settings → Agent and
+ * Station's card), "Add a repo", the "Start this run?" card and the dispatch
+ * form's repo row with its "+ Add repo". */
+
+/* ---- This computer (ThisComputerPanel, ThisComputerCard) ---- */
+.this-computer {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.this-computer-card .station-panel-head {
+  flex-wrap: wrap;
+}
+.this-computer-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.this-computer-card .this-computer {
+  margin-top: 10px;
+}
+.this-computer-part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.this-computer-part h3,
+.this-computer-head h3 {
+  margin: 0;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 650;
+}
+.this-computer-head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.this-computer-note,
+.this-computer-empty {
+  margin: 0;
+  color: var(--text-2);
+}
+.this-computer-saved {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.this-computer-saved.is-error {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.this-computer-agents,
+.this-computer-repos {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.this-computer-agents li {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.this-computer-agents li.is-missing span {
+  color: var(--text-2);
+}
+.this-computer-problem {
+  flex-basis: 100%;
+  color: var(--st-ready-fg);
+  overflow-wrap: anywhere;
+}
+.this-computer-repo {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.this-computer-repo-head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.this-computer-repo-head .mono {
+  min-width: 0;
+  flex: 1 1 160px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.this-computer-test {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.this-computer-test > label {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.this-computer-test-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.this-computer-test-row input {
+  min-width: 0;
+  flex: 1 1 180px;
+  font-family: var(--mono);
+}
+.this-computer-permission {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.this-computer-permission legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.this-computer-level {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.this-computer-askfirst {
+  margin-left: 22px;
+}
+.this-computer-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.this-computer-pr {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.this-computer-cli {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+  white-space: pre;
+}
+.this-computer-warn-body {
+  padding: 0 20px 6px;
+}
+
+/* ---- Add a repo (AddRepoDialog) ---- */
+.repo-add-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+.repo-add-body {
+  display: flex;
+  min-width: 0;
+  max-height: min(60vh, 520px);
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 10px;
+  overflow-y: auto;
+}
+.repo-add-result {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.repo-add-result.is-ok {
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.repo-add-result.is-refused {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.repo-add-result.is-plan p {
+  margin: 0 0 4px;
+}
+.repo-add-result.is-plan p:last-child {
+  margin-bottom: 0;
+}
+.repo-add-advanced code {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+/* ---- The dispatch form's repo row (DispatchDialog, GlobalAgentForm) ---- */
+.run-field-label-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.run-add-repo {
+  flex: 0 0 auto;
+}
+.run-repo-added {
+  color: var(--st-done-fg);
+}
+.run-full-access {
+  margin-right: auto;
+  color: var(--st-failed-fg);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.global-agent-form-actions .run-full-access {
+  align-self: center;
+}
+
+/* ---- "Start this run?" (OfferAskCard) ---- */
+.offer-ask {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--st-ready-fg);
+  border-radius: 8px;
+  background: var(--st-ready-bg);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.offer-ask.is-remote {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.offer-ask p {
+  margin: 0;
+}
+.offer-ask-title {
+  font-weight: 650;
+}
+.offer-ask-subject {
+  overflow-wrap: anywhere;
+}
+.offer-ask-reasons {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.offer-ask-foot {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.offer-ask-expires {
+  color: var(--text-2);
+}
+.offer-ask-buttons {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.run-status.is-asking {
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+}
+.global-agent-ask-row td {
+  padding-top: 0;
+}
+.global-agent-declined {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+}

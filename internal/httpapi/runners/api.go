@@ -54,8 +54,43 @@ type API struct {
 	llm *runners.LLMRelay
 	// repo carries read-only repo browsing answers (WithRepo).
 	repo *runners.RepoRelay
+	// settings carries runner settings changes (WithSettings; settings.go).
+	settings *runners.SettingsRelay
+	// repoAdmin carries the built-in runner's repo changes (WithRepoAdmin;
+	// repos.go); nil serves none.
+	repoAdmin *RepoAdminOptions
 	// link enables device links (WithLinks; link.go); nil serves none.
 	link *LinkOptions
+	// single: the hub has no accounts (WithEdition), so it is the
+	// single-user edition and may welcome its own runner as built in.
+	single bool
+}
+
+// WithEdition says whether the hub is the single-user edition: no accounts,
+// the person at the machine is the only user (runnerwire/edition.go). Its
+// welcomes say so, and the runner it started for itself at this startup
+// (Registry.SetBuiltIn) is welcomed as built in when it connects straight
+// from this machine. It returns a for chaining.
+func (a *API) WithEdition(single bool) *API {
+	a.single = single
+	return a
+}
+
+// welcomeFor is the welcome a runner connecting with request gets: the
+// edition, and whether the hub vouches that it is the built-in runner. The
+// runner relaxes nothing on this word alone; it checks its own side too.
+func (a *API) welcomeFor(request *http.Request, runner runnerwire.Runner) runnerwire.Welcome {
+	welcome := runnerwire.Welcome{
+		RunnerID: runner.ID, Name: runner.Name, Owner: runner.OwnerName, OwnerID: runner.OwnerID,
+		Edition: runnerwire.EditionTeam,
+	}
+	if a.single {
+		welcome.Edition = runnerwire.EditionSingle
+		// The runner serve minted or reused at this startup, on a socket
+		// straight from this machine: a loopback peer relaying nobody.
+		welcome.BuiltIn = a.reg.IsBuiltInID(runner.ID) && auth.DirectLoopback(request)
+	}
+	return welcome
 }
 
 // New builds the handler set. dispatcher may be nil.
@@ -86,6 +121,8 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.DELETE("/runners/:id", a.revoke)
 	api.GET("/runner/connect", a.connect)
 	api.GET("/runner/version", a.version)
+	a.registerSettings(api)
+	a.registerRepoAdmin(api)
 	a.registerLinks(api)
 }
 
@@ -254,14 +291,20 @@ func (a *API) connect(c *gin.Context) {
 	// dispatcher may send offers from other requests, and the runner must
 	// hear who it is first.
 	s := &session{conn: conn}
-	welcome := runnerwire.Envelope{Type: runnerwire.TypeWelcome, Welcome: &runnerwire.Welcome{
-		RunnerID: runner.ID, Name: runner.Name, Owner: runner.OwnerName, OwnerID: runner.OwnerID,
-	}}
-	if err := s.send(ctx, welcome); err != nil {
+	welcome := a.welcomeFor(c.Request, runner)
+	if err := s.send(ctx, runnerwire.Envelope{Type: runnerwire.TypeWelcome, Welcome: &welcome}); err != nil {
 		return
 	}
+	a.reg.SetWelcomed(runner.ID, welcome.BuiltIn)
 	detach := a.reg.Attach(runner.ID, s)
-	defer detach()
+	defer func() {
+		detach()
+		// What it asked about its offers goes with it, unless a newer
+		// connection already took its place.
+		if a.runs != nil {
+			a.runs.Detached(context.Background(), runner.ID)
+		}
+	}()
 	// Past the hello, run traffic (event batches, changes) is larger.
 	conn.SetReadLimit(maxRunMessageBytes)
 	if a.runs != nil {
@@ -298,7 +341,8 @@ func (a *API) connect(c *gin.Context) {
 				a.runs.Pump(ctx, runner.ID)
 			}
 		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish,
-			runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeMergeResult:
+			runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeMergeResult, runnerwire.TypeWorkspaceResult,
+			runnerwire.TypeOfferAsk:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
 				return
@@ -321,6 +365,18 @@ func (a *API) connect(c *gin.Context) {
 			// A repo browse answer; one nobody waits for is dropped.
 			if a.repo != nil {
 				_ = a.repo.Deliver(runner.ID, env)
+			}
+		case runnerwire.TypeSettingsDone:
+			// A settings answer, after the hello that carries the change;
+			// one nobody waits for is dropped.
+			if a.settings != nil {
+				_ = a.settings.Deliver(runner.ID, env)
+			}
+		case runnerwire.TypeRepoAdminDone:
+			// A repo admin answer, after the hello with the new repos; one
+			// nobody waits for is dropped.
+			if a.repoAdmin != nil && a.repoAdmin.Relay != nil {
+				_ = a.repoAdmin.Relay.Deliver(runner.ID, env)
 			}
 		case runnerwire.TypeTermOut:
 			if a.runs == nil {
@@ -352,7 +408,13 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 		if env.RunID == "" {
 			return errMalformed
 		}
-		return a.runs.Decline(ctx, runnerID, env.RunID, env.Reason)
+		return a.runs.Decline(ctx, runnerID, env.RunID, env.Reason, env.Code)
+	case runnerwire.TypeOfferAsk:
+		if env.OfferAsk == nil || env.OfferAsk.RunID == "" {
+			return errMalformed
+		}
+		// For a run that is not this runner's, or no longer offered: dropped.
+		return a.runs.OfferAsk(ctx, runnerID, *env.OfferAsk)
 	case runnerwire.TypeEvents:
 		if env.RunID == "" {
 			return errMalformed
@@ -382,6 +444,12 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 		}
 		// For a merge that is not this runner's, or already answered: dropped.
 		return a.runs.MergeResult(ctx, runnerID, *env.MergeResult)
+	case runnerwire.TypeWorkspaceResult:
+		if env.WorkspaceResult == nil || env.WorkspaceResult.ID == "" || env.WorkspaceResult.RunID == "" {
+			return errMalformed
+		}
+		// For an action that is not this runner's, or already answered: dropped.
+		return a.runs.WorkspaceResult(ctx, runnerID, *env.WorkspaceResult)
 	}
 	return errMalformed
 }
@@ -392,6 +460,12 @@ func runID(env runnerwire.Envelope) string {
 	}
 	if env.MergeResult != nil {
 		return env.MergeResult.RunID
+	}
+	if env.WorkspaceResult != nil {
+		return env.WorkspaceResult.RunID
+	}
+	if env.OfferAsk != nil {
+		return env.OfferAsk.RunID
 	}
 	return env.RunID
 }

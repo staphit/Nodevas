@@ -378,6 +378,19 @@ type jobHub struct {
 	ctx   context.Context
 	byRun map[string][]runnerwire.Envelope
 	all   []runnerwire.Envelope
+	// owner is the account id the welcome names ("" none).
+	owner string
+	// edition and builtIn are what the welcome says about the edition
+	// (builtin.go).
+	edition string
+	builtIn bool
+}
+
+// setOwner makes the next welcome name owner as the runner's owner.
+func (h *jobHub) setOwner(owner string) {
+	h.mu.Lock()
+	h.owner = owner
+	h.mu.Unlock()
 }
 
 func newJobHub(t *testing.T) (*jobHub, *httptest.Server) {
@@ -402,8 +415,12 @@ func (h *jobHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		switch msg.Type {
 		case runnerwire.TypeHello:
+			h.mu.Lock()
+			owner, edition, builtIn := h.owner, h.edition, h.builtIn
+			h.mu.Unlock()
 			_ = wsjson.Write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeWelcome,
-				Welcome: &runnerwire.Welcome{RunnerID: "r1", Name: "pc", Owner: "me"}})
+				Welcome: &runnerwire.Welcome{RunnerID: "r1", Name: "pc", Owner: "me", OwnerID: owner,
+					Edition: edition, BuiltIn: builtIn}})
 			h.mu.Lock()
 			h.conn, h.ctx = conn, ctx
 			h.mu.Unlock()
@@ -488,12 +505,23 @@ type jobEnv struct {
 
 func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
 	t.Helper()
+	return startJobRunnerWith(t, nil, tweak)
+}
+
+// startJobRunnerWith is startJobRunner with the hub set up by hubSetup
+// before the runner connects.
+func startJobRunnerWith(t *testing.T, hubSetup func(*jobHub), tweak func(*Client)) *jobEnv {
+	t.Helper()
 	repo := newTestRepo(t)
 	fixtures, err := filepath.Abs(filepath.Join("adapter", "testdata"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	hub, srv := newJobHub(t)
+	if hubSetup != nil {
+		hubSetup(hub)
+	}
+
 	env := &jobEnv{hub: hub, repo: repo, record: t.TempDir()}
 	env.client = &Client{
 		Config: &Config{

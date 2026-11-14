@@ -13,6 +13,7 @@ import { useSettingsRequest } from "../settings/openSettings";
 import { useApp } from "../store";
 import { controlRows, formatElapsed, pauseAllPlan } from "./control";
 import { useControl } from "./controlStore";
+import { useGlobalAgents } from "./globalAgentsStore";
 import { StationControlReport, StationPauseButton } from "./StationControl";
 import { useStation } from "./stationStore";
 import { StationWarRoom } from "./StationWarRoom";
@@ -118,6 +119,8 @@ function setUpStores() {
   useRuns.getState().reset();
   useAutopilot.getState().reset();
   useStation.getState().reset();
+  useStation.setState({ tab: "project" });
+  useGlobalAgents.getState().reset();
   useControl.setState({ pausing: false, result: null, error: "" });
   vi.spyOn(api, "listProjectRuns").mockResolvedValue({ runs: [] });
   vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
@@ -143,6 +146,7 @@ function Harness() {
   const graph = useApp((s) => s.graph);
   const runs = useRuns((s) => s.activeRuns);
   const runners = useRunners((s) => s.runners);
+  const globalRuns = useGlobalAgents((s) => s.runs);
   const world = useMemo(
     () =>
       buildWorld({
@@ -158,8 +162,9 @@ function Harness() {
         projectLabel: "p",
         remote: null,
         waitingItems: [],
+        globalRuns,
       }),
-    [graph, runs, runners],
+    [graph, runs, runners, globalRuns],
   );
   return <StationWarRoom world={world} />;
 }
@@ -208,7 +213,7 @@ describe("StationWarRoom", () => {
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
     mount();
 
-    expect(screen.getByRole("region", { name: "War room" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent activity" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^View: / })).not.toBeInTheDocument();
     await desk("Fix the login");
     await desk("Add a test");
@@ -227,7 +232,8 @@ describe("StationWarRoom", () => {
     await screen.findByText("1 of 4 tasks done");
     const menu = menuOf(reviewer);
     // The first item takes focus once the panel is placed.
-    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toHaveFocus();
+    expect(within(menu).getByRole("menuitem", { name: "Open workspace" })).toHaveFocus();
+    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "View changes" })).toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "Open “Add a test”" })).toBeInTheDocument();
     // The review run is a step of the autopilot's task (by its pipeline).
@@ -248,6 +254,36 @@ describe("StationWarRoom", () => {
     // An outside click closes it too.
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("gives a global agent's character its workspace and the Global agents tab, no run view or node", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    const global = makeRun({
+      id: "g1",
+      project: "",
+      nodeId: "",
+      global: true,
+      title: "Bump the deps",
+      status: "running",
+      startedAt: "2026-10-27T08:01:00Z",
+    });
+    useGlobalAgents.setState({ runs: [global] });
+    mount();
+
+    const office = await screen.findByRole("region", { name: "Office Global agents" });
+    const character = within(office).getByRole("button", { name: /, on “Bump the deps”/ });
+    const menu = menuOf(character);
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Open workspace",
+      "Show in Global agents",
+      "View changes",
+      "Cancel run",
+    ]);
+    expect(within(menu).queryByRole("menuitem", { name: "Open run" })).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Show in Global agents" }));
+    expect(useStation.getState().tab).toBe("global");
+    expect(useGlobalAgents.getState().focus).toBe("g1");
   });
 
   it("shows a live autopilot as a tile, and steers it", async () => {

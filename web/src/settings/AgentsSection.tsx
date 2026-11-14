@@ -1,12 +1,16 @@
 // Settings › Agents: the workstation's switch in the header, a line per
 // runner with one "Add runner", and the rarely changed rest under Advanced,
-// collapsed until asked for.
+// collapsed until asked for. In the single-user edition the runner is part of
+// the app: "This computer" stands in for the runner lines, and nothing about
+// tokens, device links or auto-accept commands shows.
 
 import { useEffect, useId } from "react";
 
 import type { RunBudgetStatus } from "../api";
 import { useTeamServer, useViewer } from "../components/SignIn";
 import { useI18n } from "../i18n";
+import { ThisComputerPanel } from "../local/ThisComputerPanel";
+import { useEdition } from "../runners/edition";
 import { RunnerAccessTokenSettings } from "../runners/LinkDevice";
 import { AutoAcceptSettings, autoAcceptCounts, RunnersPanel } from "../runners/RunnersModal";
 import { useRunners } from "../runners/runnerStore";
@@ -77,8 +81,9 @@ function Advanced({
   const bodyId = useId();
   const viewer = useViewer();
   const teamServer = useTeamServer();
+  const single = useEdition() === "single";
   // The runners' Access token is the server's, for its administrators.
-  const admin = Boolean(teamServer && viewer?.role === "admin");
+  const admin = Boolean(teamServer && !single && viewer?.role === "admin");
   const budget = useBudget((s) => s.status);
   const rules = useRouting((s) => s.rules);
   const runners = useRunners((s) => s.runners);
@@ -94,7 +99,7 @@ function Advanced({
     void useRouting.getState().load();
   }, [open]);
 
-  const items = 6 + (project ? 1 : 0) + (admin ? 1 : 0);
+  const items = 5 + (single ? 0 : 1) + (project ? 1 : 0) + (admin ? 1 : 0);
   return (
     <section className="settings-page-pane settings-card settings-advanced" aria-label={t("settingsPage.advanced")}>
       <button
@@ -145,15 +150,18 @@ function Advanced({
               <WorkflowStagesSettings />
             </SettingsDisclosure>
           )}
-          {/* Read-only: a runner's policy is changed on that runner. */}
-          <SettingsDisclosure
-            label={t("runners.autoAccept")}
-            value={autoAcceptValue(autoAcceptCounts(runners), t)}
-            open={row === "autoAccept"}
-            onToggle={() => toggleRow("autoAccept")}
-          >
-            <AutoAcceptSettings />
-          </SettingsDisclosure>
+          {/* Read-only: a runner's policy is changed on that runner. The
+              single-user edition's runner asks in This computer instead. */}
+          {!single && (
+            <SettingsDisclosure
+              label={t("runners.autoAccept")}
+              value={autoAcceptValue(autoAcceptCounts(runners), t)}
+              open={row === "autoAccept"}
+              onToggle={() => toggleRow("autoAccept")}
+            >
+              <AutoAcceptSettings />
+            </SettingsDisclosure>
+          )}
           <SettingsDisclosure
             label={t("settingsPage.usageDetails")}
             value={
@@ -226,12 +234,21 @@ export function AgentsSection({
   const inUse = useWorkstationInUse();
   const on = enabled || inUse;
   const hintId = useId();
+  const single = useEdition() === "single";
+  // No runner is added by hand here: an "Add a runner" request lands on
+  // This computer and is done.
+  useEffect(() => {
+    if (single && addRequested) onAddOpened();
+  }, [single, addRequested, onAddOpened]);
 
   return (
     <>
-      <section className="settings-page-pane settings-card" aria-label={t("settingsPage.page.agents")}>
+      <section
+        className="settings-page-pane settings-card"
+        aria-label={t(single ? "settingsPage.page.agentsLocal" : "settingsPage.page.agents")}
+      >
         <div className="settings-card-head">
-          <h2>{t("settingsPage.page.agents")}</h2>
+          <h2>{t(single ? "settingsPage.page.agentsLocal" : "settingsPage.page.agents")}</h2>
           {/* Once this workspace uses it, it stays: a runner or a run would
               turn it straight back on. */}
           <label className="settings-switch">
@@ -252,7 +269,12 @@ export function AgentsSection({
             {inUse ? t("workstation.inUse") : t("workstation.hint")}
           </p>
         )}
-        {on && <RunnersPanel addRequested={addRequested} onAddOpened={onAddOpened} />}
+        {on &&
+          (single ? (
+            <ThisComputerPanel />
+          ) : (
+            <RunnersPanel addRequested={addRequested} onAddOpened={onAddOpened} />
+          ))}
       </section>
       {/* With the workstation off, its switch is all Agents shows. */}
       {on && <Advanced open={advanced} onToggle={toggleAdvanced} row={row} toggleRow={toggleRow} leave={leave} />}

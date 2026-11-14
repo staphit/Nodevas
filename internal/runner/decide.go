@@ -36,7 +36,7 @@ func (s *llmSession) decide(req *runnerwire.DecideRequest) {
 		go s.send(runnerwire.Envelope{Type: runnerwire.TypeDecideDone,
 			DecideDone: &runnerwire.DecideDone{ID: req.ID, Error: reason}})
 	}
-	info, key, reason := s.c.Config.AdvisorLLM()
+	info, key, reason := s.c.cfg().AdvisorLLM()
 	switch {
 	case req.Purpose != runnerwire.LLMPurposeAdvisor:
 		refuse("this runner answers decisions for the autopilot's advisor only")

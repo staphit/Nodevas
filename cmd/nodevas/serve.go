@@ -643,6 +643,7 @@ func serve(args []string) {
 	srv.UseAgentsDB(database)
 	srv.UseRunnersDB(database)
 	srv.UseMembersDB(database)
+	srv.UseThemesDB(database)
 	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
 		fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}
@@ -788,7 +789,8 @@ func serve(args []string) {
 	}
 
 	// A standalone hub on a terminal asks for a second Ctrl+C: that terminal
-	// is also where its runner's runs are accepted.
+	// shows its runner's runs, and answers its questions when the owner asked
+	// to confirm every run.
 	confirmStop := standalone && isTerminal(os.Stdin)
 	ctx, stop := serveContext(confirmStop, os.Stderr)
 	defer stop()
@@ -834,10 +836,15 @@ func serve(args []string) {
 	}()
 	stopRunner := func() {}
 	if localRunnerConfig != "" {
-		if stop, err := startLocalRunner(localRunnerConfig, runnerStdin, os.Stderr); err != nil {
+		if stop, err := startLocalRunner(localRunnerConfig, runnerStdin, os.Stderr, standalone); err != nil {
 			runnerFailed(err)
 		} else {
 			stopRunner = stop
+			if standalone {
+				// The single-user edition: the runner is part of the app.
+				log.Print("single-user: runs you start in Nodevas begin right away on this computer, no terminal needed; " +
+					"what agents may do and which repos they work in: Settings → Agents → This computer")
+			}
 		}
 	}
 	// A click in the console must not pause the runner's prompt. Only once

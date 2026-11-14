@@ -96,6 +96,16 @@ export interface WaitingInput<R extends WaitingRunLike = Run> {
   /** Whether the viewer may answer an ask (its session's person, or an admin). */
   canAnswer: (ask: AgentAsk) => boolean;
   now: number;
+  /** Single-user edition: this computer's built-in runner. Its offers wait
+   * on nobody unless it asks about them (the others are starting). */
+  builtInRunnerId?: string;
+}
+
+/** Whether an offered run is simply starting: on the built-in runner, with
+ * nothing asked (Run.ask). */
+function starting(run: WaitingRunLike, builtIn: string | undefined): boolean {
+  const fields = run as { ask?: unknown; runnerId?: string };
+  return Boolean(builtIn) && fields.runnerId === builtIn && !fields.ask;
 }
 
 /** A stable key per item, for lists and tests. */
@@ -131,7 +141,9 @@ export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput
   const runs = waitingRuns(input.runs, input.now);
   for (const item of runs) if (item.kind === "merge") out.push(item);
   for (const item of runs) if (item.kind === "ci") out.push(item);
-  for (const run of input.active) if (run.status === "offered") out.push({ kind: "offer", run });
+  for (const run of input.active) {
+    if (run.status === "offered" && !starting(run, input.builtInRunnerId)) out.push({ kind: "offer", run });
+  }
   for (const item of runs) if (item.kind === "limit") out.push(item);
   return out;
 }

@@ -119,6 +119,8 @@ export function actorLabel(t: Translate, actor: Actor, room: string): string {
         }),
   ];
   if (actor.role) parts.push(roleSentence(t, actor.role));
+  // A headless global agent has no board: nobody it could ask.
+  if (actor.cannotAsk) parts.push(t("globalAgents.noAsk"));
   if (actor.ask) parts.push(t("game.actor.asks", { question: excerpt(askQuestionText(t, actor.ask, who), 80) }));
   if (actor.heldMail.length) parts.push(t("game.actor.held", { count: actor.heldMail.length }));
   if (actor.bubble) parts.push(t("game.actor.says", { text: excerpt(actor.bubble.body, 80) }));
@@ -160,6 +162,8 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf,
       return t("game.action.run");
     case "run-diff":
       return t("game.action.runDiff");
+    case "run-workspace":
+      return t("game.action.runWorkspace");
     case "session-diff":
       return t("game.action.sessionDiff");
     case "session":
@@ -191,5 +195,7 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf,
       return t("game.action.autopilot");
     case "runners":
       return t("game.action.runners");
+    case "global-agents":
+      return t("game.action.globalAgents");
   }
 }

@@ -99,6 +99,10 @@ var Tables = []string{
 	"analytics_settings",
 	"route_picks",
 	"analytics_dismissed",
+	// 0036_run_workspace: newer than any SQLite file too.
+	"run_workspace_actions",
+	// 0039_account_preferences: and this.
+	"account_preferences",
 }
 
 // Result is what MaybeImport or Import did.

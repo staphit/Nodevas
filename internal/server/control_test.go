@@ -41,6 +41,10 @@ func (f *runsFixture) startGoal(t *testing.T, b browser, conn *websocket.Conn, g
 	if env.Type != runnerwire.TypeOffer || env.Job == nil || env.Job.NodeID != task {
 		t.Fatalf("got %+v, want an offer for %s", env, task)
 	}
+	// Nobody clicked for it: the runner is told the autopilot started it.
+	if env.Job.Origin != runnerwire.OriginAutopilot {
+		t.Fatalf("autopilot task offered with origin %q", env.Job.Origin)
+	}
 	return view.Run.ID, env.Job.RunID
 }
 

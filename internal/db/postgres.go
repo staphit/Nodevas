@@ -1114,6 +1114,106 @@ ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS hub_notice BOOLEAN NOT NULL 
 ALTER TABLE run_changes ADD COLUMN IF NOT EXISTS patch_pruned BOOLEAN NOT NULL DEFAULT FALSE;
 `,
 	},
+	{
+		// The agent workspace: what became of a run's worktree and branch on
+		// its runner (merged there, or discarded; not a status, so the run's
+		// outcome stays what it was), and the owner's merge and discard
+		// requests, relayed like run_merges: one waiting per run.
+		name: "0036_run_workspace",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS workspace TEXT NOT NULL DEFAULT ''
+    CHECK (workspace IN ('', 'merged_local', 'discarded'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS workspace_commit TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS run_workspace_actions (
+    id                TEXT COLLATE "C" PRIMARY KEY,
+    run_id            TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    action            TEXT NOT NULL CHECK (action IN ('merge_local', 'discard')),
+    head_sha          TEXT COLLATE "C" NOT NULL DEFAULT '',
+    base              TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'done', 'failed', 'expired')),
+    code              TEXT NOT NULL DEFAULT '',
+    reason            TEXT NOT NULL DEFAULT '',
+    note              TEXT NOT NULL DEFAULT '',
+    merge_commit      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    requested_by      TEXT COLLATE "C" NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT COLLATE "C" NOT NULL,
+    finished_at       TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS run_workspace_actions_run ON run_workspace_actions (run_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS run_workspace_actions_one_pending
+    ON run_workspace_actions (run_id) WHERE status = 'pending';
+`,
+	},
+	{
+		// Who imported which theme pack (internal/themes). The packs' files
+		// live under <workspace>/.vised/themes/<id>/; name is JSON, {"en", "zh-TW"}.
+		name: "0036_theme_packs",
+		stmt: `
+CREATE TABLE theme_packs (
+    id         TEXT COLLATE "C" PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    version    TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    author     TEXT NOT NULL DEFAULT '',
+    size_bytes BIGINT NOT NULL,
+    created_at TEXT COLLATE "C" NOT NULL,
+    updated_at TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX theme_packs_owner ON theme_packs (owner);
+`,
+	},
+	{
+		// Global agents (agent workspace, phase 2): a run for no project and
+		// no node, in one of its runner's repositories. An explicit flag, so
+		// a legacy row with an empty project never turns global; the shape
+		// check keeps a global row out of every node, pipeline and role path.
+		name: "0037_global_runs",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS is_global BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS branch_slug TEXT COLLATE "C" NOT NULL DEFAULT ''
+    CHECK (branch_slug = '' OR branch_slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(branch_slug) <= 40);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS no_pr BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_global_shape;
+ALTER TABLE runs ADD CONSTRAINT runs_global_shape CHECK (NOT is_global OR
+    (project = '' AND node_id = '' AND pipeline_id = '' AND retry_of = '' AND kind = '' AND role = ''
+     AND branch_slug <> ''));
+CREATE INDEX IF NOT EXISTS runs_global_created ON runs (created_at, id) WHERE is_global;
+`,
+	},
+	{
+		// Single-user edition: who or what started a run (a person's click,
+		// the autopilot, a pipeline's next round, a usage-limit handoff),
+		// offered to the runner as runnerwire.Job.Origin; and the code a
+		// runner gave with its decline (runnerwire.Decline*), beside the
+		// English reason. Rows from before read as unknown origin, which a
+		// runner treats as automatic, and as no code.
+		name: "0038_run_origin",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS origin TEXT COLLATE "C" NOT NULL DEFAULT ''
+    CHECK (origin IN ('', 'person', 'autopilot', 'pipeline', 'handoff'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS decline_code TEXT COLLATE "C" NOT NULL DEFAULT '';
+`,
+	},
+	{
+		// Each person's app preferences (internal/prefs), so a choice made
+		// in one browser, origin or the desktop app follows them to the
+		// others. account_id is the actor's id: an account's, or "local" on
+		// a hub without accounts. key and value are the web app's own (a
+		// schema key, one JSON value); the hub bounds them, never reads
+		// them. updated_at is the hub's time of the last change.
+		name: "0039_account_preferences",
+		stmt: `
+CREATE TABLE IF NOT EXISTS account_preferences (
+    account_id TEXT COLLATE "C" NOT NULL,
+    key        TEXT COLLATE "C" NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (account_id, key)
+);
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

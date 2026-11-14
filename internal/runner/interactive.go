@@ -53,11 +53,31 @@ func capabilities(cfg *Config) []string {
 	// (only where the owner configured one; Repo.Verify says where), and
 	// runs judge jobs.
 	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan, runnerwire.CapRoles, runnerwire.CapVerify, runnerwire.CapJudge}
+	// Every runner says why an offer waits for a person (offer_ask); the
+	// built-in runner's own capabilities come with builtInCaps (localsettings.go).
+	caps = append(caps, runnerwire.CapOfferAsk)
 	if (cfg == nil || cfg.InteractiveOn()) && ptySupported() {
 		caps = append(caps, runnerwire.CapInteractive)
 	}
 	if cfg.RepoBrowseOn() {
 		caps = append(caps, runnerwire.CapRepoBrowse)
+	}
+	// The agent workspace (workspace.go): run-scoped browse and workspace
+	// actions are understood always; the actions are offered only while the
+	// owner has not turned them off.
+	caps = append(caps, runnerwire.CapRunWorkspace)
+	if cfg.WorkspaceActionsOn() {
+		caps = append(caps, runnerwire.CapWorkspaceActions)
+	}
+	// Global agents (global.go) are understood always and taken while the
+	// owner has not turned them off; maxConcurrent changes from the hub
+	// (settings.go) while the owner allows them.
+	caps = append(caps, runnerwire.CapGlobalRuns)
+	if cfg.GlobalRunsOn() {
+		caps = append(caps, runnerwire.CapGlobalRunsOn)
+	}
+	if cfg.RemoteSettingsOn() {
+		caps = append(caps, runnerwire.CapRemoteSettings)
 	}
 	if _, _, reason := cfg.CopilotLLM(); reason == "" {
 		caps = append(caps, runnerwire.CapLLM)
@@ -72,19 +92,20 @@ func capabilities(cfg *Config) []string {
 	return caps
 }
 
-// checkMode vets an offer's run mode against this runner. "" means fine.
-func (j *jobs) checkMode(job *runnerwire.Job) string {
+// checkMode vets an offer's run mode against cfg, this runner's settings
+// for the run. "" means fine.
+func (j *jobs) checkMode(job *runnerwire.Job, cfg *Config) string {
 	switch job.Mode {
 	case runnerwire.ModeHeadless:
 		return ""
 	case runnerwire.ModeInteractive:
-		if !j.c.Config.InteractiveOn() {
+		if !cfg.InteractiveOn() {
 			return "this runner does not take interactive runs (nodevas runner set interactive true)"
 		}
 		if !j.c.terminalSupported() {
 			return "this runner cannot run agents in a terminal on this OS"
 		}
-		if _, ok := j.c.adapterFor(job.Agent).(adapter.Interactive); !ok {
+		if _, ok := j.c.adapterUnder(cfg, job.Agent).(adapter.Interactive); !ok {
 			return fmt.Sprintf("agent %q cannot run interactively on this runner", job.Agent)
 		}
 		return ""
@@ -101,7 +122,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}
 	}
-	ia, ok := j.c.adapterFor(job.Agent).(adapter.Interactive)
+	ia, ok := j.c.adapterUnder(j.runCfg(r), job.Agent).(adapter.Interactive)
 	if !ok {
 		return fail("agent %q cannot run interactively on this runner", job.Agent)
 	}
@@ -109,12 +130,16 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	if err != nil {
 		return fail("%s is no longer on PATH", adapter.Binary(job.Agent))
 	}
-	proxy, err := j.proxyFor()
-	if err != nil {
-		return fail("could not start the MCP proxy: %v", err)
+	// A global agent has no board (global.go): no door, no MCP server.
+	var proxy *Proxy
+	var secret string
+	if !job.Global {
+		if proxy, err = j.proxyFor(); err != nil {
+			return fail("could not start the MCP proxy: %v", err)
+		}
+		secret = proxy.Register(job.RunID)
+		defer proxy.Revoke(secret)
 	}
-	secret := proxy.Register(job.RunID)
-	defer proxy.Revoke(secret)
 	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail("could not make a temporary directory: %v", err)
@@ -125,18 +150,23 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		return fail("cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
-	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
-	if err != nil {
-		return fail("could not write the MCP server's address: %v", err)
+	mcp := adapter.MCPServer{Command: exe}
+	if !job.Global {
+		serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+		if err != nil {
+			return fail("could not write the MCP server's address: %v", err)
+		}
+		mcp.Args = mcpArgs(serverFile, job, r.repo)
 	}
 
-	cfg := j.c.Config
+	cfg := j.runCfg(r)
 	cmd, err := ia.InteractiveCommand(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(serverFile, job, r.repo)},
+		MCP:            mcp,
+		NoBoard:        job.Global,
 		PermissionMode: cfg.PermissionModeFor(job.Agent),
 		AllowedTools:   cfg.AllowedTools,
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
@@ -165,6 +195,9 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	if job.Agent == "codex" && cfg.CodexIgnoreUserConfig {
 		text += "; codexIgnoreUserConfig does not apply to the interactive CLI"
 	}
+	if job.Global {
+		text += "; no board (a global agent)"
+	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 	j.c.logf("run %s: %s", job.RunID, text)
 
@@ -184,7 +217,8 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		exitCode = code
 		done <- err
 	}()
-	timeout := j.c.runTimeout(job.Kind)
+	timeout := j.c.runTimeout(j.runCfg(r), job.Kind)
+
 	expired, stopTimer := j.c.startRunTimer(timeout)
 	defer stopTimer()
 	var waitErr error

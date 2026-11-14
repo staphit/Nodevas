@@ -31,10 +31,11 @@ var machineErrors = map[string]string{
 	"runners/llm.go:Deliver":           "a runner's malformed model answer",
 	"runners/registry.go:ValidateInfo": "a runner's malformed hello",
 	// Someone else's words, passed on as they were written.
-	"gitrepo/gitrepo.go:run":           "git's own output",
-	"remote/git.go:redact":             "git's own output, secrets redacted",
-	"httpapi/explorer/repos.go:browse": "the runner's own refusal",
-	"auth/access.go:fetchKeys":         "the Cloudflare key endpoint's status",
+	"gitrepo/gitrepo.go:run":              "git's own output",
+	"remote/git.go:redact":                "git's own output, secrets redacted",
+	"httpapi/explorer/repos.go:browse":    "the runner's own refusal",
+	"httpapi/runs/workspace.go:browseRun": "the runner's own refusal",
+	"auth/access.go:fetchKeys":            "the Cloudflare key endpoint's status",
 	// Said to the operator who starts the server, in its log.
 	"auth/auth.go:SetTrustedProxyCIDRs":         "startup configuration",
 	"server/server.go:ErrWildcardNeedsHostName": "startup configuration",

@@ -3,7 +3,8 @@
 // emergency stop in the header. The side column says what today cost,
 // which runners there are and what the agents say to each other, each folded
 // to a line until asked. Info (the board) is the other face of the same
-// project; the top bar switches between them.
+// project; the top bar switches between them. A second tab holds the
+// viewer's global agents, which work outside any project.
 //
 // Loaded on demand (App's React.lazy), so a browser that stays in Info never
 // downloads it, and the war room's drawing below it loads lazily again.
@@ -22,9 +23,12 @@ import { useRuns } from "../runs/runStore";
 import { reportError, useApp } from "../store";
 import { buildActivity, type ActivityLane } from "./activity";
 import { useBuilding } from "./buildingStore";
+import { GlobalAgentsPanel } from "./GlobalAgentsPanel";
+import { useGlobalAgents } from "./globalAgentsStore";
 import { StationControlReport, StationPauseButton } from "./StationControl";
 import { StationSide } from "./StationSide";
 import { useStation } from "./stationStore";
+import { STATION_PANEL_ID, StationTabs, stationTabId } from "./StationTabs";
 import { StationWaiting } from "./StationWaiting";
 import { StationWarRoom } from "./StationWarRoom";
 
@@ -32,14 +36,18 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
   const { t } = useI18n();
   const activeProject = useApp((s) => s.activeProject);
   const setWatching = useStation((s) => s.setWatching);
+  const tab = useStation((s) => s.tab);
   const world = useWorld();
 
   useEffect(() => {
     setWatching(true);
     useBuilding.getState().setWatching(true);
+    // On both tabs: the war room draws the global agents' office too.
+    useGlobalAgents.getState().setWatching(true);
     return () => {
       setWatching(false);
       useBuilding.getState().setWatching(false);
+      useGlobalAgents.getState().setWatching(false);
     };
   }, [setWatching]);
   const firstProject = useRef(true);
@@ -58,18 +66,27 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
       <div className="station" aria-label={t("mode.station")} role="main">
         <header className="station-head">
           <h2>{t("mode.station")}</h2>
-          <StationPauseButton />
+          <StationTabs />
+          {tab === "project" && <StationPauseButton />}
         </header>
-        <div className="station-report">
-          <StationControlReport />
-        </div>
-        <div className="station-center">
-          <StationWaiting />
-          {/* A goal opened from a node's panel (or a review waiting on you)
-              is why Station opened: right under what waits on you. */}
-          <StationGoal />
-          <StationWarRoom world={world} />
-          <StationActivity />
+        {tab === "project" && (
+          <div className="station-report">
+            <StationControlReport />
+          </div>
+        )}
+        <div className="station-center" role="tabpanel" id={STATION_PANEL_ID} aria-labelledby={stationTabId(tab)}>
+          {tab === "project" ? (
+            <>
+              <StationWaiting />
+              {/* A goal opened from a node's panel (or a review waiting on
+                  you) is why Station opened: right under what waits on you. */}
+              <StationGoal />
+              <StationWarRoom world={world} />
+              <StationActivity />
+            </>
+          ) : (
+            <GlobalAgentsPanel />
+          )}
         </div>
         <StationSide world={world} />
       </div>

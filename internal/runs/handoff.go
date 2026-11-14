@@ -30,13 +30,16 @@ import (
 // (runner.prepareHandoff). A review, plan or judge changes no files, and a
 // revise already works on its pull request's branch.
 func canHandOff(r Record) bool {
-	return (r.Kind == runnerwire.JobImplement || r.Kind == runnerwire.JobTest) && r.Mode == runnerwire.ModeHeadless
+	return !r.Global && (r.Kind == runnerwire.JobImplement || r.Kind == runnerwire.JobTest) && r.Mode == runnerwire.ModeHeadless
 }
 
 // canWaitForReset reports whether a run stopped at a usage limit is queued
 // again for when the limit resets: headless implement, test and revise runs
 // (a revise starts again from its pull request's head).
 func canWaitForReset(r Record) bool {
+	if r.Global {
+		return false // no usage-limit wait for a global agent (global.go)
+	}
 	switch r.Kind {
 	case runnerwire.JobImplement, runnerwire.JobTest, runnerwire.JobRevise:
 		return r.Mode == runnerwire.ModeHeadless
@@ -121,6 +124,9 @@ func (d *Dispatcher) waitForReset(ctx context.Context, r Record) bool {
 		JobHandoffBranch: branch, JobHandoffNote: handoffNote,
 		RetryAt: formatStamp(at), LimitWaits: r.LimitWaits + 1,
 		Role: r.Role, JobRoles: r.JobRoles,
+		// Nobody clicks for it: it starts on its own when the limit resets,
+		// on a note the agent left (a person's "retry now" makes it theirs).
+		Origin: runnerwire.OriginHandoff,
 	})
 	if err != nil {
 		d.note(ctx, r, "not waiting for the usage limit: "+err.Error())
@@ -168,7 +174,7 @@ func (d *Dispatcher) ReleaseDue(ctx context.Context) int {
 	}
 	n := 0
 	for _, r := range due {
-		if next, err := d.release(ctx, r, "the usage limit should have reset"); err == nil && next.Status != runnerwire.RunCancelled {
+		if next, err := d.release(ctx, r, "the usage limit should have reset", ""); err == nil && next.Status != runnerwire.RunCancelled {
 			n++
 		}
 	}
@@ -185,13 +191,14 @@ func (d *Dispatcher) RetryNow(ctx context.Context, id, who string) (Record, erro
 	if r.Status != runnerwire.RunQueued || r.RetryAt == "" {
 		return r, locale.Errorf("%w: the run is not waiting for a usage limit to reset", "%w：這次執行沒有在等用量上限重置", ErrPrecondition)
 	}
-	return d.release(ctx, r, "retried now by "+who)
+	return d.release(ctx, r, "retried now by "+who, runnerwire.OriginPerson)
 }
 
 // release ends r's wait: the run joins its runner's queue like any other and
 // is offered when the runner has room. Over the budget, it is cancelled
-// instead.
-func (d *Dispatcher) release(ctx context.Context, r Record, why string) (Record, error) {
+// instead. origin, when set, is what the run is offered as from now on: a
+// person who retries it now starts it, as a dispatch does.
+func (d *Dispatcher) release(ctx context.Context, r Record, why, origin string) (Record, error) {
 	budget, err := d.store.BudgetStatus(ctx, r.OwnerID)
 	if err != nil {
 		return r, err
@@ -207,7 +214,7 @@ func (d *Dispatcher) release(ctx context.Context, r Record, why string) (Record,
 		d.afterEnd(ctx, next, false)
 		return next, nil
 	}
-	released, err := d.store.ReleaseRetry(ctx, r.ID, r.RetryAt)
+	released, err := d.store.ReleaseRetry(ctx, r.ID, r.RetryAt, origin)
 	if err != nil {
 		return r, err
 	}
@@ -244,11 +251,18 @@ ORDER BY retry_at, id`, runnerwire.RunQueued, formatStamp(now))
 
 // ReleaseRetry clears a queued run's wait, if it is still the one at, and
 // reports whether it did: of two releases racing (the loop and a person),
-// one wins.
-func (s *Store) ReleaseRetry(ctx context.Context, id, at string) (bool, error) {
+// one wins. origin, when set, becomes the run's origin in the same write.
+func (s *Store) ReleaseRetry(ctx context.Context, id, at, origin string) (bool, error) {
+	if !validOrigins[origin] {
+		return false, locale.Errorf("%w: origin %q", "%w：來源「%s」", ErrInvalid, origin)
+	}
+	sets, args := `retry_at = ''`, []any{}
+	if origin != "" {
+		sets, args = sets+`, origin = ?`, append(args, origin)
+	}
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE runs SET retry_at = '' WHERE id = ? AND status = ? AND retry_at = ? AND retry_at <> ''`,
-		id, runnerwire.RunQueued, at)
+		`UPDATE runs SET `+sets+` WHERE id = ? AND status = ? AND retry_at = ? AND retry_at <> ''`,
+		append(args, id, runnerwire.RunQueued, at)...)
 	if err != nil {
 		return false, err
 	}

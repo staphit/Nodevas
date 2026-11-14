@@ -102,7 +102,10 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 		if !shape.MatchString(name) {
 			t.Errorf("step %q is not NNNN_name", name)
 		}
-		if seen[name[:4]] {
+		// 0036 is the one number two branches each took (the agent
+		// workspace's run_workspace, the theme packs' theme_packs) before
+		// they met; databases record steps by name, so both names stay.
+		if seen[name[:4]] && name[:4] != "0036" {
 			t.Errorf("number %s used twice", name[:4])
 		}
 		seen[name[:4]] = true
@@ -117,8 +120,15 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 			t.Errorf("step %s is gone: the NAS database has it recorded", kept)
 		}
 	}
-	if n := len(names); n < 10 || names[n-10] != "0026_search_index" || names[n-9] != "0027_legacy_imports" || names[n-8] != "0028_agent_analytics" || names[n-7] != "0029_search_gin_fastupdate" || names[n-6] != "0030_agent_ask_kinds" || names[n-5] != "0031_agent_ask_run_key" || names[n-4] != "0032_agent_ask_input_truncated" || names[n-3] != "0033_permission_prompt_action_details" || names[n-2] != "0034_agent_message_hub_notice" || names[n-1] != "0035_run_changes_patch_pruned" {
-		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate, 0030_agent_ask_kinds, 0031_agent_ask_run_key, 0032_agent_ask_input_truncated, 0033_permission_prompt_action_details, 0034_agent_message_hub_notice, 0035_run_changes_patch_pruned", names[max(0, len(names)-11):])
+	// The newest steps, in order: a step is only ever appended.
+	want := []string{
+		"0026_search_index", "0027_legacy_imports", "0028_agent_analytics", "0029_search_gin_fastupdate",
+		"0030_agent_ask_kinds", "0031_agent_ask_run_key", "0032_agent_ask_input_truncated",
+		"0033_permission_prompt_action_details", "0034_agent_message_hub_notice", "0035_run_changes_patch_pruned",
+		"0036_run_workspace", "0036_theme_packs", "0037_global_runs", "0038_run_origin", "0039_account_preferences",
+	}
+	if n := len(names); n < len(want) || !slices.Equal(names[n-len(want):], want) {
+		t.Fatalf("chain ends %v, want ... %v", names[max(0, n-len(want)-1):], want)
 	}
 }
 
@@ -340,6 +350,139 @@ func TestSchemaObjectsExist(t *testing.T) {
 		if tables[gone] {
 			t.Errorf("SQLite-only table %s exists", gone)
 		}
+	}
+}
+
+// 0036_run_workspace: a run's workspace outcome, and its workspace actions
+// with at most one waiting per run.
+func TestRunWorkspaceSchema(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs (id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at)
+VALUES ('r1', 'p', 'n', 'rn', 'o', 'claude', 'repo', 'succeeded', 'o', '2026-11-13T00:00:00.000000Z')`); err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+	var workspace, commit string
+	if err := database.QueryRowContext(ctx, `SELECT workspace, workspace_commit FROM runs WHERE id = 'r1'`).Scan(&workspace, &commit); err != nil ||
+		workspace != "" || commit != "" {
+		t.Fatalf("defaults = %q %q, %v", workspace, commit, err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE runs SET workspace = 'gone' WHERE id = 'r1'`); err == nil {
+		t.Fatal("workspace 'gone' accepted")
+	}
+	insert := func(id, action, status string) error {
+		_, err := database.ExecContext(ctx, `INSERT INTO run_workspace_actions (id, run_id, action, status, requested_by, created_at)
+VALUES (?, 'r1', ?, ?, 'o', '2026-11-13T00:00:00.000000Z')`, id, action, status)
+		return err
+	}
+	if err := insert("a1", "merge_local", "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert("a2", "discard", "pending"); !db.IsUniqueViolation(err, "") {
+		t.Fatalf("a second pending action: %v", err)
+	}
+	if err := insert("a3", "discard", "done"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range [][2]string{{"push", "pending"}, {"discard", "maybe"}} {
+		if err := insert("a4", bad[0], bad[1]); err == nil {
+			t.Errorf("action %q status %q accepted", bad[0], bad[1])
+		}
+	}
+}
+
+// 0037_global_runs: a global run has no project, node, pipeline, retry,
+// kind or role, and a valid branch slug; a node's run is untouched.
+func TestGlobalRunsSchema(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	insert := func(id, project, node, slug, extra string, global bool) error {
+		_, err := database.ExecContext(ctx, `INSERT INTO runs (id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, is_global, branch_slug, no_pr, kind)
+VALUES (?, ?, ?, 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-14T00:00:00.000000Z', ?, ?, TRUE, ?)`, id, project, node, global, slug, extra)
+		return err
+	}
+	if err := insert("r1", "p", "n", "", "", false); err != nil {
+		t.Fatalf("a node's run: %v", err)
+	}
+	var global, noPR bool
+	var slug string
+	if err := database.QueryRowContext(ctx, `SELECT is_global, branch_slug, no_pr FROM runs WHERE id = 'r1'`).Scan(&global, &slug, &noPR); err != nil ||
+		global || slug != "" || !noPR {
+		t.Fatalf("node run = %v %q %v, %v", global, slug, noPR, err)
+	}
+	if err := insert("g1", "", "", "fix-it", "", true); err != nil {
+		t.Fatalf("a global run: %v", err)
+	}
+	for name, bad := range map[string][4]string{
+		"project":   {"p", "", "fix-it", ""},
+		"node":      {"", "n", "fix-it", ""},
+		"no slug":   {"", "", "", ""},
+		"kind":      {"", "", "fix-it", "review"},
+		"bad slug":  {"", "", "Fix_It", ""},
+		"dash slug": {"", "", "fix--it", ""},
+		"long slug": {"", "", strings.Repeat("a", 41), ""},
+	} {
+		if err := insert("g-"+strings.ReplaceAll(name, " ", "-"), bad[0], bad[1], bad[2], bad[3], true); err == nil {
+			t.Errorf("global run with %s accepted", name)
+		}
+	}
+	if err := insert("r2", "p", "n", "Bad", "", false); err == nil {
+		t.Error("a node run with an invalid slug accepted")
+	}
+	for _, column := range []string{"pipeline_id", "retry_of", "role"} {
+		if _, err := database.ExecContext(ctx, `UPDATE runs SET `+column+` = 'x' WHERE id = 'g1'`); err == nil {
+			t.Errorf("global run with %s accepted", column)
+		}
+	}
+}
+
+// 0038_run_origin: a run's origin is one of the known starters or unknown
+// (rows from before, which a runner treats as automatic), and a decline
+// code is free text the dispatcher clamps.
+func TestRunOriginSchema(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs (id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at)
+VALUES ('r1', 'p', 'n', 'rn', 'o', 'claude', 'repo', 'declined', 'o', '2026-11-14T00:00:00.000000Z')`); err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+	var origin, code string
+	if err := database.QueryRowContext(ctx, `SELECT origin, decline_code FROM runs WHERE id = 'r1'`).Scan(&origin, &code); err != nil ||
+		origin != "" || code != "" {
+		t.Fatalf("defaults = %q %q, %v", origin, code, err)
+	}
+	for _, good := range []string{"person", "autopilot", "pipeline", "handoff", ""} {
+		if _, err := database.ExecContext(ctx, `UPDATE runs SET origin = ? WHERE id = 'r1'`, good); err != nil {
+			t.Errorf("origin %q refused: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"robot", "Person"} {
+		if _, err := database.ExecContext(ctx, `UPDATE runs SET origin = ? WHERE id = 'r1'`, bad); err == nil {
+			t.Errorf("origin %q accepted", bad)
+		}
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE runs SET decline_code = 'declined_in_app' WHERE id = 'r1'`); err != nil {
+		t.Fatalf("decline code: %v", err)
+	}
+}
+
+// 0039_account_preferences: one value per account and key, keys compared
+// byte by byte, and the same key kept apart for each account.
+func TestAccountPreferencesSchema(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	insert := func(account, key string) error {
+		_, err := database.ExecContext(ctx, `INSERT INTO account_preferences (account_id, key, value, updated_at)
+VALUES (?, ?, '"dark"', '2026-11-14T00:00:00.000000Z')`, account, key)
+		return err
+	}
+	for _, row := range [][2]string{{"local", "theme"}, {"local", "Theme"}, {"acct-1", "theme"}} {
+		if err := insert(row[0], row[1]); err != nil {
+			t.Fatalf("insert %v: %v", row, err)
+		}
+	}
+	if err := insert("local", "theme"); !db.IsUniqueViolation(err, "") {
+		t.Fatalf("a second value for one account's key: %v", err)
 	}
 }
 

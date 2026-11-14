@@ -67,7 +67,8 @@ export interface RepoSummary {
 
 export interface RepoEntry {
   name: string;
-  type: "file" | "dir" | "symlink";
+  /** other: a FIFO, socket or device, never read. */
+  type: "file" | "dir" | "symlink" | "other";
   size: number;
   escape?: boolean;
 }
@@ -160,6 +161,8 @@ export type ExplorerErrorCode =
   | "BAD_PATH"
   | "NOT_FOUND"
   | "TIMEOUT"
+  | "NO_WORKTREE"
+  | "RUNNER_OUTDATED"
   | "";
 
 /** A refused Explorer request with the server's code. */
@@ -186,6 +189,9 @@ const CODES: readonly ExplorerErrorCode[] = [
   "BAD_PATH",
   "NOT_FOUND",
   "TIMEOUT",
+  // A run's workspace: its worktree is gone, or its runner predates them.
+  "NO_WORKTREE",
+  "RUNNER_OUTDATED",
 ];
 
 const BUSY_WAIT_MAX_MS = 5_000;
@@ -200,7 +206,7 @@ const repoReads = new Map<string, { at: number; value: Promise<unknown> }>();
  * folder opened again soon after is answered from memory. A refusal is
  * never kept.
  */
-function remembered<T>(url: string, load: () => Promise<T>): Promise<T> {
+export function remembered<T>(url: string, load: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = repoReads.get(url);
   if (hit && now - hit.at < REPO_READ_TTL_MS) return hit.value as Promise<T>;
@@ -212,8 +218,14 @@ function remembered<T>(url: string, load: () => Promise<T>): Promise<T> {
   return value;
 }
 
-/** GET url; a refusal becomes an ExplorerError carrying the server's code. */
-async function get<T>(url: string): Promise<T> {
+/** Drops remembered reads whose URL starts with `prefix`. */
+export function forgetReads(prefix: string): void {
+  for (const url of [...repoReads.keys()]) if (url.startsWith(prefix)) repoReads.delete(url);
+}
+
+/** GET url; a refusal becomes an ExplorerError carrying the server's code.
+ * Shared with a run's workspace files, which answer the same way. */
+export async function explorerGet<T>(url: string): Promise<T> {
   let res = await send(url);
   if (res.status === 429) {
     // A busy runner or server: wait the moment it asks for, once.
@@ -237,45 +249,45 @@ const arr = <T>(value: T[] | null | undefined): T[] => value ?? [];
 
 export const explorerApi = {
   workspaceFiles: (): Promise<WorkspaceListing> =>
-    get<WorkspaceListing>("/api/explorer/workspace/files").then((r) => ({ ...r, entries: arr(r.entries) })),
+    explorerGet<WorkspaceListing>("/api/explorer/workspace/files").then((r) => ({ ...r, entries: arr(r.entries) })),
   workspaceFile: (path: string): Promise<WorkspaceFile> =>
-    get<WorkspaceFile>(`/api/explorer/workspace/file?path=${q(path)}`),
+    explorerGet<WorkspaceFile>(`/api/explorer/workspace/file?path=${q(path)}`),
   workspaceGit: (): Promise<WorkspaceGit> =>
-    get<WorkspaceGit>("/api/explorer/workspace/git").then((r) => ({
+    explorerGet<WorkspaceGit>("/api/explorer/workspace/git").then((r) => ({
       ...r,
       pending: arr(r.pending),
       commits: arr(r.commits),
     })),
   workspaceCommit: (sha: string): Promise<CommitPatch> =>
-    get<CommitPatch>(`/api/explorer/workspace/git/commit?sha=${q(sha)}`),
+    explorerGet<CommitPatch>(`/api/explorer/workspace/git/commit?sha=${q(sha)}`),
   repos: (): Promise<RepoSummary[]> =>
-    get<{ repos: RepoSummary[] | null }>("/api/explorer/repos").then((r) => arr(r.repos)),
+    explorerGet<{ repos: RepoSummary[] | null }>("/api/explorer/repos").then((r) => arr(r.repos)),
   repoTree: (runnerId: string, repoId: string, path: string): Promise<RepoListing> => {
     const url = repoUrl(runnerId, repoId, `tree?path=${q(path)}`);
-    return remembered(url, () => get<RepoListing>(url).then((r) => ({ ...r, entries: arr(r.entries) })));
+    return remembered(url, () => explorerGet<RepoListing>(url).then((r) => ({ ...r, entries: arr(r.entries) })));
   },
   repoFile: (runnerId: string, repoId: string, path: string): Promise<RepoFile> => {
     const url = repoUrl(runnerId, repoId, `file?path=${q(path)}`);
-    return remembered(url, () => get<RepoFile>(url));
+    return remembered(url, () => explorerGet<RepoFile>(url));
   },
   repoStatus: (runnerId: string, repoId: string): Promise<RepoGitStatus> =>
-    get<RepoGitStatus>(repoUrl(runnerId, repoId, "git/status")).then((r) => ({ ...r, entries: arr(r.entries) })),
+    explorerGet<RepoGitStatus>(repoUrl(runnerId, repoId, "git/status")).then((r) => ({ ...r, entries: arr(r.entries) })),
   repoLog: (runnerId: string, repoId: string, limit = 30): Promise<CommitInfo[]> =>
-    get<{ commits: CommitInfo[] | null }>(repoUrl(runnerId, repoId, `git/log?limit=${limit}`)).then((r) =>
+    explorerGet<{ commits: CommitInfo[] | null }>(repoUrl(runnerId, repoId, `git/log?limit=${limit}`)).then((r) =>
       arr(r.commits),
     ),
   repoDiff: (runnerId: string, repoId: string, ref: string): Promise<RepoDiff> =>
-    get<RepoDiff>(repoUrl(runnerId, repoId, `git/diff?ref=${q(ref)}`)),
+    explorerGet<RepoDiff>(repoUrl(runnerId, repoId, `git/diff?ref=${q(ref)}`)),
   /** Drops remembered repo reads, so the next ones ask the runner. */
   forgetRepoReads: (): void => repoReads.clear(),
   agents: (): Promise<AgentsResponse> =>
-    get<AgentsResponse>("/api/explorer/agents").then((r) => ({
+    explorerGet<AgentsResponse>("/api/explorer/agents").then((r) => ({
       live: arr(r.live),
       external: arr(r.external),
       recent: arr(r.recent),
     })),
   sessionActions: (sessionId: string, limit = 200): Promise<SessionAction[]> =>
-    get<{ actions: SessionAction[] | null }>(`/api/explorer/sessions/${q(sessionId)}/actions?limit=${limit}`).then((r) =>
+    explorerGet<{ actions: SessionAction[] | null }>(`/api/explorer/sessions/${q(sessionId)}/actions?limit=${limit}`).then((r) =>
       arr(r.actions),
     ),
 };

@@ -9,7 +9,16 @@ import {
   serverAnswers,
   shouldReloadForPreloadError,
 } from "./preloadReload";
+import { useConnectivity } from "./api/connectivity";
+import { preferenceTransport } from "./api/preferences";
+import { translate } from "./i18n";
 import { resetPreferences, VIEW_SELECTION_PREFERENCES } from "./preferences";
+import {
+  cachedPreferenceAccount,
+  resumePreferenceSync,
+  startPreferenceSync,
+} from "./preferences/sync";
+import { operationScope, useApp } from "./store";
 import { installTruncationTitles } from "./truncationTitle";
 import "./app.css";
 
@@ -51,10 +60,34 @@ function resetView() {
 // Text cut with an ellipsis shows its whole value on hover, app-wide.
 installTruncationTitles(document);
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ViewErrorBoundary onResetView={resetView}>
-      <App />
-    </ViewErrorBoundary>
-  </React.StrictMode>,
-);
+// Account choices (theme, language, …) follow the person through the server
+// (preferences/sync.ts). The popout editor has no sign-in of its own: it is
+// the window that opened it, so it syncs as the account that cache holds.
+const popout = window.location.pathname === "/popout";
+const preferencesReady = startPreferenceSync({
+  transport: preferenceTransport,
+  account: popout ? (cachedPreferenceAccount() ?? undefined) : undefined,
+  // Once per page load, as a passing note in the top bar: the choice is kept
+  // here and saved when the server answers again.
+  onSaveFailed: () =>
+    useApp.getState().settleOperation(operationScope.preferences(), {
+      status: "error",
+      operation: "preferences.sync",
+      message: translate("prefsSync.offline"),
+    }),
+});
+useConnectivity.subscribe((state, previous) => {
+  if (previous.offline && !state.offline) resumePreferenceSync();
+});
+
+// A browser that never synced waits (at most half a second) for the
+// account's choices, so the default theme does not flash before the person's.
+void preferencesReady.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ViewErrorBoundary onResetView={resetView}>
+        <App />
+      </ViewErrorBoundary>
+    </React.StrictMode>,
+  );
+});

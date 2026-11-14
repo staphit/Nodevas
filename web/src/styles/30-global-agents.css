@@ -1,0 +1,384 @@
+/* Global agents (agent workspace, phase 2): Station's two tabs, the Global
+ * agents tab (the start form, each runner's load, the list) and the
+ * workspace panel's chip for a global run. */
+
+/* ---- Tabs (StationTabs) ---- */
+.station-tabs {
+  display: flex;
+  gap: 2px;
+  align-self: stretch;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--border);
+}
+.station-tab {
+  min-height: 32px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+.station-tab:hover {
+  color: var(--text);
+}
+.station-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+.station-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px 4px 0 0;
+}
+/* The header keeps one line: the title gives up its stretch to the tabs. */
+.station-head:has(.station-tabs) h2 {
+  flex: 0 0 auto;
+}
+.station-head .station-tabs + * {
+  margin-left: auto;
+}
+
+/* ---- Panel (GlobalAgentsPanel) ---- */
+.global-agents-intro {
+  margin: 0 0 10px;
+}
+
+/* ---- Form (GlobalAgentForm) ---- */
+.global-agent-form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.global-agent-form .run-field-row {
+  flex-wrap: wrap;
+}
+.global-agent-form .run-field-row > .run-field {
+  flex: 1 1 180px;
+}
+.global-agent-form-command {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.global-agent-form-command code {
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+}
+.global-agent-form-slug {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.global-agent-form-task-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.global-agent-form-task textarea {
+  min-height: 84px;
+  max-height: 60vh;
+}
+.global-agent-form-pr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.global-agent-form-noboard {
+  padding: 6px 10px;
+  border-left: 2px solid var(--st-progress-fg);
+  border-radius: 2px 6px 6px 2px;
+  background: var(--st-progress-bg);
+  color: var(--text);
+}
+.global-agent-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.global-agent-form-actions button {
+  min-height: 32px;
+}
+
+/* ---- Capacity (RunnerCapacity) ---- */
+.global-capacity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.global-capacity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.global-capacity-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.global-capacity-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.global-capacity-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.global-capacity-line {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.global-capacity-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.global-capacity-label {
+  margin-right: 2px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+.global-capacity-step {
+  justify-content: center;
+  min-width: 28px;
+  padding: 4px 0;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 700;
+}
+.global-capacity-value {
+  min-width: 24px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+.global-capacity-hint,
+.global-capacity-note {
+  flex-basis: 100%;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.global-capacity-note.is-saved {
+  color: var(--st-done-fg);
+}
+.global-capacity-note.is-notSaved {
+  color: var(--st-ready-fg);
+}
+.global-capacity-note.is-error {
+  color: var(--st-failed-fg);
+}
+
+/* ---- List (GlobalAgentList) ---- */
+.global-agent-section {
+  margin: 14px 0 6px;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text-2);
+}
+.global-agent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.global-agent-table th {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.global-agent-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text);
+}
+.global-agent-row.is-focus td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.global-agent-row.is-focus td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.global-agent-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.global-agent-who {
+  display: block;
+  font-weight: 600;
+}
+.global-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  margin-top: 2px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  white-space: nowrap;
+}
+.global-agent-chip.is-mode {
+  background: var(--st-progress-bg);
+  border-color: transparent;
+  color: var(--st-progress-fg);
+}
+.global-agent-chip.is-no-ask {
+  cursor: help;
+}
+.global-agent-task {
+  min-width: 140px;
+  overflow-wrap: anywhere;
+}
+.global-agent-branch {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.global-agent-branch .mono {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+  overflow-wrap: anywhere;
+}
+.global-agent-copy {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.global-agent-copy:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+.global-agent-num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.global-agent-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.global-agent-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--st-failed-fg);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.global-agent-more {
+  margin-top: 10px;
+}
+.global-agent-copy:focus-visible,
+.global-agent-buttons .ap-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* A phone: each run a card, each cell a labelled line. */
+@media (max-width: 720px) {
+  .global-agent-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .global-agent-table,
+  .global-agent-table tbody,
+  .global-agent-row,
+  .global-agent-row td {
+    display: block;
+    width: 100%;
+  }
+  .global-agent-row {
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .global-agent-row.is-focus {
+    border-color: var(--accent);
+  }
+  .global-agent-row td {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .global-agent-row td:last-child {
+    border-bottom: 0;
+  }
+  .global-agent-row td[data-label]::before {
+    content: attr(data-label);
+    color: var(--text-2);
+    font-weight: 600;
+  }
+  .global-agent-row td.global-agent-actions {
+    display: block;
+  }
+  .global-agent-buttons {
+    justify-content: flex-start;
+  }
+  .global-agent-buttons .ap-btn {
+    min-height: 36px;
+  }
+}
+
+/* ---- Workspace panel (RunWorkspaceDialog) ---- */
+.run-ws-chip.is-global {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--st-progress-bg);
+  color: var(--st-progress-fg);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.run-ws-info.is-note {
+  font-style: italic;
+}
+
+@media (max-width: 720px) {
+  .station-head:has(.station-tabs) {
+    flex-wrap: wrap;
+  }
+  .station-tabs {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
