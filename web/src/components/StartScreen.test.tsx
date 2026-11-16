@@ -1,10 +1,25 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Run } from "../api";
+import { setFirstRunHolding } from "../firstRun/gate";
 import { configurePreferenceStorage, readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
+import { useStation } from "../station/stationStore";
 import { useApp } from "../store";
 import type { Graph } from "../types";
 import { OPEN_START_SCREEN_EVENT, StartScreen, useNewProjectRequest } from "./StartScreen";
+
+// The describe box has tests of its own; here only where it appears and what
+// its start does to this screen.
+const box = vi.hoisted(() => ({ onStarted: undefined as ((run: Run) => void) | undefined }));
+vi.mock("../station/SimpleAgentBox", () => ({
+  SimpleAgentBox: ({ onStarted }: { onStarted?: (run: Run) => void }) => {
+    box.onStarted = onStarted;
+    return <div data-testid="describe-box" />;
+  },
+}));
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
@@ -35,7 +50,14 @@ beforeEach(() => {
     preferences: { ...readPreferences(), language: "en" },
   });
   useNewProjectRequest.getState().set(false);
+  box.onStarted = undefined;
 });
+
+afterEach(() => setFirstRunHolding(false));
+
+function single(children: ReactNode) {
+  return <EditionProvider edition="single">{children}</EditionProvider>;
+}
 
 describe("StartScreen", () => {
   it("greets a brand-new workspace with a blank start and the examples", () => {
@@ -116,5 +138,47 @@ describe("StartScreen", () => {
 
     expect(useNewProjectRequest.getState().pending).toBe(true);
     expect(useApp.getState().preferences.explorerCollapsed).toBe(false);
+  });
+
+  it("waits while the first-run questions are asking", () => {
+    seedFreshWorkspace();
+    setFirstRunHolding(true);
+    const { container } = render(single(<StartScreen />));
+    expect(container).toBeEmptyDOMElement();
+
+    act(() => setFirstRunHolding(false));
+    expect(screen.getByRole("dialog", { name: "Welcome to Nodevas" })).toBeInTheDocument();
+  });
+
+  it("carries the describe box when agents are on, and keeps focus on the blank start", async () => {
+    seedFreshWorkspace();
+    useApp.getState().updateUIPreference("agentWorkstation", true);
+    render(single(<StartScreen />));
+
+    expect(screen.getByRole("heading", { name: "Or tell an agent what you want" })).toBeInTheDocument();
+    expect(screen.getByTestId("describe-box")).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Start with a blank project/ }));
+
+    // A started task closes this screen and shows the agent at work.
+    act(() => box.onStarted?.({ id: "run-1" } as Run));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useApp.getState().preferences.startScreenDismissed).toBe(true);
+    expect(useApp.getState().preferences.projectMode).toBe("station");
+    expect(useStation.getState().tab).toBe("global");
+  });
+
+  it("has no describe box for a plan-only board", () => {
+    seedFreshWorkspace();
+    render(single(<StartScreen />));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("describe-box")).not.toBeInTheDocument();
+  });
+
+  it("has no describe box on a team hub", () => {
+    seedFreshWorkspace();
+    useApp.getState().updateUIPreference("agentWorkstation", true);
+    render(<StartScreen />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("describe-box")).not.toBeInTheDocument();
   });
 });

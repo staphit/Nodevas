@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setFirstRunHolding } from "../../firstRun/gate";
+import { EditionProvider } from "../../runners/edition";
 import { useApp, type AppState } from "../../store";
 import { OnboardingTour } from "./OnboardingTour";
 
@@ -127,6 +129,68 @@ describe("OnboardingTour welcome dialog", () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("OnboardingTour after the first-run questions", () => {
+  function setProjectMode(mode: "info" | "station" | "settings") {
+    useApp.setState((state) => ({
+      preferences: { ...state.preferences, projectMode: mode } as AppState["preferences"],
+    }));
+  }
+
+  afterEach(() => {
+    setFirstRunHolding(false);
+    setProjectMode("info");
+  });
+
+  it("does not invite while the questions hold the screen, then does", () => {
+    vi.useFakeTimers();
+    setTourPrefs("pending");
+    setFirstRunHolding(true);
+    render(<OnboardingTour />);
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    act(() => setFirstRunHolding(false));
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("waits in the single-user edition until the board is on screen", () => {
+    vi.useFakeTimers();
+    setTourPrefs("pending");
+    setProjectMode("station");
+    render(
+      <EditionProvider edition="single">
+        <OnboardingTour />
+      </EditionProvider>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    act(() => setProjectMode("info"));
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("invites as before on a team hub in Station", () => {
+    vi.useFakeTimers();
+    setTourPrefs("pending");
+    setProjectMode("station");
+    render(<OnboardingTour />);
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
 

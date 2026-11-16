@@ -11,7 +11,8 @@ import { agentColorKey, agentWho, areaName, poseLabel } from "../game/labels";
 import type { Actor, World } from "../game/world";
 import { useI18n } from "../i18n";
 import { isHubRunner, localState, useEdition, type LocalState } from "../runners/edition";
-import { runnerDisplayName } from "../runners/runnerName";
+import { plainRunnerName, runnerDisplayName } from "../runners/runnerName";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
@@ -144,8 +145,10 @@ function StationToday({ world }: { world: World }) {
   const [rosterOpen, setRosterOpen] = useState(false);
   const { actors } = world.building;
   const working = actors.filter((actor) => actor.pose === "working" || actor.pose === "reviewing").length;
+  // Simple: the built-in runner is this computer, and no token counts.
+  const simple = useSimpleMode();
   const placeName = (actor: Actor) =>
-    `${areaName(t, actor.area)} · ${runnerDisplayName(t, actor.runnerName) || t("station.roster.terminal")}`;
+    `${areaName(t, actor.area)} · ${plainRunnerName(t, actor.runnerName, simple) || t("station.roster.terminal")}`;
 
   useEffect(() => {
     if (!useUsage.getState().loaded) void useUsage.getState().refresh();
@@ -212,7 +215,9 @@ function StationToday({ world }: { world: World }) {
                     <span className="station-actor-line">
                       <span className="station-pose">{poseLabel(t, actor.pose)}</span>
                       {actor.nodeTitle ? ` · ${actor.nodeTitle}` : ""}
-                      {actor.energy ? ` · ${t("station.roster.tokens", { tokens: compact(actor.energy.used) })}` : ""}
+                      {actor.energy && !simple
+                        ? ` · ${t("station.roster.tokens", { tokens: compact(actor.energy.used) })}`
+                        : ""}
                     </span>
                     <span className="station-actor-room">{placeName(actor)}</span>
                   </span>

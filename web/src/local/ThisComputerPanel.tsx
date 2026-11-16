@@ -1,16 +1,17 @@
 // "This computer" (single-user edition): the part of Nodevas that runs
-// agents, in plain words. Which agents it found, the repos added here, how
-// many runs it takes at once, what each agent may do without asking, and
-// whether to be asked before every run. Changes go to the built-in runner
+// agents, in plain words. Which agents it found (and how to get or add one),
+// the repos added here, how many runs it takes at once, what each agent may
+// do without asking, whether to be asked before every run and before each
+// command an agent that may only edit wants to run. Changes go to the built-in runner
 // (PUT /api/runners/:id/settings, the repo routes); new runs use them, runs
 // already going keep theirs. Command lines and the settings file only show
-// under Advanced, collapsed.
+// under Advanced, collapsed. In Simple the repos are folders and no test
+// command is asked for.
 
 import { useEffect, useId, useState } from "react";
 
 import {
   api,
-  GlobalRunError,
   type PermissionLevel,
   type Runner,
   type RunnerRepo,
@@ -20,10 +21,12 @@ import { confirmAction } from "../components/ConfirmDialog";
 import { agentName } from "../game/labels";
 import { formatList, useI18n } from "../i18n";
 import { useLocalRunner, useLocalState } from "../runners/edition";
-import { runnerAgentProblem } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useGlobalAgents } from "../station/globalAgentsStore";
+import { localSettingsErrorText } from "./AddAgentDialog";
 import { AddRepoDialog } from "./AddRepoDialog";
+import { AgentScanStep } from "./AgentScanStep";
 import { LocalNotReady } from "./LocalNotReady";
 import { holdRunner, repoErrorText } from "./useAddRepo";
 
@@ -52,16 +55,18 @@ export function permissionOf(runner: Runner | undefined, kind: string): Permissi
   return "edit";
 }
 
-/** "Claude、Codex · 2 repos · 2 at a time", or why there is nothing to say. */
-export function localSummary(t: Translate, runner: Runner | undefined): string {
+/** "Claude、Codex · 2 repos · 2 at a time" ("2 folders" in Simple), or why
+ * there is nothing to say. */
+export function localSummary(t: Translate, runner: Runner | undefined, simple = false): string {
   if (!runner?.online) return t("local.unavailable");
   const agents = (runner.info?.agents ?? []).filter((agent) => agent.installed).map((agent) => agentName(agent.kind));
   const repos = runner.info?.repos?.length ?? 0;
-  return t(repos === 1 ? "local.summaryOneRepo" : "local.summary", {
+  const values = {
     agents: agents.length > 0 ? formatList(agents) : t("local.noAgents"),
-    repos,
     count: Math.max(1, runner.info?.maxConcurrent || 1),
-  });
+  };
+  if (simple) return t(repos === 1 ? "simple.local.summaryOne" : "simple.local.summary", { ...values, folders: repos });
+  return t(repos === 1 ? "local.summaryOneRepo" : "local.summary", { ...values, repos });
 }
 
 /** The command lines that make the same settings, for Advanced. */
@@ -84,18 +89,6 @@ export function localCommands(runner: Runner): string[] {
 
 type Note = { kind: "saved" | "error"; text: string };
 
-/** Why a settings change was refused, in plain words. */
-function settingsErrorText(t: Translate, error: unknown): string {
-  if (error instanceof GlobalRunError) {
-    if (error.code === "RUNNER_OFFLINE" || error.status === 503 || error.blocked === "local_only") {
-      return t("local.unavailable");
-    }
-    if (error.code === "TIMEOUT" || error.status === 504) return t("local.timeout");
-    if (error.code === "INVALID_ARGUMENT" && error.max > 0) return t("local.concurrencyCeiling", { max: error.max });
-  }
-  return t("local.error", { message: error instanceof Error ? error.message : String(error) });
-}
-
 export function ThisComputerPanel() {
   const { t } = useI18n();
   const runner = useLocalRunner();
@@ -106,6 +99,7 @@ export function ThisComputerPanel() {
   const [note, setNote] = useState<Note | null>(null);
   const [adding, setAdding] = useState(false);
   const [warnFor, setWarnFor] = useState("");
+  const simple = useSimpleMode();
 
   useEffect(() => {
     if (!useRunners.getState().loaded) void useRunners.getState().refresh();
@@ -147,7 +141,7 @@ export function ThisComputerPanel() {
       useGlobalAgents.getState().resync();
       return true;
     } catch (error) {
-      setNote({ kind: "error", text: settingsErrorText(t, error) });
+      setNote({ kind: "error", text: localSettingsErrorText(t, error) });
       return false;
     } finally {
       setSaving(false);
@@ -171,50 +165,21 @@ export function ThisComputerPanel() {
         </p>
       )}
 
-      <section className="this-computer-part" aria-labelledby={`${runner.id}-agents`}>
-        <div className="this-computer-head">
-          <h3 id={`${runner.id}-agents`}>{t("local.agentsFound")}</h3>
-          <button
-            type="button"
-            className="ap-btn"
-            disabled={locked}
-            onClick={() => void save({ redetect: true }, t("local.rechecked"))}
-          >
-            {t("local.recheck")}
-          </button>
-        </div>
-        {agents.length === 0 ? (
-          <p className="this-computer-empty">{t("local.noAgentsHelp")}</p>
-        ) : (
-          <ul className="this-computer-agents">
-            {agents.map((agent) => (
-              <li key={agent.kind} className={agent.installed ? "is-installed" : "is-missing"}>
-                <strong>{agentName(agent.kind)}</strong>
-                <span>
-                  {agent.installed
-                    ? agent.version || t("local.agentInstalled")
-                    : t("local.agentMissing", { agent: agentName(agent.kind) })}
-                </span>
-                {agent.error && <small className="this-computer-problem">{runnerAgentProblem(t, agent.error)}</small>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <AgentScanStep variant="settings" />
 
       <section className="this-computer-part" aria-labelledby={`${runner.id}-repos`}>
         <div className="this-computer-head">
-          <h3 id={`${runner.id}-repos`}>{t("local.repos")}</h3>
+          <h3 id={`${runner.id}-repos`}>{t(simple ? "simple.local.folders" : "local.repos")}</h3>
           <button type="button" className="ap-btn" disabled={!runner.online} onClick={() => setAdding(true)}>
-            {t("repoAdd.button")}
+            {t(simple ? "simple.local.addFolder" : "repoAdd.button")}
           </button>
         </div>
         {repos.length === 0 ? (
-          <p className="this-computer-empty">{t("local.reposNone")}</p>
+          <p className="this-computer-empty">{t(simple ? "simple.local.foldersNone" : "local.reposNone")}</p>
         ) : (
           <ul className="this-computer-repos">
             {repos.map((repo) => (
-              <RepoRow key={repo.id} runner={runner} repo={repo} onNote={setNote} />
+              <RepoRow key={repo.id} runner={runner} repo={repo} onNote={setNote} testCommand={!simple} />
             ))}
           </ul>
         )}
@@ -280,9 +245,24 @@ export function ThisComputerPanel() {
         <small className="run-hint">{t("local.askEveryRunHelp")}</small>
       </section>
 
+      <section className="this-computer-part">
+        <label className="route-toggle this-computer-ask">
+          <input
+            type="checkbox"
+            checked={Boolean(info?.permissionRelay)}
+            disabled={locked}
+            onChange={(event) => void save({ permissionRelay: event.target.checked })}
+          />
+          <span>{t("local.permissionRelay")}</span>
+        </label>
+        <small className="run-hint">{t("local.permissionRelayHelp")}</small>
+      </section>
+
       <details className="run-advanced this-computer-advanced">
         <summary>{t("local.advanced")}</summary>
-        {local && (
+        {/* Simple keeps finished work on this computer: no online review
+            to switch on here (Settings / General brings every option back). */}
+        {local && !simple && (
           <div className="this-computer-pr">
             <label className="route-toggle">
               <input
@@ -316,6 +296,7 @@ export function ThisComputerPanel() {
       {adding && (
         <AddRepoDialog
           runnerId={runner.id}
+          plain={simple}
           onClose={() => setAdding(false)}
           onAdded={(repo) => {
             setAdding(false);
@@ -326,6 +307,7 @@ export function ThisComputerPanel() {
       {warnFor && (
         <FullAccessDialog
           agent={agentName(warnFor)}
+          simple={simple}
           onCancel={() => setWarnFor("")}
           onConfirm={(askFirst) => {
             const kind = warnFor;
@@ -399,10 +381,13 @@ function PermissionPicker({
  * that stays: automatic runs still ask (checked unless unticked). */
 function FullAccessDialog({
   agent,
+  simple,
   onCancel,
   onConfirm,
 }: {
   agent: string;
+  /** Simple mode: the person's folder, not "the repo". */
+  simple: boolean;
   onCancel: () => void;
   onConfirm: (askFirst: boolean) => void;
 }) {
@@ -431,7 +416,7 @@ function FullAccessDialog({
         <header>
           <div>
             <h2 id={titleId}>{t("local.permission.warnTitle", { agent })}</h2>
-            <p>{t("local.permission.fullWarn", { agent })}</p>
+            <p>{t(simple ? "simple.local.fullWarn" : "local.permission.fullWarn", { agent })}</p>
           </div>
         </header>
         <div className="this-computer-warn-body">
@@ -457,10 +442,14 @@ function RepoRow({
   runner,
   repo,
   onNote,
+  testCommand,
 }: {
   runner: Runner;
   repo: RunnerRepo;
   onNote: (note: Note) => void;
+  /** Whether the test command field shows: not in Simple, where nothing is
+   * checked before work starts and no command is typed. */
+  testCommand: boolean;
 }) {
   const { t } = useI18n();
   const fieldId = useId();
@@ -517,45 +506,47 @@ function RepoRow({
           {t("repoAdd.remove")}
         </button>
       </div>
-      <div className="this-computer-test">
-        <label htmlFor={fieldId}>{t("repoAdd.testCommand")}</label>
-        <span className="this-computer-test-row">
-          <input
-            id={fieldId}
-            value={command}
-            maxLength={500}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            placeholder={repo.verify ? t("repoAdd.testCommandSet") : t("repoAdd.testPlaceholder")}
-            disabled={busy || !runner.online}
-            onChange={(event) => setCommand(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && value) {
-                event.preventDefault();
-                void setTest(value);
-              }
-            }}
-            aria-describedby={`${fieldId}-help`}
-          />
-          <button
-            type="button"
-            className="ap-btn"
-            disabled={busy || !value || !runner.online}
-            onClick={() => void setTest(value)}
-          >
-            {t("common.save")}
-          </button>
-          {repo.verify && (
-            <button type="button" className="ap-btn" disabled={busy || !runner.online} onClick={() => void setTest("")}>
-              {t("repoAdd.testClear")}
+      {testCommand && (
+        <div className="this-computer-test">
+          <label htmlFor={fieldId}>{t("repoAdd.testCommand")}</label>
+          <span className="this-computer-test-row">
+            <input
+              id={fieldId}
+              value={command}
+              maxLength={500}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              placeholder={repo.verify ? t("repoAdd.testCommandSet") : t("repoAdd.testPlaceholder")}
+              disabled={busy || !runner.online}
+              onChange={(event) => setCommand(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && value) {
+                  event.preventDefault();
+                  void setTest(value);
+                }
+              }}
+              aria-describedby={`${fieldId}-help`}
+            />
+            <button
+              type="button"
+              className="ap-btn"
+              disabled={busy || !value || !runner.online}
+              onClick={() => void setTest(value)}
+            >
+              {t("common.save")}
             </button>
-          )}
-        </span>
-        <small id={`${fieldId}-help`} className="run-hint">
-          {t("repoAdd.testCommandHelp")}
-        </small>
-      </div>
+            {repo.verify && (
+              <button type="button" className="ap-btn" disabled={busy || !runner.online} onClick={() => void setTest("")}>
+                {t("repoAdd.testClear")}
+              </button>
+            )}
+          </span>
+          <small id={`${fieldId}-help`} className="run-hint">
+            {t("repoAdd.testCommandHelp")}
+          </small>
+        </div>
+      )}
     </li>
   );
 }

@@ -25,6 +25,12 @@ export interface WorkspaceState {
   acting: Record<string, "merge" | "discard" | undefined>;
   /** Why the hub refused a run's last action, translated. */
   actionErrors: Record<string, string>;
+  /** The same refusal as a workspace code (workspaceRefusalCode), for the
+   * plain result buttons; absent when it had none. */
+  actionCodes: Record<string, string>;
+  /** Which action the refusal in actionErrors/actionCodes was for, so a
+   * refused discard is never shown as a refused apply. */
+  actionKinds: Record<string, "merge" | "discard">;
   openWorkspace: (runId: string, tab?: WorkspaceTab) => void;
   setTab: (tab: WorkspaceTab) => void;
   close: () => void;
@@ -64,6 +70,19 @@ export function workspaceRefusal(error: unknown, run: Pick<Run, "base">): string
   return message(error);
 }
 
+/** The workspace code behind a refused action: its gate (a 409's
+ * `blocked`), the runner's state, or not the owner; "" for anything else. */
+export function workspaceRefusalCode(error: unknown): string {
+  if (error instanceof WorkspaceActionError) {
+    if (error.blocked) return error.blocked;
+    if (error.code === "RUNNER_OUTDATED") return "outdated";
+    if (error.code === "RUNNER_OFFLINE") return "offline";
+    if (error.status === 403) return "not_owner";
+    return "";
+  }
+  return error instanceof AuthError && error.status === 403 ? "not_owner" : "";
+}
+
 const without = <T>(record: Record<string, T>, key: string): Record<string, T> => {
   if (!(key in record)) return record;
   const next = { ...record };
@@ -88,6 +107,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     set((state) => ({
       acting: { ...state.acting, [run.id]: kind },
       actionErrors: without(state.actionErrors, run.id),
+      actionCodes: without(state.actionCodes, run.id),
+      actionKinds: without(state.actionKinds, run.id),
     }));
     try {
       const updated =
@@ -98,7 +119,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       return true;
     } catch (error) {
       if (gen !== generation) return false;
-      set((state) => ({ actionErrors: { ...state.actionErrors, [run.id]: workspaceRefusal(error, run) } }));
+      const code = workspaceRefusalCode(error);
+      set((state) => ({
+        actionErrors: { ...state.actionErrors, [run.id]: workspaceRefusal(error, run) },
+        actionCodes: code ? { ...state.actionCodes, [run.id]: code } : without(state.actionCodes, run.id),
+        actionKinds: { ...state.actionKinds, [run.id]: kind },
+      }));
       // A 409 often means the run moved on: show what the hub knows now.
       void useRuns.getState().refreshRun(run.id);
       return false;
@@ -118,6 +144,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     viewErrors: {},
     acting: {},
     actionErrors: {},
+    actionCodes: {},
+    actionKinds: {},
 
     openWorkspace: (runId, tab) => {
       if (!runId) return;
@@ -152,7 +180,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     // a room in another project switches first and opens it after.
     reset: () => {
       generation++;
-      set({ views: {}, viewErrors: {}, acting: {}, actionErrors: {} });
+      set({ views: {}, viewErrors: {}, acting: {}, actionErrors: {}, actionCodes: {}, actionKinds: {} });
     },
   };
 });

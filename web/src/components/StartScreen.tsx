@@ -12,14 +12,23 @@
  * explorer's tools or the command palette for the examples.
  *
  * The first-run tour waits for it: two dialogs on a first launch is one too
- * many, so OnboardingTour holds its invitation while this is open.
+ * many, so OnboardingTour holds its invitation while this is open. It waits
+ * in turn for the first-run questions (firstRun/), which come before it.
+ *
+ * In the single-user edition, once agents are on, it also carries the
+ * describe box: tell an agent what you want instead of starting a board.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 
+import { useFirstRunHolding } from "../firstRun/gate";
 import { useI18n } from "../i18n";
 import { IconClose, IconPlus } from "../icons";
+import { useEdition } from "../runners/edition";
+import { useWorkstationVisible } from "../runners/workstation";
+import { openGlobalAgents } from "../station/openGlobalAgents";
+import { SimpleAgentBox } from "../station/SimpleAgentBox";
 import { reportError, useApp, usePreference } from "../store";
 import { useViewer } from "./SignIn";
 
@@ -48,7 +57,7 @@ export const useNewProjectRequest = create<{ pending: boolean; set: (pending: bo
 );
 
 /** A workspace that is exactly one project with nothing in it. */
-function useFreshWorkspace(): boolean {
+export function useFreshWorkspace(): boolean {
   const graph = useApp((s) => s.graph);
   const projects = useApp((s) => s.projects);
   const viewer = useViewer();
@@ -68,7 +77,8 @@ export function useStartScreenVisible(): boolean {
   const dismissed = usePreference("startScreenDismissed");
   const requested = useStartScreenRequest((s) => s.requested);
   const fresh = useFreshWorkspace();
-  return requested || (fresh && !dismissed);
+  const holding = useFirstRunHolding();
+  return !holding && (requested || (fresh && !dismissed));
 }
 
 export function StartScreen() {
@@ -76,6 +86,10 @@ export function StartScreen() {
   const visible = useStartScreenVisible();
   const setRequested = useStartScreenRequest((s) => s.set);
   const fresh = useFreshWorkspace();
+  // Agent work is offered here only where agents are wanted: the
+  // single-user edition with the workstation on.
+  const workstation = useWorkstationVisible();
+  const describe = useEdition() === "single" && workstation;
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const openExampleProject = useApp((s) => s.openExample);
   const [busy, setBusy] = useState<string | null>(null);
@@ -180,6 +194,18 @@ export function StartScreen() {
           ))}
         </ul>
         <p className="start-screen-note">{t("start.examplesNote")}</p>
+        {describe && (
+          <>
+            <h3>{t("start.describeHeading")}</h3>
+            <SimpleAgentBox
+              variant="start"
+              onStarted={(run) => {
+                close();
+                openGlobalAgents(run.id);
+              }}
+            />
+          </>
+        )}
         {error && (
           <div className="notify-message error" role="alert">
             {error}

@@ -178,6 +178,10 @@ func (j *jobs) runWorkspaceAction(ownerID string, job runnerwire.WorkspaceAction
 	}
 	j.c.logf("run %s: workspace action %s: %s asked for", job.RunID, job.ID, oneLine(job.Action))
 	outcome := j.doWorkspaceAction(ownerID, job)
+	if outcome.Code == "" {
+		// Applied or thrown away: its preview (preview.go) ends now.
+		j.c.revokePreview(job.RunID)
+	}
 	if j.ctx.Err() != nil {
 		// The runner is stopping; git may have been killed half way. Not
 		// answered, so the hub sends it again and a fresh look decides.

@@ -125,6 +125,9 @@ type Client struct {
 	admin chan struct{}
 	// guard replaces the sensitive-folder rules in tests (repoguard.go).
 	guard *repoGuard
+	// preview is the built-in runner's result preview listener (preview.go),
+	// started on the first page minted and stopped when Run returns.
+	preview previewSlot
 }
 
 // cfg is the config in effect now. A run uses the one it was offered under
@@ -184,6 +187,7 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	c.live.Store(c.Config)
 	c.infoChanged = make(chan struct{}, 1)
+	defer c.preview.close()
 	if c.Config.LegacyAutoAccept() {
 		// The CLI migrates and saves before this; a Config built elsewhere
 		// is migrated here, in memory.

@@ -164,6 +164,21 @@ function themePackPref(key: string, scope: PreferenceScope): SpecBody<string> {
   };
 }
 
+/** A runner's repo id, as the runner checks one (validRepoID): at most 256
+ * UTF-8 bytes, no control characters. "" means none picked. */
+const MAX_ID_BYTES = 256;
+
+function idPref(key: string, scope: PreferenceScope): SpecBody<string> {
+  return {
+    key,
+    scope,
+    fallback: () => "",
+    decode: (raw) =>
+      new TextEncoder().encode(raw).length <= MAX_ID_BYTES && !/[\p{Cc}\p{Cs}]/u.test(raw) ? raw : undefined,
+    encode: (value) => value,
+  };
+}
+
 /** The editor's modes and text sizes; the drawer's toolbar and the Settings
  * view's editor defaults both edit these preferences. */
 export const EDITOR_MODES = ["live", "source", "preview"] as const;
@@ -460,6 +475,30 @@ export const PREFERENCE_SCHEMA = {
   graphConnectTipDismissed: account(
     boolPref("vised-graph-connect-tip-dismissed", "onboarding", false),
   ),
+  /**
+   * Where this person is with the first-run questions (single-user edition):
+   * not decided yet, answered, skipped, or never asked because they already
+   * used the app. The answers themselves are not kept: they are written as
+   * the settings they choose, once, when the questions end.
+   */
+  firstRun: account(
+    enumPref(
+      "vised-first-run",
+      "onboarding",
+      ["pending", "done", "skipped", "existing"] as const,
+      () => "pending" as const,
+    ),
+  ),
+  /**
+   * How this person uses Nodevas: "simple", the preset for someone who does
+   * not write code, or "full", every option as it always was. Only the
+   * single-user edition reads it, and only through useSimpleMode
+   * (simple/simpleMode.ts). Full by default, so nobody who upgrades sees a
+   * change.
+   */
+  experience: account(
+    enumPref("vised-experience", "onboarding", ["full", "simple"] as const, () => "full" as const),
+  ),
 
   // agents
   /** Whether Copilot reads its replies aloud. */
@@ -478,6 +517,19 @@ export const PREFERENCE_SCHEMA = {
   ),
   /** Whether Station's agent network card is unfolded. */
   stationNetworkOpen: account(boolPref("vised-station-network-open", "agents", false)),
+  /** The agent the describe box hands work to; "auto" is the first one
+   * installed, in the runner's order. */
+  simpleAgentKind: account(
+    enumPref(
+      "vised-simple-agent-kind",
+      "agents",
+      ["auto", "claude", "codex", "gemini", "opencode", "antigravity"] as const,
+      () => "auto" as const,
+    ),
+  ),
+  /** The folder (a repo id of this computer's runner) the describe box's
+   * agent works in; "" is the first one. */
+  simpleAgentRepoId: account(idPref("vised-simple-agent-repo", "agents")),
 } satisfies Record<string, { sync: PreferenceSync }>;
 
 export type PreferenceKey = keyof typeof PREFERENCE_SCHEMA;

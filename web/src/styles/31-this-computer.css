@@ -296,3 +296,128 @@
   margin-top: 2px;
   color: var(--text-2);
 }
+
+/* ---- Agents on this computer (AgentScanStep, AddAgentDialog) ---- */
+.agent-scan {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+.agent-scan-summary {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+  overflow-wrap: anywhere;
+}
+.agent-scan-summary.is-ready {
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.agent-scan-list .agent-scan-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.agent-scan-list .agent-scan-row:last-child {
+  border-bottom: 0;
+}
+.agent-scan-row.is-installed > span:first-of-type {
+  color: var(--st-done-fg);
+}
+.agent-scan-row.is-missing > span:first-of-type,
+.agent-scan-row.is-problem > span:first-of-type {
+  color: var(--text-2);
+}
+.agent-scan-actions,
+.agent-scan-added {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.agent-scan-actions {
+  margin-left: auto;
+}
+.agent-scan-problem {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-scan-details summary {
+  width: fit-content;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.agent-scan-details small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-2);
+}
+.agent-scan-added {
+  flex-basis: 100%;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.agent-scan-howto {
+  display: flex;
+  min-width: 0;
+  flex-basis: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.agent-scan-howto ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.agent-scan-howto p {
+  margin: 0;
+}
+.agent-scan-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.agent-scan-still,
+.agent-scan-looking {
+  margin: 0;
+}
+.agent-add-hidden {
+  align-self: flex-start;
+}
+.fs-browser-files {
+  border-top: 1px solid var(--border);
+}
+.fs-browser-files button.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ---- First folder (FirstFolderStep) ---- */
+.first-folder {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.first-folder h3,
+.first-folder p {
+  margin: 0;
+}
+.first-folder-where {
+  overflow-wrap: anywhere;
+}
+.first-folder-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}

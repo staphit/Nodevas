@@ -2,7 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, forgetGlobalRuns, rememberGlobalRun, WorkspaceActionError, type Run, type RunWorkspaceView } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
 import { openRunWorkspace } from "./openWorkspace";
 import { RunWorkspaceDialog } from "./RunWorkspaceDialog";
@@ -439,5 +442,71 @@ describe("a global agent's workspace", () => {
     expect(await screen.findByText("Fix the login button")).toBeInTheDocument();
     expect(fetch.mock.calls.map(([url]) => String(url))).toContain("/api/global-runs/g3");
     expect(useRuns.getState().globalById.g3).toEqual(run);
+  });
+});
+
+// Simple mode (single-user edition): a result on this computer is looked at
+// and applied with the plain buttons; everyone else keeps Merge locally.
+describe("in Simple mode", () => {
+  const local = () => makeWorkspaceRun({ runnerId: "local1", runnerName: "this machine", repoName: "my-app" });
+
+  function showIn(run: Run, experience: "simple" | "full") {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience } });
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    seed(run);
+    render(
+      <EditionProvider edition="single">
+        <Panel />
+      </EditionProvider>,
+    );
+    act(() => openRunWorkspace(run.id, "changes"));
+  }
+
+  afterEach(() => useRunners.setState({ runners: [], loaded: false }));
+
+  it("swaps Merge locally and Discard for Take a look and Apply to my folder", async () => {
+    showIn(local(), "simple");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Take a look" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Merge into main locally/ })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Discard/ })).toBeNull();
+  });
+
+  // What was done where, in plain words: this computer, the folder; no
+  // branch, worktree or "merged locally".
+  it("says who worked where in plain words", async () => {
+    showIn(local(), "simple");
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("button", { name: "Apply to my folder" });
+    const facts = dialog.querySelector(".run-ws-facts") as HTMLElement;
+    expect(within(facts).getByText("Folder")).toBeInTheDocument();
+    expect(within(facts).getByText("my-app")).toBeInTheDocument();
+    expect(within(facts).getByText("This computer")).toBeInTheDocument();
+    const summary = dialog.querySelector(".run-ws-summary") as HTMLElement;
+    expect(summary.textContent).not.toMatch(/branch|worktree|repository|runner|this machine|agent\/alpha/i);
+  });
+
+  it("says an applied result is in the folder, not merged", async () => {
+    showIn({ ...local(), workspace: "merged_local" }, "simple");
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getAllByText("Applied to your folder").length).toBeGreaterThan(0);
+    expect(dialog.textContent).not.toMatch(/Merged locally/);
+  });
+
+  it("keeps the precise facts in full mode", async () => {
+    showIn({ ...local(), workspace: "merged_local" }, "full");
+    const dialog = await screen.findByRole("dialog");
+    const facts = dialog.querySelector(".run-ws-facts") as HTMLElement;
+    expect(within(facts).getByText("Repository")).toBeInTheDocument();
+    expect(within(facts).getByText("Branch")).toBeInTheDocument();
+    expect(within(dialog).getByText("Merged locally")).toBeInTheDocument();
+  });
+
+  it("keeps Merge locally in full mode", async () => {
+    showIn(local(), "full");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("button", { name: /Merge into main locally/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Apply to my folder" })).toBeNull();
   });
 });

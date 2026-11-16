@@ -9,6 +9,12 @@
   background: color-mix(in srgb, var(--scrim) 82%, transparent);
   backdrop-filter: blur(3px);
 }
+/* The dialogs the start screen and the first-run questions open (add an
+   agent, set one up, pick a folder) sit above their scrim (90); a plain
+   confirm-backdrop (80) would open hidden behind it. Below the tour (130). */
+.confirm-backdrop.repo-add-backdrop {
+  z-index: 95;
+}
 .start-screen {
   position: relative;
   display: grid;
@@ -113,12 +119,116 @@
   cursor: progress;
   opacity: 0.6;
 }
+
+/* First-run questions (firstRun/FirstRun): the start screen's frame, one
+   question per screen, big plain answers. */
+.first-run-step {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.start-screen h3.first-run-question {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: calc(15px * var(--font-scale, 1));
+  letter-spacing: 0;
+}
+.first-run-choices {
+  display: grid;
+  gap: 8px;
+}
+.first-run-choice {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.first-run-choice b {
+  font-size: calc(14px * var(--font-scale, 1));
+}
+.first-run-choice small {
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+.first-run-choice:hover:not(:disabled),
+.first-run-choice:focus-visible {
+  border-color: var(--accent);
+}
+.first-run-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+/* Why a choice cannot be taken, right under it. */
+.first-run-why {
+  margin: -4px 0 0;
+  padding: 0 14px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+.first-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.first-run-spacer {
+  flex: 1;
+}
+.first-run-actions button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: calc(12.5px * var(--font-scale, 1));
+}
+.first-run-actions button:hover {
+  border-color: var(--accent);
+}
+.first-run-actions button.first-run-next {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.first-run-saved {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 90;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 30px var(--shadow);
+  font-size: calc(13px * var(--font-scale, 1));
+  transform: translateX(-50%);
+}
 @media (max-width: 720px) {
   .start-screen {
     padding: 18px 16px;
   }
   .start-screen-blank,
-  .start-screen-examples button {
+  .start-screen-examples button,
+  .first-run-actions button {
     min-height: 44px;
   }
 }

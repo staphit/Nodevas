@@ -53,6 +53,9 @@ func TestWritesThatChangeScorecardsInvalidateThem(t *testing.T) {
 		{http.MethodPut, "/api/analytics/settings", false},
 		{http.MethodGet, "/api/runs/r1/verdicts", false},
 		{http.MethodPut, "/api/graph", false},
+		{http.MethodPost, "/api/runs/r1/workspace/preview", false},
+		{http.MethodPost, "/api/global-runs/g1/workspace/preview", false},
+		{http.MethodPost, "/api/runs/r1/workspace/merge", true},
 	} {
 		if got := changesScorecards(tc.method, tc.path); got != tc.want {
 			t.Errorf("%s %s changes scorecards = %v, want %v", tc.method, tc.path, got, tc.want)

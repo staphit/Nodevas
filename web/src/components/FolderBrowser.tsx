@@ -3,12 +3,14 @@
  * "New folder here". It only ever lists folders. The listing and the new
  * folder come from the caller (GET /api/fs/dirs, POST /api/fs/mkdir), so the
  * workspace picker and "Add repo" share it while each keeps its own
- * selection.
+ * selection. A caller that picks a program file ("Show Nodevas where Claude
+ * is") also passes the files the listing named, and gets file rows below the
+ * folders; without them it only ever lists folders.
  */
 
 import { useState } from "react";
 
-import { IconCheck, IconFolder, IconPlus } from "../icons";
+import { IconCheck, IconDoc, IconFolder, IconFolderOpen, IconPlus } from "../icons";
 import { useI18n } from "../i18n";
 
 /** One answer of GET /api/fs/dirs: "" path is the list of drives. */
@@ -26,6 +28,11 @@ export function FolderBrowser({
   createFolder,
   onCreated,
   onError,
+  home,
+  files,
+  onPickFile,
+  pickedFile = "",
+  emptyFilesText,
 }: {
   /** null while the first listing loads. */
   listing: FolderListing | null;
@@ -41,6 +48,15 @@ export function FolderBrowser({
   onCreated?: (path: string) => void;
   /** A message for the caller's error line, or null to clear it. */
   onError: (message: string | null) => void;
+  /** The person's home folder: a "My folder" button goes there. */
+  home?: string;
+  /** Files of the folder shown to pick from; undefined lists folders only. */
+  files?: { name: string; path: string }[] | null;
+  onPickFile?: (path: string) => void;
+  /** The path of the file picked, "" for none. */
+  pickedFile?: string;
+  /** Said when `files` is empty. */
+  emptyFilesText?: string;
 }) {
   const { t } = useI18n();
   const [newOpen, setNewOpen] = useState(false);
@@ -100,6 +116,14 @@ export function FolderBrowser({
           )}
         </span>
       </div>
+      {home && (
+        <div className="fs-browser-toolbar">
+          <button type="button" disabled={busy} onClick={() => onBrowse(home)}>
+            <IconFolderOpen size={12} />
+            {t("local.addAgent.home")}
+          </button>
+        </div>
+      )}
       {createFolder && (
         <div className="fs-browser-toolbar">
           <button
@@ -166,6 +190,24 @@ export function FolderBrowser({
         ))}
         {listing && (listing.dirs ?? []).length === 0 && <li className="fs-browser-empty">{t("explorer.noSubfolders")}</li>}
       </ul>
+      {files !== undefined && (
+        <ul className="fs-browser-list fs-browser-files">
+          {(files ?? []).map((file) => (
+            <li key={file.path}>
+              <button
+                type="button"
+                className={file.path === pickedFile ? "selected" : undefined}
+                aria-pressed={file.path === pickedFile}
+                onClick={() => onPickFile?.(file.path)}
+                disabled={busy}
+              >
+                <IconDoc size={12} /> {file.name}
+              </button>
+            </li>
+          ))}
+          {(files ?? []).length === 0 && emptyFilesText && <li className="fs-browser-empty">{emptyFilesText}</li>}
+        </ul>
+      )}
     </div>
   );
 }

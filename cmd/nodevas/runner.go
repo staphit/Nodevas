@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -134,6 +136,11 @@ func runnerUsage(w io.Writer) {
                                              each still accepted here or by autoaccept),
                                              repoBrowse (on|off, default on: the hub's Explorer may list
                                              and read the repos added here, read-only, secrets hidden),
+                                             agentPath (<kind> <path>: the program to run for that
+                                             agent kind; <kind> alone, or <kind> default, goes back
+                                             to PATH),
+                                             runPreview (on|off, default on: the built-in runner may
+                                             show a finished run's web page on a loopback preview),
                                              httpLoopbackHub (on|off, default off: a runner serve did not
                                              start sends its token to a plain-http hub on this machine;
                                              only if nobody else can run programs here);
@@ -488,6 +495,16 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 		repoBrowse += " (the default)"
 	}
 	setting("repoBrowse", fmt.Sprintf("%t (%s)", cfg.RepoBrowseOn(), repoBrowse))
+	runPreview := "the built-in runner may show a finished run's web page on a loopback preview"
+	if !cfg.RunPreviewOn() {
+		runPreview = "run previews are refused"
+	} else if cfg.RunPreview == nil {
+		runPreview += " (the default)"
+	}
+	setting("runPreview", fmt.Sprintf("%t (%s)", cfg.RunPreviewOn(), runPreview))
+	for _, kind := range slices.Sorted(maps.Keys(cfg.AgentPaths)) {
+		setting("agentPath "+kind, cfg.AgentPaths[kind])
+	}
 	if strings.HasPrefix(cfg.Hub, "http:") || cfg.HTTPLoopbackHub {
 		loopback := "only the runner `nodevas serve` starts sends its token to a plain-http hub here"
 		if cfg.HTTPLoopbackHub {

@@ -2,10 +2,12 @@
 // on a person. Questions and held mail from the agent network, autopilot
 // tasks held for a person's review, runs that need one (a usage limit, a PR
 // ready to merge, a PR whose CI went red, an offer the runner has not taken
-// yet) and a spent budget. Plain data, tested without React.
+// yet, a result on this computer to look at and apply) and a spent budget.
+// Plain data, tested without React.
 
 import type { AgentAsk, AgentMessage, Run, RunBudgetLimit, WaitingRunLike } from "../api";
 import type { WaitingTask } from "../autopilot/autopilotStore";
+import { applyRuns } from "../runs/resultState";
 
 /** Older than this is not waiting any more, just history. */
 export const WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -79,6 +81,8 @@ export type WaitingItem<R extends WaitingRunLike = Run> =
   | { kind: "held"; message: AgentMessage }
   | { kind: "review"; task: WaitingTask }
   | { kind: "offer"; run: R }
+  /** Single-user edition: a finished result to look at and apply. */
+  | { kind: "apply"; run: Run }
   | WaitingRun<R>;
 
 export interface WaitingInput<R extends WaitingRunLike = Run> {
@@ -97,8 +101,12 @@ export interface WaitingInput<R extends WaitingRunLike = Run> {
   canAnswer: (ask: AgentAsk) => boolean;
   now: number;
   /** Single-user edition: this computer's built-in runner. Its offers wait
-   * on nobody unless it asks about them (the others are starting). */
+   * on nobody unless it asks about them (the others are starting), and
+   * only its results are applied from here. */
   builtInRunnerId?: string;
+  /** Single-user edition: the runs a result may come from (Station's, the
+   * global agents'), freshest copy first; absent lists no results. */
+  results?: Run[];
 }
 
 /** Whether an offered run is simply starting: on the built-in runner, with
@@ -127,8 +135,8 @@ export function waitingKey<R extends WaitingRunLike>(item: WaitingItem<R>): stri
 /**
  * Everything waiting on the viewer, most blocking first: a spent budget
  * (nothing new runs), questions an agent is stopped on, held mail, reviews an
- * autopilot is stopped on, PRs to merge or fix, offers not yet taken, and
- * usage limits last (a fallback usually took over).
+ * autopilot is stopped on, PRs to merge or fix, results to apply, offers not
+ * yet taken, and usage limits last (a fallback usually took over).
  */
 export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput<R>): WaitingItem<R>[] {
   const out: WaitingItem<R>[] = [];
@@ -141,6 +149,9 @@ export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput
   const runs = waitingRuns(input.runs, input.now);
   for (const item of runs) if (item.kind === "merge") out.push(item);
   for (const item of runs) if (item.kind === "ci") out.push(item);
+  if (input.results) {
+    for (const run of applyRuns(input.results, input.now, input.builtInRunnerId)) out.push({ kind: "apply", run });
+  }
   for (const run of input.active) {
     if (run.status === "offered" && !starting(run, input.builtInRunnerId)) out.push({ kind: "offer", run });
   }

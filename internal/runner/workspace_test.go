@@ -2,11 +2,14 @@ package runner
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -581,5 +584,136 @@ func TestRunInfoUncommittedUnknown(t *testing.T) {
 	}
 	if info := env.info(t); !info.Exists || info.Uncommitted != runnerwire.UncommittedUnknown {
 		t.Fatalf("info = %+v", info)
+	}
+}
+
+// asBuiltIn makes the env's runner the built-in one, whose preview listener
+// (preview.go) stops with the test.
+func (e *wsEnv) asBuiltIn(t *testing.T) {
+	t.Helper()
+	e.j.c.builtIn.Store(true)
+	t.Cleanup(e.j.c.preview.close)
+}
+
+// preview mints a preview of the run's folder, as its owner.
+func (e *wsEnv) preview(t *testing.T) runnerwire.RunPreview {
+	t.Helper()
+	done := e.browse(runnerwire.RepoOpRunPreview, "")
+	if done.Code != "" || done.Preview == nil {
+		t.Fatalf("run_preview = %+v", done)
+	}
+	return *done.Preview
+}
+
+// previewGet fetches a minted preview's page over its loopback listener.
+func previewGet(t *testing.T, p runnerwire.RunPreview, rel string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(p.Port)+"/p/"+p.Token+"/"+rel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "localhost:" + strconv.Itoa(p.Port)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+func TestBrowseRunPreview(t *testing.T) {
+	// The built-in runner, its owner asking, a page at the top of the folder.
+	env := newWSEnv(t, nil)
+	env.asBuiltIn(t)
+	writeFile(t, env.wt.Path, "index.html", []byte("<p>the run's page</p>"))
+	before := time.Now()
+	p := env.preview(t)
+	real, err := filepath.EvalSymlinks(env.wt.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Web || p.Entry != "index.html" || p.Port <= 0 || len(p.Token) != 32 || !sameRepoPath(p.Path, real) ||
+		p.ExpiresAt.Before(before.Add(previewTTL-time.Minute)) || p.ExpiresAt.After(time.Now().Add(previewTTL+time.Minute)) {
+		t.Fatalf("preview = %+v", p)
+	}
+	if code, body := previewGet(t, p, p.Entry); code != http.StatusOK || body != "<p>the run's page</p>" {
+		t.Fatalf("GET entry = %d %q", code, body)
+	}
+	// The repo root's files are not the run's.
+	writeFile(t, env.repo, "rootonly.html", []byte("root"))
+	if code, _ := previewGet(t, p, "rootonly.html"); code != http.StatusNotFound {
+		t.Fatalf("a repo root file through the preview = %d", code)
+	}
+
+	// No page: the folder to open instead, and no listener for it.
+	plain := newWSEnv(t, nil)
+	plain.asBuiltIn(t)
+	if p := plain.preview(t); p.Web || p.Token != "" || p.Port != 0 || p.Entry != "" || p.Path == "" {
+		t.Fatalf("no page = %+v", p)
+	}
+	if plain.j.c.preview.peek() != nil {
+		t.Fatal("a listener started for a folder with no page")
+	}
+
+	// A runner that is not built in: off, and never a listener.
+	classic := newWSEnv(t, nil)
+	t.Cleanup(classic.j.c.preview.close)
+	writeFile(t, classic.wt.Path, "index.html", []byte("x"))
+	if got := classic.browse(runnerwire.RepoOpRunPreview, ""); got.Code != runnerwire.RepoErrPreviewOff || got.Preview != nil {
+		t.Fatalf("classic runner = %+v", got)
+	}
+	if classic.j.c.preview.peek() != nil {
+		t.Fatal("a classic runner started a preview listener")
+	}
+
+	// The owner turned it off.
+	off := newWSEnv(t, func(cfg *Config) {
+		no := false
+		cfg.RunPreview = &no
+	})
+	off.asBuiltIn(t)
+	writeFile(t, off.wt.Path, "index.html", []byte("x"))
+	if got := off.browse(runnerwire.RepoOpRunPreview, ""); got.Code != runnerwire.RepoErrPreviewOff || got.Preview != nil {
+		t.Fatalf("runPreview off = %+v", got)
+	}
+	if off.j.c.preview.peek() != nil {
+		t.Fatal("runPreview off started a listener")
+	}
+
+	// Someone else's account.
+	got := env.j.browseRun(context.Background(), wsOwner, runnerwire.RepoRequest{ID: "q", AccountID: "u-other", RepoID: "r1",
+		Op: runnerwire.RepoOpRunPreview, RunID: wsRun, NodeID: wsNode, Branch: env.wt.Branch, Base: "main"})
+	if got.Code != runnerwire.RepoErrRefused || got.Preview != nil {
+		t.Fatalf("another account = %+v", got)
+	}
+
+	// The worktree is gone.
+	if err := os.RemoveAll(env.wt.Path); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.browse(runnerwire.RepoOpRunPreview, ""); got.Code != runnerwire.RepoErrNoWorktree {
+		t.Fatalf("no worktree = %+v", got)
+	}
+	if code, _ := previewGet(t, p, p.Entry); code != http.StatusNotFound {
+		t.Fatalf("the page outlived its folder: %d", code)
+	}
+}
+
+// A page minted for a run ends once its folder is removed from Nodevas (the
+// run's worktree stays on disk), however often an open tab asks.
+func TestPreviewEndsWithRemovedFolder(t *testing.T) {
+	env := newWSEnv(t, nil)
+	env.asBuiltIn(t)
+	writeFile(t, env.wt.Path, "index.html", []byte("<p>the run's page</p>"))
+	p := env.preview(t)
+	if code, _ := previewGet(t, p, p.Entry); code != http.StatusOK {
+		t.Fatalf("GET entry = %d", code)
+	}
+	next := env.j.c.cfg().Clone()
+	next.Repos = nil
+	env.j.c.live.Store(next)
+	if code, body := previewGet(t, p, p.Entry); code != http.StatusNotFound {
+		t.Fatalf("after the folder was removed = %d %q", code, body)
 	}
 }

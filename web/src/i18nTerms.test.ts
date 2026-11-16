@@ -43,6 +43,7 @@ const KEYS = [
   "local.permission.edit",
   "local.permission.full",
   "local.askEveryRun",
+  "local.permissionRelay",
   "offerAsk.title",
   "offerAsk.start",
   "offerAsk.decline",
@@ -106,15 +107,15 @@ describe("global agents keys", () => {
   });
 });
 
-// Single-user edition (phase S): every This computer, add-repo and ask key
-// is in both catalogs, the Chinese one reads in Chinese, and none of them
-// says "runner" to a single-user reader in either language (the team-only
-// lines name Nodevas Runner, the separate program, on purpose).
+// Single-user edition (phase S): every This computer, add-repo, ask and
+// result-button key is in both catalogs, the Chinese one reads in Chinese,
+// and none of them says "runner" to a single-user reader in either language
+// (the team-only lines name Nodevas Runner, the separate program, on purpose).
 describe("single-user edition keys", () => {
   const text = readFileSync(resolve(process.cwd(), "src/i18n.ts"), "utf8");
   const en = text.slice(0, text.indexOf('\n  "zh-TW": {'));
   const keys = [
-    ...en.matchAll(/^\s+"((?:local|offerAsk|repoAdd)\.[^"]*|(?:runs|dispatch|terminal|globalAgents)\.[^"]+Local)":/gm),
+    ...en.matchAll(/^\s+"((?:local|offerAsk|repoAdd|result)\.[^"]*|(?:runs|dispatch|terminal|globalAgents)\.[^"]+Local)":/gm),
   ].map((match) => match[1]);
   const teamOnly = new Set([
     "repoAdd.onRunner",

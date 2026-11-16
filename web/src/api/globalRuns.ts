@@ -33,6 +33,9 @@ export interface CreateGlobalRunRequest {
   /** Push and open a pull request when done. Off (the default) keeps the
    * branch on the runner for a local merge or a discard. */
   openPR: boolean;
+  /** Simple mode: the hub adds its fixed plain-words instruction for someone
+   * who does not write code (runs.SimpleInstruction). Lifts no gate. */
+  simple?: boolean;
 }
 
 /** Why a runner cannot take global runs now: "" when it can. */

@@ -105,7 +105,19 @@ interface Engine {
   /** The newest server copy taken in before the account was known. */
   unclaimed: Record<string, string> | null;
   noticeShown: boolean;
+  /** How the first load went: true once the account's copy is in, false
+   * when it failed or the server keeps nothing for this page. */
+  firstLoad: { promise: Promise<boolean>; settle: (loaded: boolean) => void };
   unbind: () => void;
+}
+
+/** A promise that settles once, to the first answer it is given. */
+function onceSettled(): Engine["firstLoad"] {
+  let resolve!: (loaded: boolean) => void;
+  const promise = new Promise<boolean>((done) => {
+    resolve = done;
+  });
+  return { promise, settle: (loaded) => resolve(loaded) };
 }
 
 let engine: Engine | null = null;
@@ -213,6 +225,8 @@ function takeRemote(current: Engine, values: Record<string, string>): void {
     }
   }
   applyStoredPreferences(changes);
+  // The account's own copy is in: what the first-run questions wait for.
+  if (confirmed) current.firstLoad.settle(true);
 }
 
 function load(): Promise<void> {
@@ -229,6 +243,7 @@ function load(): Promise<void> {
     },
     (error: unknown) => {
       if (engine !== current || epoch !== current.epoch) return;
+      current.firstLoad.settle(false);
       failed(current, error, null);
     },
   );
@@ -330,6 +345,7 @@ function failed(current: Engine, error: unknown, sent: Record<string, string | n
       return;
     case "unsupported":
       current.off = true;
+      current.firstLoad.settle(false);
       return;
     case "refused":
       if (sent && typeof current.account === "string") settle(current.account, sent);
@@ -416,6 +432,7 @@ export function startPreferenceSync(options: PreferenceSyncOptions): Promise<voi
     lastLoadAt: 0,
     unclaimed: null,
     noticeShown: false,
+    firstLoad: onceSettled(),
     unbind: () => {},
   };
   engine = current;
@@ -494,6 +511,20 @@ export function setPreferenceAccount(id: string | null): Promise<void> | null {
   // A cache that held this account's choices shows them at once; otherwise
   // the caller may hold the app back a moment for them.
   return marker === id ? null : settleWithin(loaded, COLD_START_WAIT_MS);
+}
+
+/**
+ * Resolves once the first load of this page's account choices is done: true
+ * after the server's copy was taken in as a confirmed account's (also when it
+ * arrived before the account was named), false when that load failed, the
+ * server keeps nothing for this page, or nothing syncs at all. The first-run
+ * questions wait for it, so an empty cache never makes someone who already
+ * uses the app look new.
+ */
+export function firstPreferenceLoad(): Promise<boolean> {
+  const current = engine;
+  if (!current || current.off) return Promise.resolve(false);
+  return current.firstLoad.promise;
 }
 
 /** Sends what waits now (before signing out), within `timeoutMs`. */

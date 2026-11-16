@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, GlobalRunError, type Runner, type RunnerLoad } from "../api";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
 import { useGlobalAgents } from "./globalAgentsStore";
@@ -162,5 +163,37 @@ describe("RunnerCapacity", () => {
     // The limit stays what the runner said.
     await waitFor(() => expect(screen.getByRole("button", { name: "More at once on desktop" })).toBeEnabled());
     expect(within(stepper()).getByLabelText("2 at once on desktop")).toHaveTextContent("2");
+  });
+});
+
+// Simple (single-user edition): this computer's load without a setting's
+// name or token counts; what it cost stays.
+describe("RunnerCapacity in Simple", () => {
+  function showIn(experience: "simple" | "full") {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience } });
+    seed(makeLoad({ name: "this machine", maxConcurrent: 4, ceiling: 4 }));
+    return render(
+      <EditionProvider edition="single">
+        <RunnerCapacity />
+      </EditionProvider>,
+    );
+  }
+
+  it("hides the ceiling's setting name and the token count", () => {
+    const { container } = showIn("simple");
+    const text = container.textContent ?? "";
+    expect(text).not.toMatch(/maxConcurrentCeiling|tokens|12\.3K|runner|this machine/i);
+    expect(text).toMatch(/\$0\.042/);
+    expect(text).toMatch(/This computer/);
+    for (const element of container.querySelectorAll("[title], [aria-label]")) {
+      const said = `${element.getAttribute("title") ?? ""} ${element.getAttribute("aria-label") ?? ""}`;
+      expect(said).not.toMatch(/maxConcurrentCeiling|this machine/);
+    }
+  });
+
+  it("keeps them in full mode", () => {
+    const { container } = showIn("full");
+    expect(container.textContent).toMatch(/maxConcurrentCeiling/);
+    expect(container.textContent).toMatch(/tokens/);
   });
 });

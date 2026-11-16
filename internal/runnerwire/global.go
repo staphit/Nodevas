@@ -131,6 +131,9 @@ type CreateGlobalRunRequest struct {
 	// still may not, when its own autoPR is off). Off keeps the branch on
 	// the runner for a local merge or discard.
 	OpenPR bool `json:"openPR,omitempty"`
+	// Simple adds the hub's fixed instruction for a person who is not a
+	// programmer (runs.SimpleInstruction) to the task. It lifts no gate.
+	Simple bool `json:"simple,omitempty"`
 }
 
 // GlobalRunsResponse is the body of GET /api/global-runs: the viewer's

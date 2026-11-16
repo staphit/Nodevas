@@ -434,8 +434,9 @@ export class WorkspaceActionError extends Error {
 const WORKSPACE_POST_TIMEOUT_MS = 45_000;
 
 /** POSTs a workspace action. 200 (answered) and 202 (still pending) both
- * carry the run; a refusal keeps its code and gate, which req() drops. */
-async function workspacePost(url: string, body: unknown): Promise<Run> {
+ * carry the run (a preview, its own answer); a refusal keeps its code and
+ * gate, which req() drops. */
+async function workspacePost<T = Run>(url: string, body: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), WORKSPACE_POST_TIMEOUT_MS);
   let res: Response;
@@ -453,7 +454,20 @@ async function workspacePost(url: string, body: unknown): Promise<Run> {
       typeof parsed.error === "string" && parsed.error ? parsed.error : `${res.status}`,
     );
   }
-  return (await res.json()) as Run;
+  return (await res.json()) as T;
+}
+
+/** POST …/workspace/preview: a look at a finished run's files. A web page
+ * opens at `url`, on this computer's own preview listener under a
+ * short-lived token; anything else is `web: false`, and `folder` is the run
+ * folder to open instead. A refusal is a WorkspaceActionError whose
+ * `blocked` is running, merged_local, discarded, no_worktree, offline,
+ * outdated or preview_off. */
+export interface RunPreview {
+  web: boolean;
+  url?: string;
+  folder?: string;
+  expiresAt?: string;
 }
 
 /** Mirrors runnerwire.Budget: per owner, per UTC day; 0 means no limit. */
@@ -567,6 +581,10 @@ export interface CreateRunRequest {
   /** The auto-routing pick this dispatch followed (RouteSuggestion.ruleId
    * "auto:<id>" without the prefix), so the hub links it to the run. */
   routePick?: string;
+  /** Simple mode: the hub adds its fixed plain-words instruction for someone
+   * who does not write code (implement runs only). Lifts no gate: a run a
+   * gate blocks still needs `override`. */
+  simple?: boolean;
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.
@@ -850,4 +868,7 @@ export const runsApi = {
   /** Asks the runner to remove the run's worktree and branch (and close its
    * PR). Idempotent. */
   discardRun: (id: string) => workspacePost(`${workspacePath(id)}/discard`, {}),
+  /** Asks this computer's built-in runner for a look at the run's files
+   * (owner only). */
+  previewRun: (id: string) => workspacePost<RunPreview>(`${workspacePath(id)}/preview`, {}),
 };

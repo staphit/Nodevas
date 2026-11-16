@@ -136,6 +136,16 @@ func TestRunnerProxyRefusesEverythingElse(t *testing.T) {
 		{http.MethodGet, "/api/agents/messages/x/files"},
 		{http.MethodGet, "/api/agents/messages/x/files/../../x"},
 		{http.MethodPost, "/api/copilot/turn"},
+		// An agent never lists the host's files, nor changes the settings
+		// that decide what runs and how (an added agent program, the
+		// permission relay) or the person's own preferences (Simple).
+		{http.MethodGet, "/api/fs/dirs"},
+		{http.MethodGet, "/api/fs/dirs?files=claude"},
+		{http.MethodPost, "/api/fs/mkdir"},
+		{http.MethodPost, "/api/fs/open"},
+		{http.MethodPut, "/api/runners/x/settings"},
+		{http.MethodPatch, "/api/me/preferences"},
+		{http.MethodPut, "/api/me/preferences"},
 	} {
 		if runnerProxyAllows(route[0], route[1]) {
 			t.Errorf("the runner proxy allows %s %s", route[0], route[1])

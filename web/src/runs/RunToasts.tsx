@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "../api";
 import {
   requestSystemNotifications,
   systemNotifyPermission,
@@ -37,6 +38,21 @@ export function RunToasts() {
               {toast.body && <span>{toast.body}</span>}
             </span>
           </button>
+          {toast.folder && (
+            <button
+              type="button"
+              className="run-toast-action"
+              onClick={() => {
+                const folder = toast.folder ?? "";
+                dismiss(toast.id);
+                // A folder that will not open says nothing more here: the
+                // result card still offers it, with the reason.
+                void api.openFolder(folder).catch(() => undefined);
+              }}
+            >
+              {t("result.openFolder")}
+            </button>
+          )}
           <button
             type="button"
             className="run-toast-close"

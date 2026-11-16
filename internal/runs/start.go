@@ -327,6 +327,11 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		name = req.ActorID
 	}
 	extra := body.Prompt
+	// Simple mode tells an implement run who asked; other kinds read, plan
+	// or judge, and get nothing.
+	if body.Kind == runnerwire.JobImplement {
+		extra = withSimple(extra, body.Simple)
+	}
 	if role != nil && !role.Builtin && strings.TrimSpace(role.Instructions) != "" {
 		extra = strings.TrimSpace(extra + "\n\nProject policy for this role (" + role.Label + "):\n" + role.Instructions)
 	}

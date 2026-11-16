@@ -26,6 +26,9 @@ var (
 	// ErrRunnerOutdated: the runner is from before run workspaces
 	// (runnerwire.CapRunWorkspace).
 	ErrRunnerOutdated = locale.Errorf("update nodevas on the runner to see run workspaces", "請更新 runner 上的 nodevas 才能查看執行工作區")
+	// ErrRunPreviewOff: run_preview on a runner that is not this hub's
+	// built-in one, or whose hello lacks runnerwire.CapRunPreview.
+	ErrRunPreviewOff = locale.Errorf("previews are off on this runner", "這個 runner 關閉了預覽")
 )
 
 // DefaultRepoTimeout bounds one browse call.
@@ -103,6 +106,13 @@ func (r *RepoRelay) BrowseRun(ctx context.Context, accountID, runnerID string, r
 	// The run's own runner's owner only; administrators are no exception.
 	if runner.OwnerID != accountID {
 		return runnerwire.RepoDone{}, ErrRepoNotFound
+	}
+	// A preview needs this hub's built-in runner, as its welcome said, and
+	// its say-so: a capability alone (a member's runner can claim anything)
+	// is not enough, nor is being built in with the preview turned off.
+	if req.Op == runnerwire.RepoOpRunPreview &&
+		(!runner.BuiltIn || runner.Info == nil || !slices.Contains(runner.Info.Capabilities, runnerwire.CapRunPreview)) {
+		return runnerwire.RepoDone{}, ErrRunPreviewOff
 	}
 	if !r.reg.Online(runnerID) {
 		return runnerwire.RepoDone{}, ErrRunnerOffline

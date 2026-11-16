@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -67,24 +68,55 @@ func settingsInvalid(c *gin.Context, err error) {
 	httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
 }
 
-// settingsRequest is body as the runner is asked it.
+// agentPathRefused answers an agent path that was not taken, with why
+// (runnerwire.AgentPathRefused*) for the app to say in plain words.
+func agentPathRefused(c *gin.Context, refused string, err error) {
+	httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, map[string]any{"field": "agentPath", "refused": refused})
+}
+
+// settingsRequest is body as the runner is asked it. An agent path, set or
+// cleared, changes which agents are here, so the runner looks for them again
+// before it answers.
 func settingsRequest(accountID string, body runnerwire.RunnerSettingsBody) runnerwire.SettingsRequest {
 	return runnerwire.SettingsRequest{
 		AccountID: accountID, MaxConcurrent: body.MaxConcurrent,
 		Permission: body.Permission, AskEveryRun: body.AskEveryRun, ShellWithoutAsking: body.ShellWithoutAsking,
-		AutoPR: body.AutoPR, PRDraft: body.PRDraft, Redetect: body.Redetect,
+		AutoPR: body.AutoPR, PRDraft: body.PRDraft, AgentPath: body.AgentPath, PermissionRelay: body.PermissionRelay,
+		Redetect: body.Redetect || len(body.AgentPath) > 0,
 	}
 }
 
+// agentPathInvalid is an agent path the hub refuses before asking the
+// runner: answered with field agentPath and refused invalid, as the runner's
+// own refusals are.
+type agentPathInvalid struct{ error }
+
+func (e agentPathInvalid) Unwrap() error { return e.error }
+
 // checkLocalSettings checks the built-in runner's own settings in body
-// against the runner's last hello: an agent kind must be one it lists, and
-// a permission level read, edit or full (custom is shown, never set).
+// against the runner's last hello: an agent kind must be one it lists, a
+// permission level read, edit or full (custom is shown, never set), and an
+// agent path one agent's, of at most runnerwire.MaxAgentPathBytes with no
+// NUL. The runner checks the file itself.
 func checkLocalSettings(runner runnerwire.Runner, body runnerwire.RunnerSettingsBody) error {
 	if len(body.Permission) > runnerwire.MaxAgents || len(body.ShellWithoutAsking) > runnerwire.MaxAgents {
 		return locale.Errorf("too many agents in one change", "一次變更的 agent 太多")
 	}
 	listed := func(kind string) bool {
 		return runner.Info != nil && slices.ContainsFunc(runner.Info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == kind })
+	}
+	if len(body.AgentPath) > 1 {
+		return agentPathInvalid{locale.Errorf("add one agent's program at a time", "一次只能加入一個 agent 的程式")}
+	}
+	for kind, path := range body.AgentPath {
+		switch {
+		case !listed(kind):
+			return agentPathInvalid{locale.Errorf("%q is not an agent this runner knows", "「%s」不是這個 runner 知道的 agent", kind)}
+		case len(path) > runnerwire.MaxAgentPathBytes:
+			return agentPathInvalid{locale.Errorf("the program's path is over %d bytes", "程式的路徑超過 %d 位元組", runnerwire.MaxAgentPathBytes)}
+		case strings.ContainsRune(path, 0):
+			return agentPathInvalid{locale.Errorf("the program's path is not a path", "程式的路徑不是有效的路徑")}
+		}
 	}
 	for _, kind := range slices.Sorted(maps.Keys(body.Permission)) {
 		if !listed(kind) {
@@ -140,6 +172,10 @@ func (a *API) putSettings(c *gin.Context) {
 			return
 		}
 		if err := checkLocalSettings(runner, body); err != nil {
+			if errors.As(err, new(agentPathInvalid)) {
+				agentPathRefused(c, runnerwire.AgentPathRefusedInvalid, err)
+				return
+			}
 			settingsInvalid(c, err)
 			return
 		}
@@ -190,7 +226,12 @@ func (a *API) putSettings(c *gin.Context) {
 		settingsBlocked(c, runners.ErrSettingsLocalOnly)
 		return
 	case runnerwire.SettingsErrInvalid:
-		settingsInvalid(c, locale.Errorf("the runner did not take the change: %s", "runner 沒有接受變更：%s", done.Error))
+		err := locale.Errorf("the runner did not take the change: %s", "runner 沒有接受變更：%s", done.Error)
+		if done.Refused != "" && len(body.AgentPath) > 0 {
+			agentPathRefused(c, done.Refused, err)
+			return
+		}
+		settingsInvalid(c, err)
 		return
 	default:
 		// A code this hub does not know: the runner's own prose says why.
@@ -257,7 +298,21 @@ func (a *API) auditSettings(c *gin.Context, runnerID string, body runnerwire.Run
 	if body.PRDraft != nil {
 		detail["prDraft"] = *body.PRDraft
 	}
-	if body.Redetect {
+	if body.PermissionRelay != nil {
+		detail["permissionRelay"] = *body.PermissionRelay
+	}
+	if len(body.AgentPath) > 0 {
+		// Which agent and whether it was set; the path stays on the PC.
+		change := map[string]string{}
+		for kind, path := range body.AgentPath {
+			change[kind] = "set"
+			if path == "" {
+				change[kind] = "cleared"
+			}
+		}
+		detail["agentPath"] = change
+	}
+	if body.Redetect || len(body.AgentPath) > 0 {
 		detail["redetect"] = true
 	}
 	a.link.Audit(c.Request, ActionSettingsUpdate, auth.ActorFrom(c.Request), runnerID, detail)

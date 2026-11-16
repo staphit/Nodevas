@@ -1,5 +1,7 @@
 package runnerwire
 
+import "time"
+
 // Read-only repo browsing for the Explorer. The hub asks a person's own
 // runner to list, read or show git state of one of its registered repos;
 // the runner answers from disk. The hub never execs anything: git runs on
@@ -36,12 +38,17 @@ const (
 	RepoOpRunRead   = "run_read"   // -> File
 	RepoOpRunStatus = "run_status" // -> Status (uncommitted, worktree vs HEAD)
 	RepoOpRunInfo   = "run_info"   // -> RunInfo
+	// RepoOpRunPreview (easy start, result preview): a token for the
+	// built-in runner's own loopback preview of the run's folder, so its
+	// web page opens in a browser without reaching the hub's origin.
+	// Built-in runner only (CapRunPreview, runner setting runPreview).
+	RepoOpRunPreview = "run_preview" // -> Preview
 )
 
 // RunRepoOp reports whether op is run-scoped (RunID required).
 func RunRepoOp(op string) bool {
 	switch op {
-	case RepoOpRunList, RepoOpRunRead, RepoOpRunStatus, RepoOpRunInfo:
+	case RepoOpRunList, RepoOpRunRead, RepoOpRunStatus, RepoOpRunInfo, RepoOpRunPreview:
 		return true
 	}
 	return false
@@ -70,6 +77,9 @@ const (
 	RepoErrBusy     = "busy"
 	// RepoErrNoWorktree: the run's worktree is gone (or never existed).
 	RepoErrNoWorktree = "no_worktree"
+	// RepoErrPreviewOff: run_preview on a runner that is not built in, or
+	// whose owner turned runPreview off.
+	RepoErrPreviewOff = "preview_off"
 )
 
 // RepoRequest is one browse call. AccountID is who asks; the runner refuses
@@ -162,6 +172,20 @@ type RepoDone struct {
 	Log     []RepoCommit      `json:"log,omitempty"`
 	Diff    *RepoDiff         `json:"diff,omitempty"`
 	RunInfo *RunWorkspaceInfo `json:"runInfo,omitempty"`
+	Preview *RunPreview       `json:"preview,omitempty"`
+}
+
+// RunPreview answers run_preview. Web: the folder holds a page to open
+// (Entry, relative to it), served at http://localhost:<Port>/p/<Token>/<Entry>
+// until ExpiresAt; otherwise Port and Token are empty and the web opens the
+// folder (Path, the owner's machine path) instead.
+type RunPreview struct {
+	Port      int       `json:"port"`
+	Token     string    `json:"token"`
+	Entry     string    `json:"entry,omitempty"`
+	Web       bool      `json:"web"`
+	Path      string    `json:"path,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // Where a local merge into a run's base would happen

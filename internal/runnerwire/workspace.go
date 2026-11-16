@@ -21,6 +21,9 @@ const (
 	// them (runner setting workspaceActions, on unless turned off).
 	CapRunWorkspace     = "run-workspace"
 	CapWorkspaceActions = "workspace-actions"
+	// CapRunPreview: the built-in runner answers run_preview (runner setting
+	// runPreview, on unless turned off). Never advertised by another runner.
+	CapRunPreview = "run-preview"
 
 	WorkspaceMergeLocal = "merge_local"
 	WorkspaceDiscard    = "discard"

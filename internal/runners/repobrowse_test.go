@@ -91,3 +91,74 @@ func TestRepoRelayRefusesAndRelays(t *testing.T) {
 		t.Fatalf("unanswered: %v, want ErrRepoTimeout", err)
 	}
 }
+
+// A preview reaches only the hub's built-in runner, as its welcome said,
+// with the capability: a forged capability on another runner, or the
+// built-in runner with the preview off, is refused with nothing sent.
+func TestBrowseRunPreviewNeedsBuiltIn(t *testing.T) {
+	reg, _ := newRegistry(t)
+	relay := NewRepoRelay(reg)
+	relay.Timeout = 2 * time.Second
+	ctx := context.Background()
+	previewInfo := func(caps ...string) runnerwire.Info {
+		info := browseInfo()
+		info.Capabilities = append(info.Capabilities, runnerwire.CapRunWorkspace)
+		info.Capabilities = append(info.Capabilities, caps...)
+		return info
+	}
+	req := runnerwire.RepoRequest{RepoID: "repo-1", Op: runnerwire.RepoOpRunPreview, RunID: "run-1"}
+
+	forgedConn := newLLMConn()
+	forged := online(t, reg, "ann", previewInfo(runnerwire.CapRunPreview), forgedConn)
+	offConn := newLLMConn()
+	off := online(t, reg, "ann", previewInfo(), offConn)
+	reg.SetWelcomed(off.ID, true)
+	for name, id := range map[string]string{"forged capability": forged.ID, "built in, preview off": off.ID} {
+		if _, err := relay.BrowseRun(ctx, ann.ID, id, req); !errors.Is(err, ErrRunPreviewOff) {
+			t.Fatalf("%s: %v, want ErrRunPreviewOff", name, err)
+		}
+	}
+	if len(forgedConn.got) != 0 || len(offConn.got) != 0 {
+		t.Fatal("a refused preview reached a runner")
+	}
+	// Other run ops on the forged runner are untouched.
+	infoDone := make(chan error, 1)
+	go func() {
+		_, err := relay.BrowseRun(ctx, ann.ID, forged.ID, runnerwire.RepoRequest{RepoID: "repo-1", Op: runnerwire.RepoOpRunInfo, RunID: "run-1"})
+		infoDone <- err
+	}()
+	sent := forgedConn.next(t)
+	if sent.Repo == nil || sent.Repo.Op != runnerwire.RepoOpRunInfo {
+		t.Fatalf("run_info = %+v", sent)
+	}
+	_ = relay.Deliver(forged.ID, runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &runnerwire.RepoDone{ID: sent.Repo.ID,
+		RunInfo: &runnerwire.RunWorkspaceInfo{}}})
+	if err := <-infoDone; err != nil {
+		t.Fatal(err)
+	}
+
+	conn := newLLMConn()
+	builtIn := online(t, reg, "ann", previewInfo(runnerwire.CapRunPreview), conn)
+	reg.SetWelcomed(builtIn.ID, true)
+	// Someone else asking for it: not found.
+	if _, err := relay.BrowseRun(ctx, bob.ID, builtIn.ID, req); !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("bob: %v, want ErrRepoNotFound", err)
+	}
+	results := make(chan error, 1)
+	go func() {
+		done, err := relay.BrowseRun(ctx, ann.ID, builtIn.ID, req)
+		if err == nil && (done.Preview == nil || done.Preview.Token != "t") {
+			err = errors.New("no preview in the answer")
+		}
+		results <- err
+	}()
+	sent = conn.next(t)
+	if sent.Repo == nil || sent.Repo.Op != runnerwire.RepoOpRunPreview || sent.Repo.RunID != "run-1" || sent.Repo.AccountID != ann.ID {
+		t.Fatalf("sent = %+v", sent)
+	}
+	_ = relay.Deliver(builtIn.ID, runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &runnerwire.RepoDone{ID: sent.Repo.ID,
+		Preview: &runnerwire.RunPreview{Web: true, Port: 1234, Token: "t", Entry: "index.html"}}})
+	if err := <-results; err != nil {
+		t.Fatal(err)
+	}
+}

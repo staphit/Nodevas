@@ -19,6 +19,9 @@ import { EmptyState } from "./InteractionPrimitives";
 import { openNodeDetail } from "./drawer/openNodeDetail";
 import { useViewer } from "./SignIn";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
+import { useEdition } from "../runners/edition";
+import { useWorkstationVisible } from "../runners/workstation";
+import { openGlobalAgents } from "../station/openGlobalAgents";
 import { UnreadableGraphState } from "./lane/UnreadableGraphState";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
@@ -225,6 +228,10 @@ export function LaneView({
   // administrator's call: the same rule the start screen offers itself by.
   const viewer = useViewer();
   const canOpenExample = !viewer || viewer.role === "admin";
+  // Single-user edition, for someone who uses agents: the empty board also
+  // hands the work to one (Station's global tab, the describe box).
+  const workstationVisible = useWorkstationVisible();
+  const canAskAgent = useEdition() === "single" && workstationVisible;
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
@@ -1586,6 +1593,15 @@ export function LaneView({
                   onClick={() => window.dispatchEvent(new Event(OPEN_START_SCREEN_EVENT))}
                 >
                   {t("lane.emptyExample")}
+                </button>
+              )}
+              {canAskAgent && (
+                <button
+                  type="button"
+                  className="ui-empty-state-secondary"
+                  onClick={() => openGlobalAgents()}
+                >
+                  {t("lane.emptyAskAgent")}
                 </button>
               )}
             </>

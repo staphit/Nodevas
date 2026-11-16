@@ -5,7 +5,7 @@ import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { openRunWorkspace } from "./openWorkspace";
 import { useRuns } from "./runStore";
-import { useWorkspace, workspaceRefusal } from "./workspaceStore";
+import { useWorkspace, workspaceRefusal, workspaceRefusalCode } from "./workspaceStore";
 import { makeAction, makeView, makeWorkspaceRun } from "./workspaceFixtures";
 
 beforeEach(() => {
@@ -68,6 +68,36 @@ describe("workspace store", () => {
     expect(await useWorkspace.getState().discard(run)).toBe(false);
     expect(useWorkspace.getState().actionErrors.run7).toBe("The run is still running");
     expect(refresh).toHaveBeenCalledWith("run7");
+  });
+
+  // The plain result buttons say a refusal in their own words: they read the
+  // code, not the translated text.
+  it("keeps the refused action's code beside its words, and clears both on the next try", async () => {
+    const run = makeWorkspaceRun();
+    useRuns.setState({ runsByNode: { alpha: [run] } });
+    vi.spyOn(api, "getRun").mockResolvedValue(run);
+    const merge = vi
+      .spyOn(api, "mergeRunLocal")
+      .mockRejectedValueOnce(new WorkspaceActionError(409, "FAILED_PRECONDITION", "dirty_base", "x"))
+      .mockRejectedValueOnce(new WorkspaceActionError(503, "RUNNER_OFFLINE", "", "x"));
+    expect(await useWorkspace.getState().mergeLocal(run)).toBe(false);
+    expect(useWorkspace.getState().actionCodes.run7).toBe("dirty_base");
+    expect(await useWorkspace.getState().mergeLocal(run)).toBe(false);
+    expect(useWorkspace.getState().actionCodes.run7).toBe("offline");
+    merge.mockResolvedValueOnce({ ...run, workspaceAction: makeAction() });
+    expect(await useWorkspace.getState().mergeLocal(run)).toBe(true);
+    expect(useWorkspace.getState().actionCodes.run7).toBeUndefined();
+    expect(useWorkspace.getState().actionErrors.run7).toBeUndefined();
+  });
+});
+
+describe("workspaceRefusalCode", () => {
+  it("reads the gate, else the runner's state, else nothing", () => {
+    expect(workspaceRefusalCode(new WorkspaceActionError(409, "FAILED_PRECONDITION", "conflict", "x"))).toBe("conflict");
+    expect(workspaceRefusalCode(new WorkspaceActionError(412, "RUNNER_OUTDATED", "", "x"))).toBe("outdated");
+    expect(workspaceRefusalCode(new WorkspaceActionError(503, "RUNNER_OFFLINE", "", "x"))).toBe("offline");
+    expect(workspaceRefusalCode(new WorkspaceActionError(403, "PERMISSION_DENIED", "", ""))).toBe("not_owner");
+    expect(workspaceRefusalCode(new Error("network"))).toBe("");
   });
 });
 

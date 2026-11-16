@@ -27,6 +27,18 @@ export function confirmMergeLocal(
   });
 }
 
+/** Asks before a result is applied (the plain local merge): which folder it
+ * goes into, by name, else "your folder", and that nothing leaves this
+ * computer. */
+export function confirmApply(t: Translate, folder: string): Promise<boolean> {
+  return confirmAction({
+    title: t("result.apply.confirmTitle"),
+    description: t("result.apply.confirmBody", { folder: folder || t("result.yourFolder") }),
+    confirmLabel: t("result.apply.confirm"),
+    cancelLabel: t("common.cancel"),
+  });
+}
+
 /** Asks before discarding a run's work, listing what goes: the worktree with
  * its uncommitted files, the branch, an open PR and its remote branch. Only
  * what the runner will really remove is promised. */

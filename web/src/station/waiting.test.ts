@@ -106,6 +106,36 @@ describe("waitingOnYou", () => {
       waitingOnYou({ runs: [], active: [], asks: [], held: [], reviews: [], canAnswer: () => true, now: NOW }),
     ).toEqual([]);
   });
+
+  // Single-user edition: a result on this computer waits to be looked at and
+  // applied, after the PRs and before the offers.
+  describe("results to apply", () => {
+    const result = (over: Partial<Run>) => run({ runnerId: "local1", commit: "abc", workspace: "", ...over });
+    const base = { asks: [], held: [], reviews: [], canAnswer: () => true, now: NOW, builtInRunnerId: "local1" };
+
+    it("orders merge, ci, apply, offer", () => {
+      const merge = run({ id: "m", prUrl: "https://x/pull/2", prNumber: 2, prState: "open", ciStatus: "success" });
+      const red = run({ id: "c", nodeId: "n2", prUrl: "https://x/pull/3", prState: "open", ciStatus: "failure" });
+      const offered = run({ id: "o", nodeId: "n4", runnerId: "x", status: "offered", finishedAt: undefined });
+      const done = result({ id: "g1", global: true, nodeId: "" });
+      const items = waitingOnYou({ ...base, runs: [merge, red], active: [offered], results: [done, merge] });
+      expect(items.map(waitingKey)).toEqual(["merge:m", "ci:c", "apply:g1", "offer:o"]);
+    });
+
+    it("lists none without results, or on a team hub", () => {
+      const done = result({ id: "a" });
+      expect(waitingOnYou({ ...base, runs: [done], active: [] })).toEqual([]);
+      expect(waitingOnYou({ ...base, runs: [], active: [], results: [done], builtInRunnerId: undefined })).toEqual([]);
+    });
+
+    it("keys each by its run, once", () => {
+      const one = result({ id: "g1", global: true, nodeId: "" });
+      const two = result({ id: "g2", global: true, nodeId: "" });
+      const items = waitingOnYou({ ...base, runs: [], active: [], results: [one, two, one] });
+      expect(items.map(waitingKey)).toEqual(["apply:g1", "apply:g2"]);
+      expect(items[0]).toEqual({ kind: "apply", run: one });
+    });
+  });
 });
 
 describe("waiting on you, for another project's run summaries", () => {

@@ -468,6 +468,12 @@
   margin-top: auto;
   padding-top: 4px;
 }
+/* A result waiting on the person (single-user edition): its plain buttons
+   at the bottom of the tile, like the other tiles' actions. */
+.station-waiting-item.is-apply .result-actions {
+  margin-top: auto;
+  padding-top: 4px;
+}
 /* Something waits: the card says so before its rows are read. */
 .station-waiting.is-attention {
   border-color: var(--st-ready-fg);

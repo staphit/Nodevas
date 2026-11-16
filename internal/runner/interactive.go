@@ -126,7 +126,10 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	if !ok {
 		return fail("agent %q cannot run interactively on this runner", job.Agent)
 	}
-	bin, err := j.c.Commands.LookPath(adapter.Binary(job.Agent))
+	bin, err := agentBinary(j.c.Commands, j.runCfg(r), job.Agent)
+	if err == errAgentPathGone {
+		return fail("%s", agentPathGoneError(job.Agent))
+	}
 	if err != nil {
 		return fail("%s is no longer on PATH", adapter.Binary(job.Agent))
 	}

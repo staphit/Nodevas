@@ -88,6 +88,10 @@ export interface LocalSettings {
   prDraft: boolean;
   /** Where the runner keeps these settings (shown under Advanced). */
   configPath: string;
+  /** Agent kind → the program file the person added for it by hand
+   * (the path as picked; the runner checks where it points at every use),
+   * used before the one on PATH. Sent to the owner only. */
+  agentPaths?: Record<string, string> | null;
 }
 
 export interface Runner {
@@ -172,8 +176,36 @@ export interface RunnerSettingsRequest {
   shellWithoutAsking?: Record<string, boolean>;
   autoPR?: boolean;
   prDraft?: boolean;
+  /** Ask in the app each time an agent that may only edit files wants to run
+   * a command (RunnerInfo.permissionRelay). */
+  permissionRelay?: boolean;
+  /** Agent kind → the program file to use for it; at most one entry, and ""
+   * stops using the one added. The runner checks the file and asks it for
+   * its version before it keeps it; a refusal says why in
+   * RunnerRequestError.refused (an AgentPathRefusal). */
+  agentPath?: Record<string, string>;
   /** Look for installed agent CLIs again. */
   redetect?: boolean;
+}
+
+/** Why the runner would not use a program file (runnerwire
+ * AgentPathRefused*): not named like the agent's program, kept in a folder
+ * agents work in, not something this computer can start, gone, no answer to
+ * --version, or anything else. */
+export type AgentPathRefusal = "name" | "place" | "not_program" | "missing" | "no_answer" | "invalid";
+export const AGENT_PATH_REFUSALS: readonly AgentPathRefusal[] = [
+  "name",
+  "place",
+  "not_program",
+  "missing",
+  "no_answer",
+  "invalid",
+];
+
+/** Whether a settings change sets a program file: the hub then looks for the
+ * agents again whatever `redetect` says, so the app waits as long for it. */
+function setsAgentPath(body: RunnerSettingsRequest): boolean {
+  return Object.values(body.agentPath ?? {}).some((path) => path !== "");
 }
 
 /** Mirrors runnerwire.InitPlan: what "make it a Git project" would save. */
@@ -280,7 +312,7 @@ export const runnersApi = {
     call<RunnerSettingsResponse>(
       `${runnerPath(id)}/settings`,
       { method: "PUT", body: JSON.stringify(body) },
-      body.redetect ? REDETECT_WAIT_MS : 0,
+      body.redetect || setsAgentPath(body) ? REDETECT_WAIT_MS : 0,
     ),
   /** What the built-in runner makes of a folder on this computer. */
   inspectRepo: (id: string, path: string): Promise<RepoInspect> =>

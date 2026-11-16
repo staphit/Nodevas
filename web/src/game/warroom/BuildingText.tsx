@@ -6,18 +6,21 @@
 import { useMemo } from "react";
 
 import { formatList, useI18n } from "../../i18n";
+import { useSimpleMode } from "../../simple/simpleMode";
 import { actorLabel, agentWho, areaName, compactLabel, itemLabel, placeOf, rackLabel } from "../labels";
 import type { Actor, Area, Building } from "../world";
 import { drawnInLounge, visitorLabel } from "./Lounge";
 
 export function BuildingText({ building }: { building: Building }) {
   const { t } = useI18n();
+  // Simple: the built-in runner is this computer.
+  const simple = useSimpleMode();
   const actorsById = useMemo(() => new Map(building.actors.map((actor) => [actor.id, actor])), [building.actors]);
   const office = building.current;
   const global = building.global;
   if (!office && !global) return null;
   const actors = (ids: string[]) => ids.map((id) => actorsById.get(id)).filter((actor): actor is Actor => Boolean(actor));
-  const say = (actor: Actor) => <li key={actor.id}>{actorLabel(t, actor, placeOf(t, actor))}</li>;
+  const say = (actor: Actor) => <li key={actor.id}>{actorLabel(t, actor, placeOf(t, actor, simple))}</li>;
   // The runners' free slots, as the office's header says: the drawing pads
   // the floor to two desks, which are not free slots.
   const free = office?.freeDesks ?? 0;
@@ -96,9 +99,9 @@ export function BuildingText({ building }: { building: Building }) {
       <h3>{t("game.area.serverRoom")}</h3>
       <ul>
         {building.racks.map((rack) => (
-          <li key={rack.runnerId}>{rackLabel(t, rack)}</li>
+          <li key={rack.runnerId}>{rackLabel(t, rack, simple)}</li>
         ))}
-        {building.racks.length === 0 && <li>{t("game.serverRoom.none")}</li>}
+        {building.racks.length === 0 && <li>{t(simple ? "simple.rack.none" : "game.serverRoom.none")}</li>}
       </ul>
     </div>
   );

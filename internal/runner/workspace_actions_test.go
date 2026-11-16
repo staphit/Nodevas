@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -333,6 +334,57 @@ func TestDiscardRemovesWorktreeBranchAndKept(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "keep.txt")); err != nil {
 		t.Fatalf("removing the worktree went through the link: %v", err)
+	}
+}
+
+// Applying a run's result ends its preview at once: the token is dropped,
+// not merely left to find its folder gone.
+func TestMergeRevokesPreview(t *testing.T) {
+	env := newWSEnv(t, nil)
+	env.asBuiltIn(t)
+	writeFile(t, env.wt.Path, "index.html", []byte("page"))
+	gitT(t, env.wt.Path, "add", "-A")
+	gitT(t, env.wt.Path, "commit", "-q", "-m", "a page")
+	env.tip = gitT(t, env.wt.Path, "rev-parse", "HEAD")
+	p := env.preview(t)
+	srv := env.j.c.preview.peek()
+	if srv == nil || !srv.live(p.Token) {
+		t.Fatal("no live preview to revoke")
+	}
+	// A refused merge keeps it.
+	refused := env.mergeJob("w-0")
+	refused.HeadSHA = strings.Repeat("0", 40)
+	if out := env.act(t, refused); out.Code == "" {
+		t.Fatalf("a stale head merged: %+v", out)
+	}
+	if !srv.live(p.Token) {
+		t.Fatal("a refused merge revoked the preview")
+	}
+	if out := env.act(t, env.mergeJob("w-1")); out.Code != "" {
+		t.Fatalf("merge = %+v", out)
+	}
+	if srv.live(p.Token) {
+		t.Fatal("the preview outlived the merge")
+	}
+}
+
+func TestDiscardRevokesPreview(t *testing.T) {
+	env := newWSEnv(t, nil)
+	env.asBuiltIn(t)
+	writeFile(t, env.wt.Path, "index.html", []byte("page"))
+	p := env.preview(t)
+	srv := env.j.c.preview.peek()
+	if srv == nil || !srv.live(p.Token) {
+		t.Fatal("no live preview to revoke")
+	}
+	if out := env.act(t, env.discardJob("d-1")); out.Code != "" {
+		t.Fatalf("discard = %+v", out)
+	}
+	if srv.live(p.Token) {
+		t.Fatal("the preview outlived the discard")
+	}
+	if code, _ := previewGet(t, p, p.Entry); code != http.StatusNotFound {
+		t.Fatalf("GET after the discard = %d", code)
 	}
 }
 

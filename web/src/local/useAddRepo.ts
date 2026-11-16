@@ -38,15 +38,30 @@ export function refusalText(t: Translate, refused: string | undefined): string {
   return t(`repoAdd.refused.${REFUSALS.has(refused ?? "") ? refused : "unreadable"}`);
 }
 
+/** The refusals that name Git, Git projects or repos, said for someone who
+ * does not write code (AddRepoDialog's `plain`): a folder for the agent, and
+ * a history. */
+const PLAIN_ERRORS: Record<string, string> = {
+  git_missing: "local.firstFolder.gitNeeded",
+  too_big: "local.pickFolder.tooBig",
+  not_repo: "local.pickFolder.error.not_repo",
+  too_many: "local.pickFolder.error.too_many",
+  refused: "local.pickFolder.error.refused",
+  git_failed: "local.pickFolder.error.git_failed",
+};
+
 /** A refused repo change, in plain words. `count` is the plan's file count
- * for too_big; `machine` names a team runner for add_on_runner. */
+ * for too_big; `machine` names a team runner for add_on_runner; `plain`
+ * leaves out Git and repos (PLAIN_ERRORS). */
 export function repoErrorText(
   t: Translate,
   error: unknown,
-  context: { name?: string; count?: number; machine?: string } = {},
+  context: { name?: string; count?: number; machine?: string; plain?: boolean } = {},
 ): string {
   if (error instanceof GlobalRunError) {
     if (error.blocked === "add_on_runner") return t("repoAdd.onRunner", { machine: context.machine ?? "" });
+    const plainKey = context.plain ? PLAIN_ERRORS[error.code.toLowerCase()] : undefined;
+    if (plainKey) return t(plainKey, { count: context.count ?? 0, message: error.message });
     switch (error.code.toLowerCase()) {
       case "git_missing":
         return t("repoAdd.gitMissing");
@@ -104,7 +119,12 @@ export interface AddRepoState {
   adding: boolean;
 }
 
-export function useAddRepo(runnerId: string, onAdded: (repo: RunnerRepo, runner: Runner | undefined) => void) {
+export function useAddRepo(
+  runnerId: string,
+  onAdded: (repo: RunnerRepo, runner: Runner | undefined) => void,
+  /** Refusals in plain words (repoErrorText's `plain`). */
+  plain = false,
+) {
   const t: Translate = useCallback((key, values) => translate(key, undefined, values), []);
   const [state, setState] = useState<AddRepoState>({
     listing: null,
@@ -155,7 +175,7 @@ export function useAddRepo(runnerId: string, onAdded: (repo: RunnerRepo, runner:
       if (mine !== turn.current) return;
       patch({
         checking: false,
-        error: repoErrorText(t, error, { name: folderName(path) }),
+        error: repoErrorText(t, error, { name: folderName(path), plain }),
         errorCode: error instanceof GlobalRunError ? error.code.toLowerCase() : "",
       });
     }
@@ -178,7 +198,7 @@ export function useAddRepo(runnerId: string, onAdded: (repo: RunnerRepo, runner:
       const code = error instanceof GlobalRunError ? error.code.toLowerCase() : "";
       patch({
         adding: false,
-        error: repoErrorText(t, error, { name: inspectName(inspect), count: inspect.init?.files }),
+        error: repoErrorText(t, error, { name: inspectName(inspect), count: inspect.init?.files, plain }),
         errorCode: code,
         // The folder changed under the plan: the person checks it again.
         ...(code === "plan_changed" ? { inspect: null, confirmInit: false } : {}),

@@ -9,19 +9,21 @@ import { useAutopilot } from "../autopilot/autopilotStore";
 import { setProjectMode } from "./projectMode";
 import { useI18n } from "../i18n";
 import { IconCanvas, IconSpark } from "../icons";
+import { useLocalRunner } from "../runners/edition";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { useApp, usePreference } from "../store";
 import { useStation } from "./stationStore";
+import { useResultCandidates } from "./useWaitingItems";
 import { waitingOnYou } from "./waiting";
 
 /**
  * Everything waiting on the viewer: Station's badge. The same list Station's
  * "Waiting on you" card shows (waiting.ts), counted from the same stores:
  * the questions and held messages they may answer, autopilot reviews, PRs to
- * merge or fix, offers no runner took yet, usage limits and an exceeded daily
- * budget. Station's recent runs count only once Station has loaded them for
- * the project on screen.
+ * merge or fix, results to apply (single-user edition), offers no runner
+ * took yet, usage limits and an exceeded daily budget. Station's recent runs
+ * count only once Station has loaded them for the project on screen.
  */
 export function useWaitingCount(): number {
   const asks = useAgents((s) => s.asks);
@@ -33,10 +35,16 @@ export function useWaitingCount(): number {
   const runsProject = useStation((s) => s.project);
   const activeProject = useApp((s) => s.activeProject);
   const exceeded = useBudget((s) => s.status?.exceeded);
+  const builtInRunnerId = useLocalRunner()?.id;
+  const projectRuns = useMemo(
+    () => (runsProject === activeProject ? runs : []),
+    [runs, runsProject, activeProject],
+  );
+  const results = useResultCandidates(projectRuns);
   return useMemo(
     () =>
       waitingOnYou({
-        runs: runsProject === activeProject ? runs : [],
+        runs: projectRuns,
         active,
         asks,
         held,
@@ -44,8 +52,10 @@ export function useWaitingCount(): number {
         budgetExceeded: exceeded,
         canAnswer: (ask) => canAnswerAsk(ask, viewer),
         now: Date.now(),
+        builtInRunnerId,
+        results,
       }).length,
-    [runs, runsProject, activeProject, active, asks, held, reviews, exceeded, viewer],
+    [projectRuns, active, asks, held, reviews, exceeded, viewer, builtInRunnerId, results],
   );
 }
 

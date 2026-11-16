@@ -30,7 +30,8 @@ import { RunWorkspaceHost } from "./runs/RunWorkspaceHost";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
-import { StartScreen } from "./components/StartScreen";
+import { FirstRun } from "./firstRun/FirstRun";
+import { useSimpleModeSync } from "./simple/useSimpleModeSync";
 import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
 import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
@@ -100,6 +101,8 @@ function MainApp() {
   const projectMode = usePreference("projectMode");
   // Agents seen in this workspace turn the workstation on.
   useWorkstationAutoEnable();
+  // Simple holds this computer's pull requests off (single-user edition).
+  useSimpleModeSync();
   const [degradedDocuments, dispatchDocumentPersistence] = useReducer(
     degradedDocumentsReducer,
     new Set<string>(),
@@ -564,8 +567,9 @@ function MainApp() {
       <ViewErrorBoundary compact resetKey={activeProject}>
         <CommandPalette />
       </ViewErrorBoundary>
+      {/* The first-run questions, then the start screen they lead to. */}
       <ViewErrorBoundary compact resetKey={activeProject}>
-        <StartScreen />
+        <FirstRun />
       </ViewErrorBoundary>
       <ViewErrorBoundary compact resetKey={activeProject}>
         <OnboardingTour />

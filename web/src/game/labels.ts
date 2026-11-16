@@ -6,7 +6,7 @@
 import { askQuestionText } from "../agents/AskCard";
 import { excerpt } from "../agents/agentStore";
 import { formatList } from "../i18n";
-import { runnerDisplayName } from "../runners/runnerName";
+import { LOCAL_RUNNER_NAME, plainRunnerName, runnerDisplayName } from "../runners/runnerName";
 import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -41,8 +41,8 @@ export function agentColorKey(agent: string): string {
 
 /** Where a character works, for its sentence: its runner, or "Terminals"
  * for an agent someone runs in their own terminal. */
-export function placeOf(t: Translate, actor: Pick<Actor, "runnerName">): string {
-  return runnerDisplayName(t, actor.runnerName) || t("game.room.terminal");
+export function placeOf(t: Translate, actor: Pick<Actor, "runnerName">, simple = false): string {
+  return plainRunnerName(t, actor.runnerName, simple, true) || t("game.room.terminal");
 }
 
 export function areaName(t: Translate, area: Area): string {
@@ -77,13 +77,31 @@ export function compactLabel(t: Translate, c: Pick<CompactOffice, "counts" | "la
   return t("game.compact.label", { name: c.label, summary: compactSummary(t, c), style: styleName(t, c.style) });
 }
 
-export function rackLabel(t: Translate, rack: Rack): string {
+/** A rack's name under its drawing: in Simple, the hub's own runner is
+ * "This computer". */
+export function rackName(t: Translate, rack: Pick<Rack, "name">, simple = false): string {
+  return plainRunnerName(t, rack.name, simple) || t("game.room.unnamed");
+}
+
+/** What a rack says, ending in what pressing it does. In Simple (the
+ * built-in runner) it is this computer, whose settings it opens. */
+export function rackLabel(t: Translate, rack: Rack, simple = false): string {
   const state =
     rack.online === null ? t("game.rack.unknown") : rack.online ? t("game.room.online") : t("game.room.offline");
+  if (simple && rack.name === LOCAL_RUNNER_NAME) {
+    return rack.slots
+      ? t("simple.rack.label", { state, busy: rack.busy, slots: rack.slots })
+      : t("simple.rack.labelNoSlots", { state, busy: rack.busy });
+  }
   const name = runnerDisplayName(t, rack.name) || t("game.room.unnamed");
   return rack.slots
     ? t("game.rack.label", { name, state, busy: rack.busy, slots: rack.slots })
     : t("game.rack.labelNoSlots", { name, state, busy: rack.busy });
+}
+
+/** "Manage runners", or in Simple this computer's settings. */
+export function runnersActionLabel(t: Translate, simple = false): string {
+  return t(simple ? "simple.rack.manage" : "game.action.runners");
 }
 
 export function itemLabel(t: Translate, item: Pick<MeetingItem, "kind" | "title">): string {

@@ -7,6 +7,7 @@ import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
 import { useEdition } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
 import { openSettings } from "../settings/openSettings";
+import { useSimpleMode } from "../simple/simpleMode";
 import { relativeTime } from "../runners/RunnersModal";
 import {
   formatCompact,
@@ -165,10 +166,11 @@ const WORKSPACE_STATES = new Set(["merged_local", "discarded"]);
  * worktree and branch. Nothing while they are as the run left them. */
 export function WorkspaceChip({ workspace }: { workspace?: string }) {
   const { t } = useI18n();
+  // Simple: applied to the person's folder, not "merged locally".
+  const simple = useSimpleMode();
   if (!workspace || !WORKSPACE_STATES.has(workspace)) return null;
-  return (
-    <span className={`run-workspace-chip is-${workspace}`}>{t(`runWorkspace.state.${workspace}`)}</span>
-  );
+  const key = simple && workspace === "merged_local" ? "simple.workspace.merged_local" : `runWorkspace.state.${workspace}`;
+  return <span className={`run-workspace-chip is-${workspace}`}>{t(key)}</span>;
 }
 
 /** The W5 line under a run: its job kind, a review's verdict, why it failed

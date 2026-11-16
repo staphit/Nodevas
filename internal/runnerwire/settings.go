@@ -25,8 +25,20 @@ const (
 	// SettingsErrLocalOnly: a classic runner refuses any field but
 	// MaxConcurrent; a team member changes their PC's settings on that PC.
 	SettingsErrLocalOnly = "local_only"
-	// SettingsErrInvalid: an unknown agent kind or permission level.
+	// SettingsErrInvalid: an unknown agent kind or permission level, or an
+	// agent path the runner refused (SettingsDone.Refused says why).
 	SettingsErrInvalid = "invalid"
+
+	// SettingsDone.Refused values: why an agent path (AgentPath) was not
+	// taken. The web shows a plain sentence for each.
+	AgentPathRefusedName       = "name"        // the file is not named like the agent's program
+	AgentPathRefusedPlace      = "place"       // inside a registered folder, the runner's data or the temp dir
+	AgentPathRefusedNotProgram = "not_program" // not a regular executable file
+	AgentPathRefusedMissing    = "missing"     // no such file
+	AgentPathRefusedNoAnswer   = "no_answer"   // `--version` did not answer
+	AgentPathRefusedInvalid    = "invalid"     // not an absolute path, too long, or a NUL
+	// MaxAgentPathBytes caps one agent path.
+	MaxAgentPathBytes = 1024
 
 	// Permission levels (SettingsRequest.Permission, LocalSettings.Permission):
 	// what an agent may do without asking, mapped to each CLI's own mode on
@@ -67,6 +79,13 @@ type SettingsRequest struct {
 	ShellWithoutAsking map[string]bool `json:"shellWithoutAsking,omitempty"`
 	AutoPR             *bool           `json:"autoPR,omitempty"`
 	PRDraft            *bool           `json:"prDraft,omitempty"`
+	// AgentPath sets agent kind → the absolute path of the program to run
+	// for it, at most one entry; "" goes back to finding it on PATH. The
+	// runner checks the file and asks it for --version before it keeps it.
+	AgentPath map[string]string `json:"agentPath,omitempty"`
+	// PermissionRelay turns "ask me each time an agent wants to run a
+	// command" on or off (runner setting permissionRelay).
+	PermissionRelay *bool `json:"permissionRelay,omitempty"`
 	// Redetect looks for the agent CLIs again (a new hello follows).
 	Redetect bool `json:"redetect,omitempty"`
 }
@@ -86,6 +105,10 @@ type LocalSettings struct {
 	PRDraft            bool     `json:"prDraft"`
 	// ConfigPath is the runner's settings file, for 進階.
 	ConfigPath string `json:"configPath"`
+	// AgentPaths is agent kind → the program the owner added for it, the
+	// path as picked (cleaned; a link is checked again where it points at
+	// every use). Only here, for the owner; never in Info.Agents.
+	AgentPaths map[string]string `json:"agentPaths,omitempty"`
 }
 
 // SettingsDone is Envelope.SettingsDone.
@@ -94,6 +117,9 @@ type SettingsDone struct {
 	Code string `json:"code,omitempty"`
 	// Error is English, at most MaxSettingsError.
 	Error string `json:"error,omitempty"`
+	// Refused is why an agent path was not taken (AgentPathRefused*), with
+	// Code SettingsErrInvalid.
+	Refused string `json:"refused,omitempty"`
 	// MaxConcurrent is the limit in effect now.
 	MaxConcurrent int `json:"maxConcurrent"`
 	// Persisted: written to the runner's config file, so it outlives a
@@ -111,6 +137,8 @@ type RunnerSettingsBody struct {
 	ShellWithoutAsking map[string]bool   `json:"shellWithoutAsking,omitempty"`
 	AutoPR             *bool             `json:"autoPR,omitempty"`
 	PRDraft            *bool             `json:"prDraft,omitempty"`
+	AgentPath          map[string]string `json:"agentPath,omitempty"`
+	PermissionRelay    *bool             `json:"permissionRelay,omitempty"`
 	Redetect           bool              `json:"redetect,omitempty"`
 }
 

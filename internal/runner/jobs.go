@@ -693,7 +693,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	if note != "" {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: note})
 	}
-	bin, err := j.c.Commands.LookPath(adapter.Binary(job.Agent))
+	bin, err := agentBinary(j.c.Commands, j.runCfg(r), job.Agent)
+	if errors.Is(err, errAgentPathGone) {
+		return fail(runnerwire.FailureAgentAbsent, "%s", agentPathGoneError(job.Agent))
+	}
 	if err != nil {
 		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", adapter.Binary(job.Agent))
 	}

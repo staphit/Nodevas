@@ -39,6 +39,7 @@ import { AddRepoButton, defaultModel, installedAgents, ownRunners, validBranchNa
 import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "../runs/RunModePicker";
 import { openSettings } from "../settings/openSettings";
 import { StepUpDialog } from "../stepup/StepUpDialog";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useStepUp } from "../stepup/stepUpStore";
 import { useGlobalAgents } from "./globalAgentsStore";
 
@@ -151,6 +152,9 @@ export function GlobalAgentForm({
   const loads = useGlobalAgents((s) => s.runners);
 
   const single = useEdition() === "single";
+  // Simple mode: finished work stays on this computer (no pull request to
+  // ask for), and the hub adds its plain-words instruction.
+  const simple = useSimpleMode();
   const mine = useMemo(() => ownRunners(runners, viewer), [runners, viewer]);
   // Single-user: this computer's built-in runner, and no choice.
   const localRunner = single ? builtInRunner(mine) : undefined;
@@ -257,7 +261,8 @@ export function GlobalAgentForm({
       ...(baseValue ? { base: baseValue } : {}),
       task: taskValue,
       ...(sendSlug ? { slug: slugValue } : {}),
-      openPR,
+      openPR: simple ? false : openPR,
+      ...(simple ? { simple: true } : {}),
     };
     try {
       const run = await useGlobalAgents.getState().create(body);
@@ -527,15 +532,17 @@ export function GlobalAgentForm({
               )}
             </div>
 
-            <div className="global-agent-form-pr">
-              <label className="route-toggle">
-                <input type="checkbox" checked={openPR} onChange={(event) => setOpenPR(event.target.checked)} />
-                <span>{t("globalAgents.form.openPR")}</span>
-              </label>
-              <small className="run-hint">
-                {t(localRunner ? "globalAgents.form.openPRHelpLocal" : "globalAgents.form.openPRHelp")}
-              </small>
-            </div>
+            {!simple && (
+              <div className="global-agent-form-pr">
+                <label className="route-toggle">
+                  <input type="checkbox" checked={openPR} onChange={(event) => setOpenPR(event.target.checked)} />
+                  <span>{t("globalAgents.form.openPR")}</span>
+                </label>
+                <small className="run-hint">
+                  {t(localRunner ? "globalAgents.form.openPRHelpLocal" : "globalAgents.form.openPRHelp")}
+                </small>
+              </div>
+            )}
 
             <p className="run-hint global-agent-form-noboard">{t("globalAgents.form.noBoard")}</p>
 

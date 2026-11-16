@@ -9,6 +9,7 @@
 import { memo, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { useI18n } from "../../i18n";
+import { useSimpleMode } from "../../simple/simpleMode";
 import type { ControlRow } from "../../station/control";
 import { StationMenu } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
@@ -128,6 +129,7 @@ export function OfficeRoom({
   rowOf: (runId: string) => ControlRow | undefined;
 }) {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const layout = useMemo(() => layoutOffice(office, actorsById), [office, actorsById]);
   const meetingOf = useMemo(() => {
     const byActor = new Map<string, Meeting>();
@@ -145,7 +147,7 @@ export function OfficeRoom({
     const meeting = meetingOf.get(actor.id);
     return {
       actor,
-      label: actorLabel(t, actor, placeOf(t, actor)),
+      label: actorLabel(t, actor, placeOf(t, actor, simple)),
       detail: meeting ? meetingLabel(t, meeting) || undefined : undefined,
       row: actor.runId ? rowOf(actor.runId) : undefined,
       titleOf,

@@ -7,6 +7,7 @@ import { useEffect, useId, useState } from "react";
 import { useI18n } from "../i18n";
 import { useLocalRunner, useLocalState } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
+import { useSimpleMode } from "../simple/simpleMode";
 import { localSummary, ThisComputerPanel } from "./ThisComputerPanel";
 
 export function ThisComputerCard() {
@@ -15,6 +16,7 @@ export function ThisComputerCard() {
   const starting = useLocalState() === "starting";
   const loaded = useRunners((s) => s.loaded);
   const [open, setOpen] = useState(false);
+  const simple = useSimpleMode();
   const titleId = useId();
   const bodyId = useId();
 
@@ -27,7 +29,7 @@ export function ThisComputerCard() {
     ? t("common.loading")
     : starting
       ? t("local.statusStarting")
-      : localSummary(t, runner);
+      : localSummary(t, runner, simple);
 
   return (
     <section className="station-panel this-computer-card" aria-labelledby={titleId}>

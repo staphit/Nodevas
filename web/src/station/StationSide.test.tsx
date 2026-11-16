@@ -102,6 +102,44 @@ describe("StationSide", () => {
     expect(within(roster).getByText("Work area · mac-mini")).toBeInTheDocument();
   });
 
+  // Simple: no token counts, and the built-in runner is this computer.
+  it("leaves token counts out of the roster in Simple and says this computer", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    const here = {
+      building: {
+        actors: [
+          {
+            ...(world.building.actors[0] as object),
+            runnerName: "this machine",
+            energy: { used: 12000, cap: 0 },
+          },
+        ],
+      },
+    } as unknown as World;
+    render(
+      <EditionProvider edition="single">
+        <StationSide world={here} />
+      </EditionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1 working · 1 in all/ }));
+    const roster = screen.getByRole("list", { name: "Agents" });
+    expect(roster.textContent).not.toMatch(/tokens|this machine/);
+    expect(within(roster).getByText("Work area · This computer")).toBeInTheDocument();
+  });
+
+  it("keeps token counts in the roster in full mode", () => {
+    const here = {
+      building: { actors: [{ ...(world.building.actors[0] as object), energy: { used: 12000, cap: 0 } }] },
+    } as unknown as World;
+    render(
+      <EditionProvider edition="single">
+        <StationSide world={here} />
+      </EditionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1 working · 1 in all/ }));
+    expect(screen.getByRole("list", { name: "Agents" }).textContent).toMatch(/tokens/);
+  });
+
   it("counts a global agent in the roster, and opens its workspace (it has no node)", () => {
     const openWorkspace = vi.fn();
     useWorkspace.setState({ openWorkspace });

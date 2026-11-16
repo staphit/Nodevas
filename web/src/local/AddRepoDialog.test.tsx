@@ -232,6 +232,87 @@ describe("AddRepoDialog", () => {
   });
 });
 
+describe("AddRepoDialog plain", () => {
+  function openPlain() {
+    const onAdded = vi.fn();
+    render(<AddRepoDialog runnerId="local1" plain onClose={vi.fn()} onAdded={onAdded} />);
+    return { onAdded };
+  }
+
+  it("speaks of a folder for the agent, with no command line", async () => {
+    openPlain();
+    const dialog = screen.getByRole("dialog", { name: "Choose a folder for the agent" });
+    expect(dialog).toHaveTextContent("The agent works in a copy of it, never in your files directly.");
+    await screen.findByRole("button", { name: /code/ });
+    expect(screen.queryByText("Advanced: add from the command line")).not.toBeInTheDocument();
+    expect(dialog.querySelector("details")).toBeNull();
+  });
+
+  it("still asks before it starts a history in a folder that has none", async () => {
+    vi.spyOn(api, "inspectRepo").mockResolvedValue(
+      inspected({
+        state: "not_repo",
+        repo: code,
+        init: { files: 12, bytes: 100, ignored: [], writesGitignore: false, tooBig: false, hash: "h1" },
+      }),
+    );
+    const add = vi.spyOn(api, "addRepo").mockResolvedValue({ repo: code, runner: localRunner() });
+    const { onAdded } = openPlain();
+    await pickBig();
+    expect(
+      await screen.findByText(
+        "Nodevas doesn't keep a history of this folder yet. It needs one to show you what the agent changed.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Git/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start keeping a history" }));
+    expect(
+      screen.getByText("This saves the 12 files in it as the starting point. Your files stay as they are."),
+    ).toBeInTheDocument();
+    expect(add).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start and use this folder" }));
+    await waitFor(() => expect(add).toHaveBeenCalledWith("local1", "D:\\code\\big", "h1"));
+    expect(onAdded).toHaveBeenCalledWith(code, localRunner());
+  });
+
+  const DEV_WORDS = /\bgit\b|git project|git tool|\brepos?\b/i;
+
+  it("says a folder inside another history without Git words", async () => {
+    vi.spyOn(api, "inspectRepo").mockResolvedValue(
+      inspected({ state: "inside_repo", path: "D:\\code\\big\\web", top: "D:\\code\\big" }),
+    );
+    openPlain();
+    await pickBig();
+    const dialog = screen.getByRole("dialog");
+    await within(dialog).findByText(/D:\\code\\big/, { selector: ".repo-add-result" });
+    expect(dialog.querySelector(".repo-add-result")?.textContent).not.toMatch(DEV_WORDS);
+  });
+
+  it("says a folder too big for a history, pointing to a smaller or a new one", async () => {
+    vi.spyOn(api, "inspectRepo").mockResolvedValue(
+      inspected({
+        state: "not_repo",
+        init: { files: 25000, bytes: 0, ignored: [], writesGitignore: false, tooBig: true, hash: "" },
+      }),
+    );
+    openPlain();
+    await pickBig();
+    const said = await screen.findByText(t("local.pickFolder.tooBig", { count: 25000 }));
+    expect(said.textContent).not.toMatch(DEV_WORDS);
+    expect(said.textContent).toMatch(/smaller folder|new one/);
+  });
+
+  it.each(["not_repo", "too_many", "refused", "git_failed"])("says a refused add (%s) without Git words", async (code) => {
+    vi.spyOn(api, "inspectRepo").mockRejectedValue(new GlobalRunError(409, code, "", "", 0, "git says no"));
+    openPlain();
+    await pickBig();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent?.replace("git says no", "")).not.toMatch(DEV_WORDS);
+  });
+});
+
 describe("useAddRepo helpers", () => {
   it("names folders and repos by their last part", () => {
     expect(folderName("D:\\code\\big\\")).toBe("big");

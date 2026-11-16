@@ -1,17 +1,21 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"nodevas/internal/audit"
+	"nodevas/internal/auth"
 	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -495,6 +499,308 @@ func TestRunWorkspaceBrowse(t *testing.T) {
 	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &runnerwire.RepoDone{ID: env.Repo.ID,
 		Listing: &runnerwire.RepoListing{Entries: []runnerwire.RepoEntry{}}}})
 	<-done
+}
+
+// previewHello is the built-in runner's hello once it offers previews.
+func previewHello() runnerwire.Envelope {
+	env := globalRunsHello()
+	env.Hello.Capabilities = append(env.Hello.Capabilities, runnerwire.CapRunPreview)
+	return env
+}
+
+const previewToken = "0123456789abcdef0123456789abcdef"
+
+type previewAnswer struct {
+	Web       bool   `json:"web"`
+	URL       string `json:"url"`
+	Folder    string `json:"folder"`
+	ExpiresAt string `json:"expiresAt"`
+	Code      string `json:"code"`
+	Blocked   string `json:"blocked"`
+}
+
+// previewPost is POST …/workspace/preview from a browser at host.
+func (f *runsFixture) previewPost(t *testing.T, b *browser, path, host string, header map[string]string) (*httptest.ResponseRecorder, previewAnswer) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+	request.Host = host
+	request.Header.Set("Content-Type", "application/json")
+	if b != nil {
+		withCookies(request, b.cookies)
+		request.Header.Set(auth.CSRFHeaderName, b.csrf)
+	}
+	for key, value := range header {
+		request.Header.Set(key, value)
+	}
+	response := httptest.NewRecorder()
+	f.handler.ServeHTTP(response, request)
+	var answer previewAnswer
+	_ = json.Unmarshal(response.Body.Bytes(), &answer)
+	return response, answer
+}
+
+// previewAsync sends previewPost and answers the run_preview the runner gets
+// with done (its ID filled in).
+func (f *runsFixture) previewAnswered(t *testing.T, conn *websocket.Conn, path, host string, done runnerwire.RepoDone) (*httptest.ResponseRecorder, previewAnswer) {
+	t.Helper()
+	type result struct {
+		response *httptest.ResponseRecorder
+		answer   previewAnswer
+	}
+	out := make(chan result, 1)
+	go func() {
+		response, answer := f.previewPost(t, &f.bea, path, host, nil)
+		out <- result{response, answer}
+	}()
+	// Wait for the runner's request with the slack a loaded machine needs,
+	// and say what the hub answered if it answered without asking.
+	envs := make(chan runnerwire.Envelope, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			readErr <- err
+			return
+		}
+		var env runnerwire.Envelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			readErr <- err
+			return
+		}
+		envs <- env
+	}()
+	var env runnerwire.Envelope
+	select {
+	case env = <-envs:
+	case err := <-readErr:
+		t.Fatalf("runner read: %v", err)
+	case res := <-out:
+		t.Fatalf("the hub answered without asking the runner: %d %s", res.response.Code, res.response.Body)
+	}
+	if env.Type != runnerwire.TypeRepoRequest || env.Repo == nil || env.Repo.Op != runnerwire.RepoOpRunPreview ||
+		env.Repo.AccountID != f.runner.Runner.OwnerID || env.Repo.RepoID != "repo-1" {
+		t.Fatalf("runner got %+v", env)
+	}
+	done.ID = env.Repo.ID
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &done})
+	select {
+	case res := <-out:
+		return res.response, res.answer
+	case <-time.After(20 * time.Second):
+		t.Fatal("the preview POST never answered")
+	}
+	return nil, previewAnswer{}
+}
+
+func webPreview() runnerwire.RepoDone {
+	return runnerwire.RepoDone{Preview: &runnerwire.RunPreview{Web: true, Port: 43210, Token: previewToken, Entry: "site pages/index.html",
+		Path: `C:\data\worktrees\run`, ExpiresAt: time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)}}
+}
+
+func TestWorkspacePreviewRoute(t *testing.T) {
+	shortWorkspaceWait(t, 10*time.Second)
+	f := newRunsFixture(t)
+	conn := f.connect(t, previewHello())
+	f.server.runners.SetWelcomed(f.runner.Runner.ID, true)
+	run := f.localRun(t, conn)
+	path := "/api/runs/" + run.ID + "/workspace/preview"
+
+	// The host swap: the page never shares the app's loopback name.
+	for _, c := range [][2]string{{"127.0.0.1:8080", "localhost"}, {"localhost:8080", "127.0.0.1"}, {"[::1]:8080", "localhost"}} {
+		response, answer := f.previewAnswered(t, conn, path, c[0], webPreview())
+		want := "http://" + c[1] + ":43210/p/" + previewToken + "/site%20pages/index.html"
+		if response.Code != http.StatusOK || !answer.Web || answer.URL != want || answer.Folder != `C:\data\worktrees\run` ||
+			answer.ExpiresAt != "2026-11-17T12:00:00Z" || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("Host %s: %d %s", c[0], response.Code, response.Body)
+		}
+	}
+	// No page: the folder to open instead.
+	response, answer := f.previewAnswered(t, conn, path, "127.0.0.1:8080", runnerwire.RepoDone{Preview: &runnerwire.RunPreview{Path: `C:\data\worktrees\run`}})
+	if response.Code != http.StatusOK || answer.Web || answer.URL != "" || answer.Folder != `C:\data\worktrees\run` || answer.ExpiresAt != "" {
+		t.Fatalf("no page = %d %s", response.Code, response.Body)
+	}
+	// The runner's refusals.
+	for code, blocked := range map[string]string{runnerwire.RepoErrNoWorktree: runnerwire.RepoErrNoWorktree,
+		runnerwire.RepoErrPreviewOff: runnerwire.RepoErrPreviewOff, runnerwire.RepoErrOff: runnerwire.RepoErrPreviewOff} {
+		response, answer := f.previewAnswered(t, conn, path, "127.0.0.1:8080", runnerwire.RepoDone{Code: code, Error: "no"})
+		if response.Code != http.StatusConflict || answer.Blocked != blocked {
+			t.Fatalf("runner %s = %d %s", code, response.Code, response.Body)
+		}
+	}
+	// A runner answer the hub cannot vouch for is never handed on.
+	for _, bad := range []runnerwire.RunPreview{
+		{Web: true, Port: 43210, Token: previewToken, Entry: "../x.html"},
+		{Web: true, Port: 43210, Token: previewToken, Entry: "/etc/x.html"},
+		{Web: true, Port: 43210, Token: "short", Entry: "index.html"},
+		{Web: true, Port: 0, Token: previewToken, Entry: "index.html"},
+		{Web: true, Port: 43210, Token: previewToken, Entry: `a\b.html`},
+		{Web: true, Port: 43210, Token: previewToken, Entry: ""},
+		{Web: true, Port: 70000, Token: previewToken, Entry: "index.html"},
+	} {
+		response, _ := f.previewAnswered(t, conn, path, "127.0.0.1:8080", runnerwire.RepoDone{Preview: &bad})
+		if response.Code != http.StatusBadGateway || strings.Contains(response.Body.String(), "43210") {
+			t.Fatalf("bad answer %+v = %d %s", bad, response.Code, response.Body)
+		}
+	}
+
+	// A Host that is not this machine: off, and nothing asked of the runner.
+	response, answer = f.previewPost(t, &f.bea, path, "nodevas.example.test", nil)
+	if response.Code != http.StatusConflict || answer.Blocked != runnerwire.RepoErrPreviewOff {
+		t.Fatalf("remote Host = %d %s", response.Code, response.Body)
+	}
+	response, answer = f.previewPost(t, &f.bea, path, "127.0.0.1:8080", map[string]string{"X-Forwarded-For": "203.0.113.9"})
+	if response.Code != http.StatusConflict || answer.Blocked != runnerwire.RepoErrPreviewOff {
+		t.Fatalf("forwarded for elsewhere = %d %s", response.Code, response.Body)
+	}
+	// Someone else: the administrator is not the owner; cal cannot see it.
+	if response, answer := f.previewPost(t, &f.ann, path, "127.0.0.1:8080", nil); response.Code != http.StatusForbidden || answer.Code != "PERMISSION_DENIED" {
+		t.Fatalf("administrator = %d %s", response.Code, response.Body)
+	}
+	if response, _ := f.previewPost(t, &f.cal, path, "127.0.0.1:8080", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("cal = %d %s", response.Code, response.Body)
+	}
+	if response := f.doAsAgent(t, &f.bea, http.MethodPost, path, "{}"); response.Code != http.StatusForbidden {
+		t.Fatalf("agent = %d %s", response.Code, response.Body)
+	}
+	// A page on another origin cannot ask for it.
+	if response, _ := f.previewPost(t, &f.bea, path, "127.0.0.1:8080", map[string]string{"Origin": "http://evil.example.test"}); response.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin = %d %s", response.Code, response.Body)
+	}
+	if response, _ := f.previewPost(t, &f.bea, path, "127.0.0.1:8080", map[string]string{"Sec-Fetch-Site": "cross-site"}); response.Code != http.StatusForbidden {
+		t.Fatalf("cross-site = %d %s", response.Code, response.Body)
+	}
+	// Only a POST mints.
+	if response := f.do(t, &f.bea, http.MethodGet, path, "", nil); response.Code == http.StatusOK {
+		t.Fatalf("GET = %d %s", response.Code, response.Body)
+	}
+	if response := f.do(t, &f.bea, http.MethodGet, "/api/unknown-run-id/workspace/preview", "", nil); response.Code == http.StatusOK {
+		t.Fatalf("GET elsewhere = %d", response.Code)
+	}
+	if response, _ := f.previewPost(t, &f.bea, "/api/runs/no-such-run/workspace/preview", "127.0.0.1:8080", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown run = %d %s", response.Code, response.Body)
+	}
+
+	// Applied already.
+	pending := f.postAsync(t, &f.bea, run.ID, "merge", mergeBody(testCommit))
+	job := expectWorkspaceAction(t, conn, run.ID)
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeWorkspaceResult, RunID: run.ID, WorkspaceResult: &runnerwire.WorkspaceOutcome{
+		ID: job.ID, RunID: run.ID, Action: job.Action, MergeCommit: strings.Repeat("e", 40), WorktreeRemoved: true, BranchDeleted: true,
+	}})
+	if res := awaitPost(t, pending); res.code != http.StatusOK {
+		t.Fatalf("merge = %d %+v", res.code, res.failure)
+	}
+	if response, answer := f.previewPost(t, &f.bea, path, "127.0.0.1:8080", nil); response.Code != http.StatusConflict ||
+		answer.Blocked != runnerwire.WorkspaceGateMergedLocal {
+		t.Fatalf("merged = %d %s", response.Code, response.Body)
+	}
+	// Still running.
+	running := f.startedRun(t, conn)
+	if response, answer := f.previewPost(t, &f.bea, "/api/runs/"+running.ID+"/workspace/preview", "127.0.0.1:8080", nil); response.Code != http.StatusConflict ||
+		answer.Blocked != runnerwire.WorkspaceGateRunning {
+		t.Fatalf("running = %d %s", response.Code, response.Body)
+	}
+
+	// A team runner (not this hub's built-in one), even claiming the
+	// capability: off, and nothing sent.
+	other := f.localRun(t, conn)
+	otherPath := "/api/runs/" + other.ID + "/workspace/preview"
+	f.server.runners.SetWelcomed(f.runner.Runner.ID, false)
+	if response, answer := f.previewPost(t, &f.bea, otherPath, "127.0.0.1:8080", nil); response.Code != http.StatusConflict ||
+		answer.Blocked != runnerwire.RepoErrPreviewOff {
+		t.Fatalf("team runner = %d %s", response.Code, response.Body)
+	}
+	pingPong(t, conn)
+	// Offline.
+	f.server.runners.SetWelcomed(f.runner.Runner.ID, true)
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	f.waitOffline(t)
+	if response, answer := f.previewPost(t, &f.bea, otherPath, "127.0.0.1:8080", nil); response.Code != http.StatusConflict ||
+		answer.Blocked != runnerwire.WorkspaceGateOffline {
+		t.Fatalf("offline = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestWorkspacePreviewRouteGlobal(t *testing.T) {
+	f := newRunsFixture(t)
+	conn := f.connect(t, previewHello())
+	f.server.runners.SetWelcomed(f.runner.Runner.ID, true)
+	run, _ := f.startedGlobal(t, conn, nil)
+	path := "/api/global-runs/" + run.ID + "/workspace/preview"
+	// Still running.
+	if response, answer := f.previewPost(t, &f.bea, path, "127.0.0.1:8080", nil); response.Code != http.StatusConflict ||
+		answer.Blocked != runnerwire.WorkspaceGateRunning {
+		t.Fatalf("running = %d %s", response.Code, response.Body)
+	}
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeChanges, RunID: run.ID, Changes: testChanges()})
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: run.ID, Result: &runnerwire.RunResult{Status: runnerwire.RunSucceeded}})
+	f.waitGlobal(t, run.ID, "its commit", func(r runnerwire.Run) bool { return r.Status == runnerwire.RunSucceeded && r.Commit == testCommit })
+	pingPong(t, conn)
+	response, answer := f.previewAnswered(t, conn, path, "localhost:8080", webPreview())
+	if response.Code != http.StatusOK || !answer.Web || !strings.HasPrefix(answer.URL, "http://127.0.0.1:43210/p/"+previewToken+"/") {
+		t.Fatalf("global preview = %d %s", response.Code, response.Body)
+	}
+	// Not under the project prefix, and the other way round.
+	if response, _ := f.previewPost(t, &f.bea, "/api/runs/"+run.ID+"/workspace/preview", "127.0.0.1:8080", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("project route for a global run = %d %s", response.Code, response.Body)
+	}
+	if response, _ := f.previewPost(t, &f.ann, path, "127.0.0.1:8080", nil); response.Code == http.StatusOK {
+		t.Fatalf("administrator = %d %s", response.Code, response.Body)
+	}
+	if response := f.do(t, &f.bea, http.MethodGet, path, "", nil); response.Code == http.StatusOK {
+		t.Fatalf("GET = %d %s", response.Code, response.Body)
+	}
+}
+
+// lockedBuffer collects log output written from the server's goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// The token goes to its owner's browser and nowhere else: not the log, not
+// the audit trail.
+func TestWorkspacePreviewTokenNotLogged(t *testing.T) {
+	logs := &lockedBuffer{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	f := newRunsFixture(t)
+	conn := f.connect(t, previewHello())
+	f.server.runners.SetWelcomed(f.runner.Runner.ID, true)
+	run := f.localRun(t, conn)
+	response, answer := f.previewAnswered(t, conn, "/api/runs/"+run.ID+"/workspace/preview", "127.0.0.1:8080", webPreview())
+	if response.Code != http.StatusOK || !strings.Contains(answer.URL, previewToken) {
+		t.Fatalf("preview = %d %s", response.Code, response.Body)
+	}
+	pingPong(t, conn)
+	if !strings.Contains(logs.String(), "/workspace/preview") {
+		t.Fatalf("the request was not logged here, so this proves nothing:\n%s", logs.String())
+	}
+	if strings.Contains(logs.String(), previewToken) {
+		t.Fatalf("the token is in the log:\n%s", logs.String())
+	}
+	events, err := f.server.audit.Query(context.Background(), audit.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(events)
+	if strings.Contains(string(raw), previewToken) {
+		t.Fatal("the token is in the audit trail")
+	}
 }
 
 func TestPRMergeRefusedWhileWorkspaceBusy(t *testing.T) {

@@ -5,10 +5,11 @@ import { agentWho } from "../game/labels";
 import { IconClose, IconFork, IconTrash } from "../icons";
 import { useI18n } from "../i18n";
 import { lazyWithRetry } from "../lazyWithRetry";
-import { useEdition } from "../runners/edition";
+import { useEdition, useLocalRunner } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useApp } from "../store";
-import { confirmDiscard, confirmMergeLocal } from "./confirmWorkspace";
+import { confirmApply, confirmDiscard, confirmMergeLocal } from "./confirmWorkspace";
 import { RunDiffBody } from "./DiffViewer";
 import { MergeControl, shortSha } from "./MergeApproval";
 import { RunStatusBadge, WorkspaceChip } from "./NodeRuns";
@@ -17,6 +18,8 @@ import { declineText } from "./offerReasons";
 import { openNodeRuns } from "./openRuns";
 import { CIBadge, PRChip } from "./RunChanges";
 import { RoleBadge } from "./RunEvidence";
+import { ResultActions } from "./ResultActions";
+import { resultState } from "./resultState";
 import { safeExternalUrl } from "./runFormat";
 import { RunTimeline } from "./RunTimeline";
 import { selectRunById, useRuns } from "./runStore";
@@ -93,6 +96,7 @@ function ActionStatus({ run }: { run: Run }) {
  * first. A run with an open PR merges through it instead. */
 function WorkspaceActions({ run, view }: { run: Run; view: RunWorkspaceView }) {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const acting = useWorkspace((s) => s.acting[run.id]);
   const refusal = useWorkspace((s) => s.actionErrors[run.id]);
   const mergeLocal = useWorkspace((s) => s.mergeLocal);
@@ -111,7 +115,9 @@ function WorkspaceActions({ run, view }: { run: Run; view: RunWorkspaceView }) {
     view.discard.allowed || (Boolean(view.discard.blocked) && !FINAL_GATES.has(view.discard.blocked));
 
   const onMerge = async () => {
-    if (await confirmMergeLocal(t, run, view.info)) await mergeLocal(run);
+    // Simple: the same merge, asked in the result buttons' words.
+    const ok = simple ? await confirmApply(t, run.repoName) : await confirmMergeLocal(t, run, view.info);
+    if (ok) await mergeLocal(run);
   };
   const onDiscard = async () => {
     if (await confirmDiscard(t, run, view.info)) await discard(run);
@@ -128,7 +134,7 @@ function WorkspaceActions({ run, view }: { run: Run; view: RunWorkspaceView }) {
           onClick={() => void onMerge()}
         >
           <IconFork size={13} />
-          <span>{t("runWorkspace.merge.local", values)}</span>
+          <span>{simple ? t("result.apply") : t("runWorkspace.merge.local", values)}</span>
         </button>
       )}
       {showDiscard && (
@@ -178,7 +184,8 @@ function TabPanel({
  * and base), how the run and its PR stand, and its worktree's files, its
  * changes against the base and its terminal or log. The runner's owner can
  * merge the branch (through the PR, or locally when there is none) or
- * discard the work.
+ * discard the work. In Simple mode a result on this computer offers the
+ * plain "Take a look" and "Apply to my folder" instead.
  */
 export function RunWorkspaceDialog({
   runId,
@@ -191,6 +198,8 @@ export function RunWorkspaceDialog({
 }) {
   const { t } = useI18n();
   const single = useEdition() === "single";
+  const simple = useSimpleMode();
+  const localRunnerId = useLocalRunner()?.id;
   const run = useRuns((s) => selectRunById(s, runId));
   const view = useWorkspace((s) => s.views[runId]);
   const viewError = useWorkspace((s) => s.viewErrors[runId]);
@@ -256,7 +265,7 @@ export function RunWorkspaceDialog({
       : name === "changes"
         ? t("runWorkspace.tab.changes")
         : interactive
-          ? t("runWorkspace.tab.terminal")
+          ? t(simple ? "simple.tab.terminal" : "runWorkspace.tab.terminal")
           : t("runWorkspace.tab.log");
   const tabId = (name: WorkspaceTab) => `run-ws-${runId}-tab-${name}`;
   const panelId = (name: WorkspaceTab) => `run-ws-${runId}-panel-${name}`;
@@ -270,8 +279,12 @@ export function RunWorkspaceDialog({
     body = <p className="run-ws-note">{missing ? t("runWorkspace.runGone") : t("common.loading")}</p>;
   } else {
     const runner = runnerDisplayName(t, run.runnerName) || run.runnerId;
-    const info = infoLine(t, run, view);
+    // Simple: who worked where in plain words; the worktree, the base's
+    // checkout and the branch are a developer's facts.
+    const info = simple ? [] : infoLine(t, run, view);
     const pr = Boolean(safeExternalUrl(run.prUrl));
+    // Simple mode: the plain result buttons, which say their own outcome.
+    const plain = simple && resultState(run, localRunnerId) !== "none";
     body = (
       <>
         <div className="run-ws-summary">
@@ -309,22 +322,34 @@ export function RunWorkspaceDialog({
             )}
             <div>
               <dt>{t(single ? "local.title" : "runWorkspace.runner")}</dt>
-              <dd>
-                {view && (
-                  <span
-                    className={`run-ws-dot${view.runnerOnline ? " is-online" : ""}`}
-                    role="img"
-                    aria-label={t(view.runnerOnline ? "runWorkspace.runnerOnline" : "runWorkspace.runnerOffline")}
-                  />
-                )}
-                {runner}
-              </dd>
+              {simple ? (
+                // Simple: the label already says this computer; how it is.
+                <dd>
+                  {view && (
+                    <>
+                      <span className={`run-ws-dot${view.runnerOnline ? " is-online" : ""}`} aria-hidden="true" />
+                      {t(view.runnerOnline ? "runWorkspace.runnerOnline" : "runWorkspace.runnerOffline")}
+                    </>
+                  )}
+                </dd>
+              ) : (
+                <dd>
+                  {view && (
+                    <span
+                      className={`run-ws-dot${view.runnerOnline ? " is-online" : ""}`}
+                      role="img"
+                      aria-label={t(view.runnerOnline ? "runWorkspace.runnerOnline" : "runWorkspace.runnerOffline")}
+                    />
+                  )}
+                  {runner}
+                </dd>
+              )}
             </div>
             <div>
-              <dt>{t("runs.repo")}</dt>
+              <dt>{t(simple ? "simple.facts.folder" : "runs.repo")}</dt>
               <dd>{run.repoName || run.repoId}</dd>
             </div>
-            {(run.branch || run.base) && (
+            {!simple && (run.branch || run.base) && (
               <div>
                 <dt>{t("runWorkspace.branch")}</dt>
                 <dd className="mono">
@@ -348,10 +373,16 @@ export function RunWorkspaceDialog({
           {viewError && !view && (
             <p className="run-ws-info is-error">{t("runWorkspace.loadFailed", { message: viewError })}</p>
           )}
-          <ActionStatus run={run} />
-          {/* The PR's own approval, with its own rules on who may press it. */}
-          {view?.merge.mode === "pr" && <MergeControl run={run} className="run-ws-pr-merge" />}
-          {view?.owner && <WorkspaceActions run={run} view={view} />}
+          {plain ? (
+            <ResultActions run={run} />
+          ) : (
+            <>
+              <ActionStatus run={run} />
+              {/* The PR's own approval, with its own rules on who may press it. */}
+              {view?.merge.mode === "pr" && <MergeControl run={run} className="run-ws-pr-merge" />}
+              {view?.owner && <WorkspaceActions run={run} view={view} />}
+            </>
+          )}
         </div>
         <div className="run-ws-tablist" role="tablist" aria-label={t("runWorkspace.tabs")}>
           {TABS.map((name, index) => (
