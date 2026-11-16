@@ -3,11 +3,12 @@
  * its conditions combine.
  *
  * The plain case — "starts when these are done" — is the whole default view:
- * the prerequisites with a remove button each, a picker to add one, and the
- * nodes this one blocks. Everything beyond waiting for all of them (OR/XOR/
- * NAND/NOR, optional or deprecated relations, standalone logic gates) sits
- * under "Advanced conditions", which opens by itself whenever the node already
- * uses one of them, so a stored condition is never tucked out of sight.
+ * the prerequisites with a remove button each and a picker to add one, and
+ * the same for the nodes this one blocks. Everything beyond waiting for all
+ * of them (OR/XOR/NAND/NOR, optional or deprecated relations, standalone
+ * logic gates) sits under "Advanced conditions", which opens by itself
+ * whenever the node already uses one of them, so a stored condition is never
+ * tucked out of sight.
  *
  * The edits are the board's: the same hooks its node menu uses, driven with
  * this node instead of a menu position, so both places obey the same rules.
@@ -20,21 +21,45 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { edgeRelation } from "../../domain/graph/edgeStyle";
-import { nodesWaitingOn } from "../../domain/graph/logicGate";
+import {
+  booleanLogicGateForOutput,
+  logicGateOwningEdge,
+  nodesWaitingOn,
+} from "../../domain/graph/logicGate";
 import { nodeTypeOf } from "../../domain/graph/nodeTypes";
 import { requiresNodeRefs } from "../../domain/graph/requires";
 import { IconClose, IconPlus } from "../../icons";
 import { localizedRelationLabel, useI18n } from "../../i18n";
 import { NodeTypeChip } from "../../nodeTypeTheme";
 import { reportError, useApp } from "../../store";
-import type { EdgeRelation, Graph, GraphNode, LogicGate } from "../../types";
+import type { EdgeRelation, Graph, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { withRequiresProjection } from "../canvas/requiresProjection";
 import { advancedConditionKind, hasAdvancedCondition } from "../canvas/simpleDependency";
 import { useGraphWiring } from "../canvas/useGraphWiring";
 import { useNodeConditions } from "../canvas/useNodeConditions";
+import { noteConnectionMade } from "../lane/ConnectTip";
 import { NodeLinkSection } from "./NodeDocumentLinks";
 
 const NO_GATES: LogicGate[] = [];
+
+type PendingSet = ReadonlySet<string>;
+
+/**
+ * Marks a node as added but not yet answered in one of the two pickers, and
+ * hands back what takes the mark off again.
+ */
+function markPending(
+  setPending: (update: (current: PendingSet) => PendingSet) => void,
+  nodeId: string,
+): () => void {
+  setPending((current) => new Set(current).add(nodeId));
+  return () =>
+    setPending((current) => {
+      const next = new Set(current);
+      next.delete(nodeId);
+      return next;
+    });
+}
 
 export function NodeDependencies({ id }: { id: string }) {
   const { t, language } = useI18n();
@@ -51,10 +76,14 @@ export function NodeDependencies({ id }: { id: string }) {
   const [notice, setNotice] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   // Added but not yet answered: the server materialises a dependency before
   // the board shows it, and the picker must not offer it again meanwhile.
-  const [adding, setAdding] = useState<ReadonlySet<string>>(() => new Set());
+  const [adding, setAdding] = useState<PendingSet>(() => new Set());
+  // The same for the other direction: nodes just told to wait for this one.
+  const [addingBlocked, setAddingBlocked] = useState<PendingSet>(() => new Set());
+  const [blockedPick, setBlockedPick] = useState("");
   useEffect(() => {
     setNotice(null);
     setAdding(new Set());
+    setAddingBlocked(new Set());
   }, [id]);
   // An edit refused while graph.yaml could not be read no longer holds once
   // it reads again.
@@ -136,13 +165,7 @@ export function NodeDependencies({ id }: { id: string }) {
   const addDependency = () => {
     const sourceId = conditionSource;
     if (!sourceId || sourceId === id) return;
-    setAdding((current) => new Set(current).add(sourceId));
-    const settle = () =>
-      setAdding((current) => {
-        const next = new Set(current);
-        next.delete(sourceId);
-        return next;
-      });
+    const settle = markPending(setAdding, sourceId);
     void updateNode({
       type: "node.addDependency",
       sourceId,
@@ -152,12 +175,65 @@ export function NodeDependencies({ id }: { id: string }) {
     })
       .then((result) => {
         if (!result.ok) setNotice({ text: result.message, kind: "error" });
+        else noteConnectionMade();
       })
       .catch(reportError)
       .finally(settle);
   };
 
   const outgoing = (edges ?? []).filter((edge) => edge.from === id);
+
+  // The other direction, so "this must finish before that" does not mean
+  // opening that node first. Not on offer: a node that already waits for this
+  // one, one just added whose answer is still on its way, one this node waits
+  // on itself (directly or further up), which would close a loop, and one
+  // whose condition a logic gate owns, where the gate's inputs are the edit.
+  const blockedChoices = useMemo(() => {
+    if (!graph) return [];
+    const wires = edges ?? [];
+    const waiting = new Set(wires.filter((edge) => edge.from === id).map((edge) => edge.to));
+    // nodesWaitingOn walks the wires forward; turned round, the same walk
+    // finds everything this node waits on.
+    const upstream = nodesWaitingOn(
+      wires.map((edge) => ({ from: edge.to, to: edge.from })),
+      id,
+    );
+    return (graph.nodes ?? []).filter(
+      (node) =>
+        node.id !== id &&
+        !waiting.has(node.id) &&
+        !addingBlocked.has(node.id) &&
+        !upstream.has(node.id) &&
+        !booleanLogicGateForOutput(graph, node.id),
+    );
+  }, [graph, edges, id, addingBlocked]);
+
+  useEffect(() => {
+    if (blockedChoices.some((node) => node.id === blockedPick)) return;
+    setBlockedPick(blockedChoices[0]?.id ?? "");
+  }, [blockedChoices, blockedPick]);
+
+  const addBlocked = () => {
+    const targetId = blockedPick;
+    if (!targetId || targetId === id) return;
+    const settle = markPending(setAddingBlocked, targetId);
+    // No operator and no relation: those two pickers describe this node's own
+    // condition. The node told to wait keeps the mode it already has.
+    void updateNode({ type: "node.addDependency", sourceId: id, targetId })
+      .then((result) => {
+        if (!result.ok) setNotice({ text: result.message, kind: "error" });
+        else noteConnectionMade();
+      })
+      .catch(reportError)
+      .finally(settle);
+  };
+
+  // A wire a logic gate drew is the gate's to take away: the hub refuses to
+  // remove it on its own, so the row offers no button that would only fail.
+  const gateOwned = (edge: GraphEdge) =>
+    graph !== null &&
+    (logicGateOwningEdge(graph, edge.from, edge.to) !== undefined ||
+      (edgeRelation(edge) === "" && booleanLogicGateForOutput(graph, edge.to) !== undefined));
   const requires = conditionTarget?.requires?.trim() ?? "";
   const conditionKind = advancedConditionKind(requires);
   const advanced =
@@ -177,6 +253,7 @@ export function NodeDependencies({ id }: { id: string }) {
           : null;
 
   const removeDependency = (from: string) => runCanvasCommand({ type: "canvas.removeEdge", from, to: id });
+  const removeBlocked = (to: string) => runCanvasCommand({ type: "canvas.removeEdge", from: id, to });
   const open = (nodeId: string) => void openTab(nodeId).catch(reportError);
 
   return (
@@ -272,6 +349,7 @@ export function NodeDependencies({ id }: { id: string }) {
           {t("relations.dependents")}
           <span>{outgoing.length}</span>
         </h3>
+        <p className="node-dependencies-hint">{t("drawer.deps.blocksHint")}</p>
         {outgoing.length === 0 ? (
           <div className="node-relations-empty">{t("drawer.deps.blocksNone")}</div>
         ) : (
@@ -281,10 +359,55 @@ export function NodeDependencies({ id }: { id: string }) {
                 <button type="button" className="node-dependency-open" onClick={() => open(edge.to)}>
                   {nodeTitle(edge.to)}
                 </button>
+                {!gateOwned(edge) && (
+                  <button
+                    type="button"
+                    className="node-dependency-remove"
+                    aria-label={t("drawer.deps.blocksRemove", { title: nodeTitle(edge.to) })}
+                    title={t("drawer.deps.blocksRemove", { title: nodeTitle(edge.to) })}
+                    disabled={readOnly}
+                    onClick={() => removeBlocked(edge.to)}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         )}
+        <form
+          className="node-dependency-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            addBlocked();
+          }}
+        >
+          <select
+            value={blockedPick}
+            aria-label={t("drawer.deps.blocksPick")}
+            disabled={readOnly || blockedChoices.length === 0}
+            onChange={(event) => setBlockedPick(event.target.value)}
+          >
+            {blockedChoices.length === 0 ? (
+              <option value="">{t("nodeMenu.noSources")}</option>
+            ) : (
+              blockedChoices.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {node.title || node.id}
+                </option>
+              ))
+            )}
+          </select>
+          {/* Two Add buttons share the tab; this one says which it is. */}
+          <button
+            type="submit"
+            aria-label={t("drawer.deps.blocksAdd")}
+            disabled={readOnly || !blockedPick}
+          >
+            <IconPlus size={13} />
+            {t("drawer.deps.add")}
+          </button>
+        </form>
       </section>
 
       <ReferencesSection

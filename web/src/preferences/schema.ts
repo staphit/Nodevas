@@ -276,7 +276,11 @@ export const PREFERENCE_SCHEMA = {
       () => "stage" as const,
     ),
   ),
-  /** The part of the Settings view last open. */
+  /**
+   * The part of the Settings view last open. A first visit opens General
+   * (remembered as "appearance"), the top of the list and where the tour
+   * sends people for the replay, help and the theme.
+   */
   settingsSection: device(
     enumPref(
       "vised-settings-section",
@@ -300,7 +304,7 @@ export const PREFERENCE_SCHEMA = {
         "account",
         "audit",
       ] as const,
-      () => "project" as const,
+      () => "appearance" as const,
     ),
   ),
 
@@ -448,6 +452,14 @@ export const PREFERENCE_SCHEMA = {
    * command palette or the explorer's menu.
    */
   startScreenDismissed: account(boolPref("vised-start-screen-dismissed", "onboarding", false)),
+  /**
+   * Whether the board's one-line tip on how to connect two nodes is done
+   * with: closed by hand, or no longer needed because this person has made a
+   * dependency. It teaches one gesture once, so it never comes back.
+   */
+  graphConnectTipDismissed: account(
+    boolPref("vised-graph-connect-tip-dismissed", "onboarding", false),
+  ),
 
   // agents
   /** Whether Copilot reads its replies aloud. */

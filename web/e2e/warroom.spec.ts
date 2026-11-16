@@ -1,7 +1,7 @@
 import { type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, freshProject, test } from "./fixture";
+import { expect, freshProject, setPreferences, test } from "./fixture";
 
 // Station's war room against the real binary. The project's nodes,
 // dependencies, a logic gate and statuses are written through the real API;
@@ -430,11 +430,7 @@ async function openStaged(page: Page, prefs: Record<string, string> = {}, extraO
   const ids = await stageGraph(page);
   await mockWorkstation(page, ids);
   await page.route(/\/api\/station\/building$/, (route) => route.fulfill({ json: buildingProjects(extraOffices) }));
-  await page.addInitScript((values) => {
-    localStorage.setItem("vised-language", "en");
-    localStorage.setItem("vised-pane-timeline", "0");
-    for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
-  }, prefs);
+  await setPreferences(page, { "vised-language": "en", "vised-pane-timeline": "0", ...prefs });
   await page.reload();
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible({ timeout: 15_000 });
   return ids;
@@ -564,7 +560,7 @@ test("war room: screenshots in every office style, both themes and on a phone", 
   for (const style of STYLES) {
     await setOfficeStyle(page, style);
     for (const theme of ["light", "dark"] as const) {
-      await page.evaluate((t) => localStorage.setItem("vised-theme", t), theme);
+      await setPreferences(page, { "vised-theme": theme });
       await page.reload();
       const room = page.getByRole("region", { name: "Agent activity" });
       await expect(room).toBeVisible({ timeout: 15_000 });
@@ -587,16 +583,13 @@ test("war room: screenshots in every office style, both themes and on a phone", 
   await page.setViewportSize({ width: 390, height: 844 });
   const pageOverflow = () =>
     page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  await page.evaluate(() => {
-    localStorage.setItem("vised-theme", "light");
-    localStorage.setItem("vised-project-mode", "info");
-  });
+  await setPreferences(page, { "vised-theme": "light", "vised-project-mode": "info" });
   await page.reload();
   // At phone width the panel may or may not have opened itself by now.
   const close = page.getByRole("button", { name: "Close Agent chat" });
   if (await close.isVisible({ timeout: 5_000 }).catch(() => false)) await close.click();
   const baseline = await pageOverflow();
-  await page.evaluate(() => localStorage.setItem("vised-project-mode", "station"));
+  await setPreferences(page, { "vised-project-mode": "station" });
   await page.reload();
   const room = page.getByRole("region", { name: "Agent activity" });
   await expect(room).toBeVisible({ timeout: 15_000 });

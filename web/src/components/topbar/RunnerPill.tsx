@@ -8,7 +8,8 @@
  * workstation is shown: a board used as a planner has nothing to say here.
  *
  * Single-user edition: there is one machine, so the pill says "This
- * computer" (green while its built-in runner is up), never "runners".
+ * computer" (green while its built-in runner is up), never "runners". While
+ * it is not up, the label says which: still starting, or not running.
  */
 
 import { useEffect } from "react";
@@ -16,7 +17,7 @@ import { useEffect } from "react";
 import { useConnectivity } from "../../api/connectivity";
 import { setProjectMode } from "../../station/projectMode";
 import { useI18n } from "../../i18n";
-import { builtInRunner, useEdition } from "../../runners/edition";
+import { builtInRunner, isHubRunner, localState, useEdition } from "../../runners/edition";
 import { useWorkstationVisible } from "../../runners/workstation";
 import { useRunners } from "../../runners/runnerStore";
 import { useBudget } from "../../runs/budgetStore";
@@ -32,6 +33,7 @@ export function RunnerPill() {
   const { t } = useI18n();
   const visible = useWorkstationVisible();
   const runners = useRunners((s) => s.runners);
+  const listed = useRunners((s) => s.loaded && !(s.loading && s.runners.length === 0));
   const cost = useBudget((s) => s.status?.used.costUsd);
   // Offline, the last list is stale: no runner is known to be up or down.
   const offline = useConnectivity((s) => s.offline);
@@ -69,20 +71,33 @@ export function RunnerPill() {
   }
 
   const spend = typeof cost === "number" ? formatSpend(cost) : "";
-  const local = single ? builtInRunner(runners) : undefined;
-  const online = single ? (local?.online ? 1 : 0) : runners.filter((runner) => runner.online).length;
+  const local = single ? localState(runners) : undefined;
+  const online = single ? (local === "ready" ? 1 : 0) : runners.filter((runner) => runner.online).length;
   const count = single
     ? t("local.title")
     : online === 1
       ? t("topbar.runnerPill.one")
       : t("topbar.runnerPill.many", { count: online });
-  const label = single
-    ? spend
-      ? t("local.pill", { cost: spend })
-      : t("local.title")
-    : spend
-      ? t("topbar.runnerPill.label", { runners: count, cost: spend })
-      : t("topbar.runnerPill.labelNoCost", { runners: count });
+  // What the grey dot means, once the list has arrived: until then nothing
+  // is known, and the pill says only what it always does. With no runner
+  // welcomed as built in (serve --no-runner), the dispatch dialog offers an
+  // online runner someone connected by hand, so agents can start after all.
+  // Once the app's own runner was welcomed the dialog sticks to it, and a
+  // runner by hand does not change what the pill says.
+  const byHand =
+    !builtInRunner(runners) && runners.some((runner) => runner.online && !isHubRunner(runner));
+  const label =
+    listed && local === "starting"
+      ? t("local.pillStarting")
+      : listed && local === "stopped" && !byHand
+        ? t("local.pillStopped")
+        : single
+          ? spend
+            ? t("local.pill", { cost: spend })
+            : t("local.title")
+          : spend
+            ? t("topbar.runnerPill.label", { runners: count, cost: spend })
+            : t("topbar.runnerPill.labelNoCost", { runners: count });
 
   return (
     <button

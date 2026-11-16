@@ -316,6 +316,22 @@ export function GraphCanvas({
           y: rect.bottom + 4,
         });
       },
+      // The connect dot sits outside its card, so the board would read a
+      // press on it as the start of a pan, and it captures the pointer
+      // itself: the rest of the drag arrives here, not at the card.
+      connectPointerDown: (event, id) => {
+        event.stopPropagation();
+        latest.current.connectionHandlers.startNode(event, id, true);
+      },
+      connectPointerMove: (event) => {
+        latest.current.connectionHandlers.onPointerMove(event);
+      },
+      connectPointerUp: (event) => {
+        latest.current.connectionHandlers.onPointerUp(event, true);
+      },
+      connectPointerCancel: (event) => {
+        latest.current.connectionHandlers.onPointerUp(event, false);
+      },
       resizePointerDown: (event, id, dirX, dirY, width, height) =>
         latest.current.cardResizeHandlers.onPointerDown(event, id, dirX, dirY, width, height),
       resizePointerMove: (event) => latest.current.cardResizeHandlers.onPointerMove(event),
@@ -843,7 +859,7 @@ export function GraphCanvas({
               activeTab === n.id ? " active" : ""
             }${selected ? " selected" : ""}${
               isDragging ? " lifting" : ""
-            }${filteredOut ? " filtered-out" : ""}${
+            }${resizing ? " resizing" : ""}${filteredOut ? " filtered-out" : ""}${
               analysis.overdue.has(n.id) ? " analysis-overdue" : ""
             }${violationNodeIDs.has(n.id) ? " analysis-violation" : ""}${
               analysis.blocked.has(n.id) ? " analysis-blocked" : ""

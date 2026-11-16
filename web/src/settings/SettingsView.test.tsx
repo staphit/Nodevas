@@ -78,6 +78,34 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: /Deadline reminders/ })).toHaveAttribute("aria-expanded", "false");
   });
 
+  // The Settings button and the palette's "Open settings" name no section.
+  // The first time that lands on General, where the tour says the replay,
+  // help and the theme are; afterwards on the section last open.
+  it("opens on General the first time, then on the section last open", async () => {
+    const user = userEvent.setup();
+    const first = render(<SettingsView />);
+
+    expect(within(nav()).getByRole("button", { name: /^General/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Replay the tour" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Help and shortcuts" })).toBeInTheDocument();
+
+    await user.click(within(nav()).getByRole("button", { name: /^This project/ }));
+    expect(useApp.getState().preferences.settingsSection).toBe("project");
+    first.unmount();
+    render(<SettingsView />);
+    expect(within(nav()).getByRole("button", { name: /^This project/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  // "Project settings" in the palette and the status legend's link ask for
+  // This project by name: the General default is not in their way.
+  it("opens the section asked for, whatever the default", () => {
+    act(() => openSettings("project"));
+    render(<SettingsView />);
+
+    expect(within(nav()).getByRole("button", { name: /^This project/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 2, name: "This project" })).toBeInTheDocument();
+  });
+
   // A section's line is cut with an ellipsis where the list is narrow
   // ("Appearance, language, notifications, c…"); its whole text shows on hover.
   it("gives each section's line its whole text as a tooltip", () => {

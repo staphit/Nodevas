@@ -40,3 +40,30 @@ export function useLocalRunner(): Runner | undefined {
   const runners = useRunners((s) => s.runners);
   return single ? builtInRunner(runners) : undefined;
 }
+
+/** Whether `runner` is the one this hub started for itself. The runner list
+ * says so from the moment the hub registers it (`hubLocal`); a runner the
+ * settings and add-repo routes answer with says it only by `builtIn`. */
+export function isHubRunner(runner: Runner): boolean {
+  return runner.hubLocal === true || runner.builtIn === true;
+}
+
+/**
+ * How the part of the app that runs agents is doing (single-user edition):
+ * "ready" once the hub's own runner is connected and welcomed as built in,
+ * "starting" while it is registered but has not connected since this hub
+ * started (every start, for a few seconds), "stopped" for anything else: it
+ * was up and dropped, it connected some other way, or there is none.
+ */
+export type LocalState = "ready" | "starting" | "stopped";
+
+export function localState(runners: readonly Runner[]): LocalState {
+  const own = runners.find(isHubRunner);
+  if (own?.builtIn && own.online) return "ready";
+  return own && !own.builtIn && !own.online ? "starting" : "stopped";
+}
+
+/** localState of the loaded runner list. Loading it is the caller's to ask for. */
+export function useLocalState(): LocalState {
+  return localState(useRunners((s) => s.runners));
+}

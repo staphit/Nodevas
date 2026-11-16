@@ -359,6 +359,159 @@
     inset: -8px;
   }
 }
+/* The card's connect dot: where a dependency is drawn from. Round and filled
+   with the accent colour, because the squares on a selected card resize it
+   and a beginner dragged the square on this edge expecting a line. Like the
+   menu button it is the card's sibling. GraphCard sets its left/top to a
+   point on the card's right edge (connectPortTop in geometry.ts); this sheet
+   places the box from there, and the dot is drawn in the middle of the box.
+   The box is the hit area, so the rules below hold for the box and the dot
+   alike, in board pixels (connectPort.test.ts checks them):
+   - Nothing reaches more than 6px past the right edge, half the default 12px
+     gap between columns. The next card's own squares reach the other 6px of
+     the gap, and a dot that went further covered that card's left edge: with
+     a card selected, pressing its neighbour started a line from it.
+   - Nothing covers the card's own resize squares while they are shown, at
+     the shortest card (52px). Under a mouse the squares are 12px and centred
+     on the edge, so the east one ends 6px below the middle and the corner one
+     starts 6px above the bottom: 14px of edge between them at 52px, centred
+     at three quarters of the height. The box is that tall and the dot 12px,
+     so it has a pixel to spare on each side.
+   - Nothing covers the marker chip, which ends at the content box (the 8px
+     padding and 1px border): the box reaches 8px into the card and stops
+     there.
+   A shaped card is clipped, and at three quarters of its height its outline
+   is short of the right edge: a few pixels for an ellipse or a hexagon, a
+   quarter of the width for a diamond. The pointer crosses that strip over
+   neither the card nor the dot, so the hover that shows the dot lapses on
+   the way to it. The dot therefore stays where it can be pointed at for a
+   moment after it starts to fade (visibility, not pointer-events, which
+   would end at once), and pointing at it brings it back. */
+.col-card-connect {
+  position: absolute;
+  z-index: 12;
+  width: 14px;
+  height: 14px;
+  translate: calc(6px - 100%) -50%;
+  cursor: crosshair;
+  touch-action: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms var(--ease-out), visibility 0s linear 300ms,
+    left 200ms var(--ease-out), top 200ms var(--ease-out);
+}
+.col-card-connect::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  translate: -50% -50%;
+  box-sizing: border-box;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 3px var(--shadow);
+  transition: border-color 120ms var(--ease-out);
+}
+/* The ring darkens rather than the dot growing: a dot that grew would reach
+   past the half gap it is kept inside. */
+.col-card-connect:hover::after {
+  border-color: var(--text);
+}
+/* With the ⋯ between the card and the dot, and without it at the compact
+   level of detail. A pointer on the ⋯ is still a pointer on the card, and the
+   card a line is being drawn from keeps its dot though the pointer has left. */
+.col-card:hover + .col-card-connect,
+.col-card:hover + .col-card-more + .col-card-connect,
+.col-card.selected + .col-card-connect,
+.col-card.selected + .col-card-more + .col-card-connect,
+.col-card.connection-source + .col-card-connect,
+.col-card.connection-source + .col-card-more + .col-card-connect,
+.col-card-more:hover + .col-card-connect,
+.col-card-connect:hover {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+/* Nothing is being connected while a card is moved or resized, and a dot
+   left where the card was would say otherwise. */
+.board-inner.dragging .col-card-connect,
+.col-card.resizing + .col-card-connect,
+.col-card.resizing + .col-card-more + .col-card-connect {
+  display: none;
+}
+@media (hover: none) {
+  /* A finger leaves :hover behind on the last card it touched. */
+  .col-card:hover:not(.selected) + .col-card-connect,
+  .col-card:hover:not(.selected) + .col-card-more + .col-card-connect {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@media (pointer: coarse) {
+  /* Under a finger the squares are 18px, and between them only 8px of a 52px
+     card's right edge is free: no fingertip's worth fits on the edge without
+     covering a square or reaching into the gap. So the dot moves inside the
+     card, beside the column of squares (which reach 9px in), at the same
+     height. That is where the marker chip ends, so a selected card gives its
+     second line the box's width back on the right, and the chip moves left of
+     the dot instead of under it. */
+  .col-card-connect {
+    width: 24px;
+    height: 24px;
+    translate: calc(-100% - 9px) -50%;
+  }
+  .col-card-connect::after {
+    width: 20px;
+    height: 20px;
+  }
+  .col-card.selected .col-card-meta {
+    padding-right: 24px;
+  }
+  /* Only the selected card made that room, so only it shows the dot here.
+     Hover (a pen, or a touch screen with a mouse beside it) and a connect-mode
+     drag from a card that was never selected would otherwise light the dot
+     over that card's chip. As specific as the rules that show it, and after
+     them, so this wins. It goes at once: the delay that lets a mouse cross a
+     shaped card's clipped edge would leave an unseen press target inside the
+     card, where the next tap on the card would land. */
+  .col-card:not(.selected) + .col-card-connect,
+  .col-card:not(.selected) + .col-card-more + .col-card-connect {
+    opacity: 0;
+    visibility: hidden;
+    transition-delay: 0s;
+  }
+}
+/* Zoomed out to the minimal level, the dot keeps the size it has at 100% as
+   far as it can: the board's CSS zoom would shrink it with the cards to a few
+   pixels, and a phone's board opens that far out. Dividing the view scale
+   back out holds it, as the title's floor below does. The squares are not
+   drawn at this level (below), so the dot goes back onto the edge, at half
+   the height, and may grow until it fills the shortest card's height, never
+   past the half gap: past that cap it shrinks with the board after all. */
+.board-inner[data-lod="minimal"] .col-card-connect {
+  width: min(calc(18px / var(--view-scale, 1)), 52px);
+  height: min(calc(18px / var(--view-scale, 1)), 52px);
+  translate: calc(6px - 100%) -50%;
+}
+.board-inner[data-lod="minimal"] .col-card-connect::after {
+  width: min(calc(14px / var(--view-scale, 1)), 44px);
+  height: min(calc(14px / var(--view-scale, 1)), 44px);
+  border-width: min(calc(2px / var(--view-scale, 1)), 6px);
+}
+@media (pointer: coarse) {
+  .board-inner[data-lod="minimal"] .col-card-connect {
+    width: min(calc(36px / var(--view-scale, 1)), 52px);
+    height: min(calc(36px / var(--view-scale, 1)), 52px);
+    translate: calc(6px - 100%) -50%;
+  }
+  .board-inner[data-lod="minimal"] .col-card-connect::after {
+    width: min(calc(22px / var(--view-scale, 1)), 44px);
+    height: min(calc(22px / var(--view-scale, 1)), 44px);
+  }
+}
 /* Whole lines or none. A card asks for more height than it owns as soon as the
    user picks a short one or the node carries tags, and flex answers that by
    shrinking the line boxes — which every line here then clips against for its
@@ -594,4 +747,24 @@
 }
 .ui-empty-state-action button:active {
   transform: translateY(1px);
+}
+/* A second way to begin, under the one button and in plain text: an empty
+   state has a single primary action, and this must not read as a rival. */
+.ui-empty-state-action button.ui-empty-state-secondary {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  margin-top: 6px;
+  padding: 2px 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ui-empty-state-action button.ui-empty-state-secondary:hover {
+  filter: none;
+  color: var(--text);
 }

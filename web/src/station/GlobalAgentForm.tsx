@@ -27,8 +27,9 @@ import {
 import { useViewer } from "../components/SignIn";
 import { agentName } from "../game/labels";
 import { useI18n } from "../i18n";
+import { LocalNotReady } from "../local/LocalNotReady";
 import { permissionOf } from "../local/ThisComputerPanel";
-import { builtInRunner, useEdition } from "../runners/edition";
+import { builtInRunner, localState, useEdition } from "../runners/edition";
 import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
 import { AutoAcceptNote } from "../runs/AutoAcceptNote";
@@ -306,11 +307,11 @@ export function GlobalAgentForm({
   let fields: ReactNode;
   if (loadingRunners) {
     fields = <p className="run-empty">{t("common.loading")}</p>;
-  } else if (single && (mine.length === 0 || (localRunner && eligible.length === 0))) {
+  } else if (single && eligible.length === 0) {
+    // Single-user with nothing that can start one: this computer is not
+    // ready, in its own words, as in the dispatch dialog.
     fields = (
-      <p className="run-empty" role="status">
-        {t("local.unavailable")}
-      </p>
+      <LocalNotReady starting={localState(mine) === "starting"} onOpenSettings={() => openSettings("runners")} />
     );
   } else if (mine.length === 0) {
     fields = (

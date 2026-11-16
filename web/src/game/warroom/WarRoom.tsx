@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import "./warroom.css";
 
 import { useI18n } from "../../i18n";
+import { useEdition } from "../../runners/edition";
 import { useWorkstationVisible } from "../../runners/workstation";
 import type { ControlRow } from "../../station/control";
 import { setProjectMode } from "../../station/projectMode";
@@ -97,10 +98,13 @@ export default function WarRoomStage(props: WarRoomProps) {
  * nothing to draw, so say how to bring it back. */
 function WarRoomOff() {
   const { t } = useI18n();
+  // Single-user: no runners to speak of, and its Settings section is not
+  // the one the team hint names.
+  const single = useEdition() === "single";
   return (
     <div className="px-empty" role="status">
-      <p>{t("game.warroom.off")}</p>
-      <p className="px-empty-hint">{t("game.warroom.offHint")}</p>
+      <p>{t(single ? "game.warroom.offLocal" : "game.warroom.off")}</p>
+      <p className="px-empty-hint">{t(single ? "game.warroom.offHintLocal" : "game.warroom.offHint")}</p>
       <div className="px-empty-actions">
         <button
           type="button"
@@ -156,12 +160,13 @@ export function WarRoom({ building, titleOf, rowOf }: WarRoomProps) {
   );
   const labelOf = useLabelOf(building);
   const cast = useThemeCast();
+  const single = useEdition() === "single";
 
   if (!building.current && !building.global) {
     return (
       <div className="px-empty">
-        <p>{t("game.warroom.noRooms")}</p>
-        <p className="px-empty-hint">{t("game.warroom.noRoomsHint")}</p>
+        <p>{t(single ? "game.warroom.noRoomsLocal" : "game.warroom.noRooms")}</p>
+        <p className="px-empty-hint">{t(single ? "game.warroom.noRoomsHintLocal" : "game.warroom.noRoomsHint")}</p>
       </div>
     );
   }

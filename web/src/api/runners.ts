@@ -104,6 +104,11 @@ export interface Runner {
   /** This computer's built-in runner (single-user edition): the one `nodevas
    * serve` started for the person at this machine. The hub's word. */
   builtIn?: boolean;
+  /** The runner this hub registered for itself at this startup, connected
+   * or not; only the runner list says it. `builtIn` follows once the runner
+   * has connected and been welcomed, so this alone is "still starting". It
+   * allows nothing: what the built-in runner may do stays on `builtIn`. */
+  hubLocal?: boolean;
 }
 
 export interface RunnerListResponse {

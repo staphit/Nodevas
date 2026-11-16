@@ -146,6 +146,26 @@ func fail(c *gin.Context, err error) {
 	}
 }
 
+// listedRunner is a runner as GET /api/runners lists it: the registry's
+// record, and whether it is this hub's own runner.
+type listedRunner struct {
+	runnerwire.Runner
+	// HubLocal: the runner a single-user hub registered or kept for itself
+	// at this startup (Registry.SetBuiltIn), whether or not it has
+	// connected. BuiltIn says the same only once the runner's welcome did,
+	// so until then the app could not tell "this computer's own runner,
+	// still starting" from any other offline runner. It is what the
+	// registry was told at startup, never the runner's claim, and it
+	// allows nothing: adding repos and changing settings stay on BuiltIn.
+	HubLocal bool `json:"hubLocal,omitempty"`
+}
+
+// listResponse is the body of GET /api/runners: runnerwire.ListResponse
+// with each runner as listed.
+type listResponse struct {
+	Runners []listedRunner `json:"runners"`
+}
+
 func (a *API) list(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	list, err := a.reg.List(c.Request.Context(), auth.ActorFrom(c.Request))
@@ -153,7 +173,16 @@ func (a *API) list(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, runnerwire.ListResponse{Runners: list})
+	out := listResponse{Runners: make([]listedRunner, 0, len(list))}
+	for _, runner := range list {
+		out.Runners = append(out.Runners, listedRunner{
+			Runner: runner,
+			// As with the welcome: a hub with accounts has no runner of
+			// its own, whatever the registry was told.
+			HubLocal: a.single && a.reg.IsBuiltInID(runner.ID),
+		})
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (a *API) create(c *gin.Context) {

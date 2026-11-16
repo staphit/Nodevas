@@ -14,7 +14,7 @@
  * timeline header keeps its direction up front for the same reason.
  */
 
-import { useId, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 
 import { IconAlignGuides, IconPlus, IconResizeHorizontal } from "../icons";
 import { InlineNotice } from "./InteractionPrimitives";
@@ -63,6 +63,11 @@ export interface BoardToolbarProps {
   activeFilters: number;
   /** Rows in the Problems panel: analysis findings and validation warnings. */
   problemCount: number;
+  /**
+   * Whether the count holds more than warnings — an error, an overdue node
+   * or a broken dependency. The badge is the failure colour only then.
+   */
+  problemsUrgent: boolean;
   problemsOpen: boolean;
   setProblemsOpen: (update: (open: boolean) => boolean) => void;
   /** The Problems button, where the keyboard returns when the panel closes. */
@@ -127,6 +132,7 @@ export function BoardToolbar({
   filterPanel,
   activeFilters,
   problemCount,
+  problemsUrgent,
   problemsOpen,
   setProblemsOpen,
   problemsButtonRef,
@@ -180,6 +186,48 @@ export function BoardToolbar({
   // Both panes render this toolbar, so the hint needs an id that stays unique.
   const hintId = useId();
   const [hintOpen, setHintOpen] = useState(false);
+  const hintRef = useRef<HTMLSpanElement>(null);
+  const hintToggleRef = useRef<HTMLButtonElement>(null);
+  // The hint hangs over the board like a menu, so it leaves like one
+  // (OverflowMenu): Escape closes it and hands the keyboard back to the ?
+  // that opened it, and a press anywhere else closes it without moving
+  // focus from where that press put it. The ? counts as inside — its own
+  // click is what toggles, and closing on the press would only reopen it —
+  // and so does the toolbar's ⋯ menu, whose Help is the graph's ?: that
+  // checkbox keeps the menu open, and a second click on it turns the tips off.
+  useEffect(() => {
+    if (!hintOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // No press closes the tips when a shortcut opens a dialog over them,
+      // and that dialog's Escape is its own: taking it would leave the
+      // dialog open and pull the keyboard to the ? behind it.
+      if (document.querySelector("[aria-modal='true']")) return;
+      // Claimed here so the board below does not also read this Escape as
+      // "clear the selection".
+      event.stopPropagation();
+      setHintOpen(false);
+      hintToggleRef.current?.focus();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        (hintRef.current?.contains(target) ||
+          hintToggleRef.current?.contains(target) ||
+          (target instanceof Element && target.closest(".board-overflow-menu")))
+      ) {
+        return;
+      }
+      setHintOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [hintOpen]);
   const hint = isGraph
     ? coarsePointer
       ? t("board.hint.graphTouch")
@@ -523,6 +571,7 @@ export function BoardToolbar({
                 ⋯ menu as Help; the timeline, with fewer controls, keeps its ?. */}
             {!isGraph && (
               <button
+                ref={hintToggleRef}
                 type="button"
                 className="board-hint-toggle"
                 onClick={() => setHintOpen((open) => !open)}
@@ -535,6 +584,7 @@ export function BoardToolbar({
               </button>
             )}
             <span
+              ref={hintRef}
               id={hintId}
               className={`board-title-hint${hintOpen ? " open" : ""}`}
               role="note"
@@ -547,12 +597,15 @@ export function BoardToolbar({
           <>
             <span className="board-title-spacer" aria-hidden />
             {/* Always there, so where problems are found never moves: the count
-                is the badge, and it turns to the alert colour when non-zero. */}
+                is the badge. It turns to the alert colour for something that
+                is wrong — an error, an overdue node, a broken dependency —
+                and to the calmer warning colour when warnings are all there
+                is, which is what two new cards nobody has connected yet are. */}
             <button
               ref={problemsButtonRef}
               type="button"
               className={`board-tool-button board-problems${problemsOpen ? " active" : ""}${
-                problemCount ? " has-problems" : ""
+                problemCount ? (problemsUrgent ? " has-problems" : " has-problems warnings-only") : ""
               }`}
               onClick={() => setProblemsOpen((open) => !open)}
               aria-expanded={problemsOpen}

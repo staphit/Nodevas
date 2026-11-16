@@ -24,6 +24,7 @@ import type {
   LogicGateOperator,
 } from "../../types";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
+import { noteConnectionMade } from "../lane/ConnectTip";
 import { COL_W, ROW_H } from "./geometry";
 import { withRequiresProjection } from "./requiresProjection";
 
@@ -160,6 +161,7 @@ export function useNodeConditions({
       relation: conditionRelation,
     }).then((result) => {
       if (!result.ok) setGraphNotice({ text: result.message, kind: "error" });
+      else noteConnectionMade();
     });
     setContextMenu(null);
   };

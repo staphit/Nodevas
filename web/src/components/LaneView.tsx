@@ -16,6 +16,9 @@ import { useI18n } from "../i18n";
 import { localizeIssue } from "../issueMessages";
 import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
+import { openNodeDetail } from "./drawer/openNodeDetail";
+import { useViewer } from "./SignIn";
+import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
 import { UnreadableGraphState } from "./lane/UnreadableGraphState";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
@@ -33,7 +36,7 @@ import { useNarrowViewport } from "./TopbarOverflow";
 import { GraphCanvas } from "./canvas/GraphCanvas";
 import { paintLiftedCards } from "./canvas/GraphCard";
 import { GraphMinimap } from "./canvas/GraphMinimap";
-import { ProblemsPanel, problemCount } from "./canvas/ProblemsPanel";
+import { ProblemsPanel, hasUrgentProblem, problemCount } from "./canvas/ProblemsPanel";
 import { useCardResize } from "./canvas/useCardResize";
 import { useCardDrag, type CardDragState } from "./canvas/useCardDrag";
 import {
@@ -96,6 +99,7 @@ import {
   timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
+import { ConnectTip } from "./lane/ConnectTip";
 import {
   LaneContextMenuLayer,
   useLaneContextMenu,
@@ -217,6 +221,10 @@ export function LaneView({
   // the cards, and offers nothing that would write over the file.
   const graphUnreadable = useApp((s) => s.graphUnreadable);
   const unreadable = graphUnreadable !== null;
+  // An example is copied in as a new project, which on a team server is an
+  // administrator's call: the same rule the start screen offers itself by.
+  const viewer = useViewer();
+  const canOpenExample = !viewer || viewer.role === "admin";
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
@@ -1156,6 +1164,7 @@ export function LaneView({
 
   const connection = useConnectionDrag({
     enabled: isGraph,
+    withoutModifier: gestureMode === "connect",
     graphPointFromClient,
     connectionPointForNode,
     onSelectGate: (gateId) => setGraphSelection({ kind: "logic-gate", id: gateId }),
@@ -1551,21 +1560,35 @@ export function LaneView({
           title={t("lane.emptyTitle")}
           description={t("lane.emptyDescription")}
           action={
-            <button
-              type="button"
-              onClick={(event) =>
-                openNodeCreationMenu({
-                  kind: "graph",
-                  x: event.clientX || 24,
-                  y: event.clientY || 88,
-                  col: 0,
-                  row: 0,
-                })
-              }
-            >
-              <IconPlus size={13} />
-              {t("nodeCreate.create")}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={(event) =>
+                  openNodeCreationMenu({
+                    kind: "graph",
+                    x: event.clientX || 24,
+                    y: event.clientY || 88,
+                    col: 0,
+                    row: 0,
+                  })
+                }
+              >
+                <IconPlus size={13} />
+                {t("nodeCreate.create")}
+              </button>
+              {/* The other way to begin, for someone who would rather look
+                  at a finished board first. Plain text beside the one
+                  button, and only where the start screen itself is offered. */}
+              {canOpenExample && (
+                <button
+                  type="button"
+                  className="ui-empty-state-secondary"
+                  onClick={() => window.dispatchEvent(new Event(OPEN_START_SCREEN_EVENT))}
+                >
+                  {t("lane.emptyExample")}
+                </button>
+              )}
+            </>
           }
         />
       </div>
@@ -1622,6 +1645,7 @@ export function LaneView({
         }
         activeFilters={activeFilterCount(viewFilter)}
         problemCount={unreadable ? 0 : problemCount(analysis, issues)}
+        problemsUrgent={!unreadable && hasUrgentProblem(analysis, issues)}
         problemsOpen={problemsOpen && !unreadable}
         setProblemsOpen={toggleProblems}
         problemsButtonRef={problemsButtonRef}
@@ -1854,6 +1878,9 @@ export function LaneView({
         </div>
       </div>
       {graphUnreadable !== null && <UnreadableGraphState message={graphUnreadable} />}
+      {/* Waits for this project's own graph: the last one's, still on show
+          during a switch, is not the one to give advice about. */}
+      {isGraph && !unreadable && graphReady && <ConnectTip graph={graph} />}
       {isGraph && !unreadable && minimapVisible && cols.length > 0 && (
         <GraphMinimap
           cols={cols}
@@ -1875,10 +1902,14 @@ export function LaneView({
           analysis={analysis}
           issues={localizedIssues}
           nodeTitle={nodeTitle}
-          onPick={(nodeId) => {
+          onPick={(nodeId, view) => {
             setProblemsOpen(false);
             selectNode(nodeId);
-            void openTab(nodeId).catch(reportError);
+            // A finding that is put right in one of the panel's views opens
+            // on it; the card is kept in sight either way, because the drawer
+            // coming to show a node is what that watches.
+            if (view) openNodeDetail(nodeId, view);
+            else void openTab(nodeId).catch(reportError);
           }}
           onClose={closeProblems}
         />

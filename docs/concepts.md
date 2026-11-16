@@ -11,7 +11,7 @@ Nodevas keeps the workspace visible as a graph while preserving each node as an 
 
 ## Dependency gates
 
-Most of the time you only need "B depends on A": Alt+drag from A onto B, or choose **Add dependency…** in B's context menu, which opens B's node panel on its **Dependencies** tab where you pick A. B is blocked until A is done, and A shows up under B's **Depends on** list while B shows up under A's **Blocks** list.
+Most of the time you only need "B depends on A": point at card A, drag the round dot on its right edge onto card B, and B now waits for A. (The small squares on a selected card resize it; Alt+drag from A's card onto B does the same as the dot.) From the node panel's **Dependencies** tab you can add it from either side: pick A under B's **Depends on**, or pick B under A's **Blocks**. **Add dependency…** in B's context menu opens that tab for you. B is blocked until A is done, and A shows up under B's **Depends on** list while B shows up under A's **Blocks** list.
 
 When B depends on several nodes, it waits for **all** of them. That is the default, so the editor shows these connections as plain wires with no gate badge. A single dependency needs no gate either.
 

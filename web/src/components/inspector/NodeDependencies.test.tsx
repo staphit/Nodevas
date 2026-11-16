@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
 import { readPreferences } from "../../preferences";
+import { translate } from "../../i18n";
 import { useApp } from "../../store";
 import type { Graph } from "../../types";
 import { NodeDependencies } from "./NodeDependencies";
@@ -176,6 +177,102 @@ describe("NodeDependencies", () => {
     useApp.setState({ graph: graph("plan or review") });
     render(<NodeDependencies id="design" />);
     expect(screen.getByText("進階條件").closest("details")).toHaveAttribute("open");
+  });
+});
+
+// "A must finish before B" used to mean opening B: only "Depends on" could be
+// added to. Blocks now has the same picker, pointed the other way.
+describe("NodeDependencies blocks", () => {
+  const blocksPicker = () => screen.getByLabelText(translate("drawer.deps.blocksPick", "zh-TW"));
+  const offered = () =>
+    within(blocksPicker())
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+  it("says what the list means, under the heading it always had", () => {
+    render(<NodeDependencies id="design" />);
+    expect(screen.getByRole("heading", { name: /阻擋/ })).toBeInTheDocument();
+    expect(screen.getByText(translate("drawer.deps.blocksHint", "zh-TW"))).toBeInTheDocument();
+  });
+
+  it("makes the picked node wait for this one, leaving its condition's mode alone", async () => {
+    const user = userEvent.setup();
+    render(<NodeDependencies id="design" />);
+    // Not the node itself, not 上線 (already waits for it), not 企劃 (it
+    // waits on 企劃, so the other way round would be a loop).
+    expect(offered()).toEqual(["審查"]);
+
+    await user.click(
+      screen.getByRole("button", { name: translate("drawer.deps.blocksAdd", "zh-TW") }),
+    );
+    expect(updateNode).toHaveBeenCalledWith({
+      type: "node.addDependency",
+      sourceId: "design",
+      targetId: "review",
+    });
+  });
+
+  it("never offers a node this one waits on further up, or one a logic gate decides", () => {
+    const g = graph();
+    g.nodes!.push({ id: "brief", title: "簡報" }, { id: "qa", title: "測試" });
+    g.edges!.push({ from: "brief", to: "plan" });
+    g.ui = { logicGates: [{ id: "g1", operator: "or", x: 0, y: 0, inputs: ["review"], output: "qa" }] };
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    expect(offered()).toEqual(["審查"]);
+  });
+
+  it("stops offering a node the moment it is told to wait", async () => {
+    const user = userEvent.setup();
+    updateNode.mockImplementationOnce(() => new Promise(() => {}));
+    const g = graph();
+    g.nodes!.push({ id: "docs", title: "文件" });
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    await user.selectOptions(blocksPicker(), "review");
+    await user.click(
+      screen.getByRole("button", { name: translate("drawer.deps.blocksAdd", "zh-TW") }),
+    );
+    expect(offered()).toEqual(["文件"]);
+  });
+
+  it("has nothing to offer when every other node is taken", () => {
+    const g = graph();
+    g.edges!.push({ from: "design", to: "review" });
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    expect(offered()).toEqual(["沒有可新增的節點"]);
+    expect(blocksPicker()).toBeDisabled();
+  });
+
+  it("stops a node waiting from its own row", async () => {
+    const user = userEvent.setup();
+    render(<NodeDependencies id="design" />);
+    await user.click(
+      screen.getByRole("button", {
+        name: translate("drawer.deps.blocksRemove", "zh-TW", { title: "上線" }),
+      }),
+    );
+    expect(updateCanvasLayout).toHaveBeenCalledWith({
+      type: "canvas.removeEdge",
+      from: "design",
+      to: "ship",
+    });
+  });
+
+  // The hub refuses to take one wire out of a gate, so the row offers no
+  // button that could only fail; the gate's inputs are the edit.
+  it("offers no remove for a wire a logic gate drew", () => {
+    const g = graph();
+    g.ui = { logicGates: [{ id: "g1", operator: "or", x: 0, y: 0, inputs: ["design"], output: "ship" }] };
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    expect(screen.getByRole("button", { name: "上線" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: translate("drawer.deps.blocksRemove", "zh-TW", { title: "上線" }),
+      }),
+    ).toBeNull();
   });
 });
 

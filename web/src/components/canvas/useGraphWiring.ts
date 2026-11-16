@@ -18,6 +18,7 @@ import { useI18n } from "../../i18n";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
 import type { Graph, LogicGateOperator } from "../../types";
+import { noteConnectionMade } from "../lane/ConnectTip";
 
 export function useGraphWiring({
   graph,
@@ -62,6 +63,7 @@ export function useGraphWiring({
           kind: "ok",
         });
         selectNode(targetId);
+        noteConnectionMade();
       },
     );
   };
@@ -111,6 +113,9 @@ export function useGraphWiring({
               }),
         kind: "ok",
       });
+      // A wire into a gate is a dependency made, as much as one between two
+      // cards: the connect tip has taught what it had to.
+      noteConnectionMade();
     });
   };
 
@@ -169,6 +174,7 @@ export function useGraphWiring({
             }),
         kind: "ok",
       });
+      noteConnectionMade();
     });
   };
 

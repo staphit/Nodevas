@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { explorerApi } from "../api/explorer";
+import { explorerApi, type RepoSummary } from "../api/explorer";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useApp } from "../store";
 import { useExplorer } from "./explorerStore";
 import FilesPanel from "./FilesPanel";
@@ -127,5 +128,73 @@ describe("FilesPanel", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Showing the first 5 entries.")).toBeInTheDocument();
     expect(explorerApi.repoTree).not.toHaveBeenCalled();
+  });
+});
+
+// Single-user: the runner is part of the app. The panel told its reader to
+// run `nodevas runner repo add` and `nodevas runner set repoBrowse on`.
+describe("FilesPanel, single-user edition", () => {
+  const single = () =>
+    render(
+      <EditionProvider edition="single">
+        <FilesPanel />
+      </EditionProvider>,
+    );
+  /** A repo on this computer's own runner. */
+  const mine = (over: Partial<RepoSummary> = {}) => repo({ runnerId: "local1", runnerName: "this machine", ...over });
+
+  it("points to This computer for the first repo, with no command to type", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
+    useApp.setState({
+      preferences: { ...useApp.getState().preferences, projectMode: "info", agentWorkstation: true },
+    });
+    const { container } = single();
+    const note = await screen.findByText(/No repos yet\. Add a project folder under This computer/);
+    expect(container.textContent).not.toMatch(/runner/i);
+    await userEvent.click(within(note).getByRole("button", { name: "Open This computer" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
+  });
+
+  // With agents off, This computer shows only its switch: the note names it
+  // rather than an "Add" the reader would not find there.
+  it("names the switch first while agents are off", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
+    useApp.setState({ preferences: { ...useApp.getState().preferences, agentWorkstation: false } });
+    single();
+    const note = await screen.findByText(
+      /No repos yet\. Open This computer, turn on “Let agents work here”, then add a project folder/,
+    );
+    expect(within(note).getByRole("button", { name: "Open This computer" })).toBeInTheDocument();
+  });
+
+  it("says what is hidden, that this computer is not ready, and that browsing is off, in plain words", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([
+      mine(),
+      mine({ repoId: "r2", name: "game", online: false }),
+      mine({ repoId: "r3", name: "site", browsable: false, reason: "REPO_BROWSE_OFF" }),
+    ]);
+    const { container } = single();
+    const open = await screen.findByRole("region", { name: "Repo · visual-editor" });
+    expect(await within(open).findByText("Read-only. 2 sensitive files hidden.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Repo · game" })).getByText(
+        "This computer isn't ready to run agents right now, so this repo can't be shown.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Repo · site" })).getByText(
+        "Showing this repo's files here is turned off. Open its folder on your computer to see them.",
+      ),
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/runner/i);
+  });
+
+  it("still names a runner connected by hand", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([repo({ online: false, runnerName: "laptop" })]);
+    single();
+    expect(
+      await screen.findByText("Runner “laptop” is offline, so this repo can't be browsed right now."),
+    ).toBeInTheDocument();
   });
 });

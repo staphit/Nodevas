@@ -50,7 +50,7 @@ https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 The server shows the board; a small **runner** on your PC runs the agents with your own logins, in your own repositories, and only the runs you start or accept. Alone on one machine it is built into the app; on a team server each person runs one on their own PC. Setup, security, autopilot, and more demos: [Agent workstation](./docs/workstation.md).
 
-The agent controls are hidden at first. They appear when you turn on **Settings → Agents → Let agents work here** or open Station, and by themselves once the workspace has a runner, a run, or a connected agent.
+The agent controls are hidden at first. They appear when you turn on **Settings → Agents → Let agents work here** or open Station, and by themselves once the workspace has a runner, a run, or a connected agent. Alone on one machine the built-in runner is always there, so it counts only once you have added a repository to it.
 
 ## Security model
 

@@ -276,9 +276,6 @@
   font-size: calc(11px * var(--font-scale, 1));
   letter-spacing: 0.06em;
 }
-.command-palette-help section:first-child h3 {
-  margin-top: 0;
-}
 .command-palette-help dl > div {
   display: grid;
   grid-template-columns: 150px 1fr;
@@ -301,6 +298,39 @@
 .command-palette-help ol {
   margin: 0;
   padding-left: 18px;
+}
+/* What Nodevas is, in the rows' own text size, then the ways on from here
+   (the guides, an example, the tour) as one wrapping row: a link and a
+   button look alike, since the reader need not tell them apart. */
+.command-palette-help-lead {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.6;
+}
+.command-palette-help-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.command-palette-help-links a,
+.command-palette-help-links button {
+  display: block;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.6;
+  text-decoration: none;
+}
+.command-palette-help-links a:hover,
+.command-palette-help-links button:hover {
+  background: var(--hover);
 }
 .command-palette-results b,
 .command-palette-results small {
@@ -568,6 +598,66 @@
   flex: 1;
   min-width: 0;
 }
+/* The connect tip: one line over the board's top-left corner, under the
+   button that made the cards it is about. Laid over the board rather than in
+   the body's row, so it takes no room from the cards, and kept out from
+   under the node drawer when that covers the right side. Only its close
+   button takes the pointer: a press on the words is a press on the board
+   beneath, so a card or an empty spot under the tip can still be reached. */
+.board-connect-tip {
+  position: absolute;
+  pointer-events: none;
+  top: 10px;
+  left: 14px;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100% - 28px - var(--drawer-cover, 0px)));
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 5px 18px var(--shadow);
+  color: var(--text);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+/* The dot the sentence is about, as it looks on a card. */
+.board-connect-tip::before {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.board-connect-tip button {
+  pointer-events: auto;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.board-connect-tip button:hover,
+.board-connect-tip button:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .board-connect-tip button {
+    width: 36px;
+    height: 36px;
+  }
+}
 .problems-panel {
   --problems-w: 320px;
   display: flex;
@@ -680,6 +770,16 @@ button.problems-issue:focus-visible {
 .problems-issue small {
   color: var(--text);
   font-size: calc(11px * var(--font-scale, 1));
+}
+/* What a click on the row does, for a row that opens somewhere other than
+   the node's document. Underlined, so it reads as the way forward. */
+.problems-issue-action {
+  display: block;
+  margin-top: 2px;
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .problems-issue.issue-error {
   background: var(--st-failed-bg);

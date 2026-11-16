@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { explorerApi, type AgentItem } from "../api/explorer";
 import { useI18n } from "../i18n";
+import { useEdition } from "../runners/edition";
+import { openSettings } from "../settings/openSettings";
 import { useApp } from "../store";
 import { costText, roleText, stateText } from "./explorerFormat";
 import { useExplorer } from "./explorerStore";
@@ -21,6 +23,7 @@ const ICON: Record<string, string> = {
 /** Running, external and recently finished agents. */
 export default function AgentsTab() {
   const { t } = useI18n();
+  const single = useEdition() === "single";
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
   const project = useApp((s) => s.activeProject);
@@ -86,7 +89,23 @@ export default function AgentsTab() {
               {items.map(row)}
             </section>
           ))}
-        {empty && <p className="ex-note">{t("explorer.agent.none")}</p>}
+        {/* Why it is empty and what fills it. Single-user: the way there is
+            This computer, where agents are let in and given a repo. */}
+        {empty && (
+          <p className="ex-note">
+            <span>{t("explorer.agent.none")}</span>
+            <br />
+            {t(single ? "explorer.agent.noneHintLocal" : "explorer.agent.noneHint")}
+            {single && (
+              <>
+                {" "}
+                <button type="button" className="run-inline-link" onClick={() => openSettings("runners")}>
+                  {t("offerAsk.fixLocal")}
+                </button>
+              </>
+            )}
+          </p>
+        )}
         {agents.error != null && <p className="ex-note">{(agents.error as Error).message ?? String(agents.error)}</p>}
       </div>
     </div>

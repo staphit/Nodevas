@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgents } from "../agents/agentStore";
-import { api, type AgentMessage, type UsageReport } from "../api";
+import { api, type AgentMessage, type Runner, type UsageReport } from "../api";
 import type { World } from "../game/world";
+import { localRunner, startingRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useWorkspace } from "../runs/workspaceStore";
@@ -147,6 +149,57 @@ describe("StationSide", () => {
     const card = screen.getByRole("region", { name: "Runner" });
     expect(within(card).getByText("本機")).toBeInTheDocument();
     expect(within(card).queryByText("this machine")).not.toBeInTheDocument();
+  });
+
+  // Single-user: the card read "Runners / this machine / Offline / Manage"
+  // for a reader who never added a runner.
+  it("is This computer in the single-user edition, saying how it is doing", () => {
+    const single = (runners: Runner[]) => {
+      useRunners.setState({ runners });
+      const view = render(
+        <EditionProvider edition="single">
+          <StationSide world={world} />
+        </EditionProvider>,
+      );
+      const card = screen.getByRole("region", { name: "This computer" });
+      return { card, text: card.textContent ?? "", unmount: view.unmount };
+    };
+
+    const ready = single([localRunner()]);
+    expect(within(ready.card).getByText("Ready")).toBeInTheDocument();
+    expect(ready.card.querySelector(".station-dot.status-running")).not.toBeNull();
+    expect(ready.text).not.toMatch(/runner|this machine|Online|Offline/i);
+    fireEvent.click(within(ready.card).getByRole("button", { name: "Settings" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    ready.unmount();
+
+    const starting = single([startingRunner()]);
+    expect(within(starting.card).getByText("Starting…")).toBeInTheDocument();
+    expect(starting.text).not.toMatch(/runner|this machine|Offline/i);
+    starting.unmount();
+
+    const stopped = single([{ ...localRunner(), online: false }]);
+    expect(within(stopped.card).getByText("Not running")).toBeInTheDocument();
+    expect(stopped.card.querySelector(".station-dot.is-off")).not.toBeNull();
+    expect(stopped.text).not.toMatch(/runner|this machine|Offline/i);
+    stopped.unmount();
+
+    // A runner connected by hand beside it keeps its own line.
+    const both = single([localRunner(), { id: "r9", name: "laptop", online: false } as Runner]);
+    expect(within(both.card).getByText("Ready")).toBeInTheDocument();
+    expect(within(both.card).getByText("laptop")).toBeInTheDocument();
+    expect(within(both.card).getByText("Offline")).toBeInTheDocument();
+  });
+
+  it("says how an agent gets on the roster, without a runner to add, in the single-user edition", () => {
+    const nobody = { building: { actors: [] } } as unknown as World;
+    render(
+      <EditionProvider edition="single">
+        <StationSide world={nobody} />
+      </EditionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /0 working · 0 in all/ }));
+    expect(screen.getByText("No agents yet. Send a task to an agent and it shows up here.")).toBeInTheDocument();
   });
 
   it("keeps Agent chat folded to what is unread until opened, and reads it when open", () => {

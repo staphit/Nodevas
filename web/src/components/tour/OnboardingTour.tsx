@@ -244,8 +244,9 @@ export function OnboardingTour() {
   }, [updateUIPreference, clearPendingStart]);
 
   // ---------------------------------------------------------------------
-  // Full replay (topbar ? button / command palette): forget every chapter
-  // and let the user choose again from the welcome dialog.
+  // Full replay (Settings › General, the command palette or its help view):
+  // forget every chapter and let the user choose again from the welcome
+  // dialog.
   // ---------------------------------------------------------------------
   useEffect(() => {
     const onStart = () => {

@@ -16,14 +16,17 @@ const Q = String.raw`"((?:[^"\\]|\\.)*)"`;
 
 interface Rule {
   re: RegExp;
+  /** What the finding is called here, and the last part of its catalog key. */
+  id: string;
   key: string;
   /** The catalog value each capture group fills, in order. */
   names: string[];
 }
 
-const rule = (pattern: string, key: string, ...names: string[]): Rule => ({
+const rule = (pattern: string, id: string, ...names: string[]): Rule => ({
   re: new RegExp(`^${pattern}$`),
-  key: `issue.msg.${key}`,
+  id,
+  key: `issue.msg.${id}`,
   names,
 });
 
@@ -114,22 +117,35 @@ function localizeKinds(raw: string, language: Language): string {
 /** A cycle `a -> b -> a`, drawn with arrows. */
 const localizeCycle = (raw: string) => raw.split(" -> ").join(" → ");
 
+/** The rule the hub's message was written by, and what it captured. */
+function matchRule(msg: string): { rule: Rule; match: RegExpExecArray } | null {
+  for (const candidate of RULES) {
+    const match = candidate.re.exec(msg);
+    if (match) return { rule: candidate, match };
+  }
+  return null;
+}
+
+/** A matched message, read from the catalog in language. */
+function renderRule(
+  { rule: { key, names }, match }: { rule: Rule; match: RegExpExecArray },
+  language: Language,
+): string {
+  const values: Record<string, string> = {};
+  names.forEach((name, index) => {
+    const raw = match[index + 1] ?? "";
+    if (name === "kinds") values[name] = localizeKinds(raw, language);
+    else if (name === "cycle") values[name] = localizeCycle(raw);
+    else values[name] = unquote(raw);
+  });
+  return translate(key, language, values);
+}
+
 /** The hub's validation message in language, or msg itself when it is not one this list knows. */
 export function localizeIssueMessage(msg: string, language: Language): string {
   if (language === "en") return msg;
-  for (const { re, key, names } of RULES) {
-    const match = re.exec(msg);
-    if (!match) continue;
-    const values: Record<string, string> = {};
-    names.forEach((name, index) => {
-      const raw = match[index + 1] ?? "";
-      if (name === "kinds") values[name] = localizeKinds(raw, language);
-      else if (name === "cycle") values[name] = localizeCycle(raw);
-      else values[name] = unquote(raw);
-    });
-    return translate(key, language, values);
-  }
-  return msg;
+  const found = matchRule(msg);
+  return found ? renderRule(found, language) : msg;
 }
 
 /** `node "c" has invalid priority "zzz"`, `node "c": type "note" cannot ...`. */
@@ -150,8 +166,24 @@ export function localizeGraphRefusal(msg: string, language: Language): string {
   return translate("issue.onNode", language, { id: unquote(match[1]), msg: finding });
 }
 
-/** issue with its message in language. */
-export function localizeIssue(issue: Issue, language: Language): Issue {
-  const msg = localizeIssueMessage(issue.msg, language);
-  return msg === issue.msg ? issue : { ...issue, msg };
+/**
+ * An issue as the board reads it. `rule` says which known finding it is
+ * ("disconnected", "cycle"…) in every language, English included: the hub
+ * sends no code, and the Problems panel sees only the translated message, so
+ * this is what lets it offer the fix for one kind of finding. Absent for a
+ * message this list does not know.
+ */
+export interface LocalizedIssue extends Issue {
+  rule?: string;
+}
+
+/** issue with its message in language, and the rule that message matched. */
+export function localizeIssue(issue: Issue, language: Language): LocalizedIssue {
+  const found = matchRule(issue.msg);
+  if (!found) return issue;
+  return {
+    ...issue,
+    msg: language === "en" ? issue.msg : renderRule(found, language),
+    rule: found.rule.id,
+  };
 }

@@ -85,6 +85,19 @@ describe("validation", () => {
     expect(readPreference("language")).toBe("en");
   });
 
+  // General is the top of the Settings list and where the tour sends people
+  // for the replay, help and the theme; it is remembered as "appearance".
+  it("opens Settings on General until another section is remembered", () => {
+    configurePreferenceStorage(fakeStorage());
+    expect(readPreference("settingsSection")).toBe("appearance");
+
+    configurePreferenceStorage(fakeStorage({ "vised-settings-section": "project" }));
+    expect(readPreference("settingsSection")).toBe("project");
+
+    configurePreferenceStorage(fakeStorage({ "vised-settings-section": "nowhere" }));
+    expect(readPreference("settingsSection")).toBe("appearance");
+  });
+
   // The explorer default is a thunk over the window width: a phone-sized
   // window starts with the overlay out of the way, a desktop one starts with
   // the tree showing. It is only a default — a stored answer always wins.

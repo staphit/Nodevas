@@ -30,13 +30,6 @@ func (c *Client) MaxConcurrentRuns() int {
 	return c.cfg().MaxConcurrentRuns()
 }
 
-// settingsAnswer is a settings_done on its way out, with the hello to send
-// first when the owner asked to look for the agent CLIs again.
-type settingsAnswer struct {
-	done runnerwire.SettingsDone
-	info *runnerwire.Info
-}
-
 // applySettings answers a settings_request from the hub of the runner whose
 // owner is ownerID. Everything asked for is checked before anything applies.
 func (c *Client) applySettings(ownerID string, req runnerwire.SettingsRequest) runnerwire.SettingsDone {

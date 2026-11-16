@@ -50,7 +50,7 @@ https://github.com/user-attachments/assets/ab98a136-677c-473e-9f94-45a330ec74e6
 
 server 只負責顯示看板；你電腦上的小程式 **runner** 用你自己的登入，在你自己的 repo 裡執行 agent，而且只執行你開始或同意的 run。只在一台電腦上自己用時它內建在 app 裡；團隊 server 上則每個人在自己的電腦上執行一個。設定、安全、自動推進與更多示範影片：[Agent 工作站](./docs/workstation.zh-TW.md)。
 
-agent 相關功能一開始是隱藏的。開啟 **設定 → Agent 與 Runner → 讓 agent 在這裡工作** 或進入工作站時就會出現；工作區一有 runner、執行紀錄或已連線的 agent，也會自動出現。
+agent 相關功能一開始是隱藏的。開啟 **設定 → Agent 與 Runner → 讓 agent 在這裡工作** 或進入工作站時就會出現；工作區一有 runner、執行紀錄或已連線的 agent，也會自動出現。只在一台電腦上自己用時，內建的 runner 一直都在，所以要等你替它加入 repo 之後才算。
 
 ## 安全模型
 

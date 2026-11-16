@@ -22,8 +22,9 @@ import { useI18n } from "../i18n";
 import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
-import { builtInRunner, useEdition } from "../runners/edition";
+import { builtInRunner, localState, useEdition } from "../runners/edition";
 import { AddRepoDialog, repoAddCommand } from "../local/AddRepoDialog";
+import { LocalNotReady } from "../local/LocalNotReady";
 import { permissionOf } from "../local/ThisComputerPanel";
 import { openSettings } from "../settings/openSettings";
 import { agentName } from "../game/labels";
@@ -192,6 +193,10 @@ export function DispatchDialog({
     () => choices.filter((runner) => runnerUnavailableReason(runner) === ""),
     [choices],
   );
+  // Single-user with nothing that can take a run: this computer is not
+  // ready, said in its own words. Never a list of runners to manage; the
+  // classic path above is only for a runner that can take the run now.
+  const localDown = single && eligible.length === 0;
   const [addedNote, setAddedNote] = useState("");
 
   const [runnerId, setRunnerId] = useState("");
@@ -463,6 +468,11 @@ export function DispatchDialog({
     window.dispatchEvent(new CustomEvent("nodevas-open-runners"));
   };
 
+  const openThisComputer = () => {
+    onClose();
+    openSettings("runners");
+  };
+
   const runnerLabel = (item: Runner) => {
     const reason = runnerUnavailableReason(item);
     const host = item.info?.hostname && item.info.hostname !== item.name ? ` (${item.info.hostname})` : "";
@@ -493,7 +503,11 @@ export function DispatchDialog({
           </span>
           <div>
             <h2 id="run-dispatch-title">{t("runs.dispatchTitle")}</h2>
-            <p>{t(localRunner ? "runs.dispatchDescriptionLocal" : "runs.dispatchDescription", { title: nodeTitle })}</p>
+            <p>
+              {t(localRunner || localDown ? "runs.dispatchDescriptionLocal" : "runs.dispatchDescription", {
+                title: nodeTitle,
+              })}
+            </p>
           </div>
           <button
             type="button"
@@ -549,14 +563,7 @@ export function DispatchDialog({
               {missingTestCommand && localRunner && (
                 <div className="run-stage-warning" role="status">
                   <span>{t("dispatch.noTestCommandLocal")}</span>{" "}
-                  <button
-                    type="button"
-                    className="run-inline-link"
-                    onClick={() => {
-                      onClose();
-                      openSettings("runners");
-                    }}
-                  >
+                  <button type="button" className="run-inline-link" onClick={openThisComputer}>
                     {t("dispatch.setTestCommand")}
                   </button>
                 </div>
@@ -598,10 +605,8 @@ export function DispatchDialog({
 
           {loadingRunners ? (
             <p className="run-empty">{t("common.loading")}</p>
-          ) : single && (mine.length === 0 || (localRunner && eligible.length === 0)) ? (
-            <p className="run-empty" role="status">
-              {t("local.unavailable")}
-            </p>
+          ) : localDown ? (
+            <LocalNotReady starting={localState(mine) === "starting"} onOpenSettings={openThisComputer} />
           ) : mine.length === 0 ? (
             <div className="run-empty">
               <p>{t("runs.noRunners")}</p>
@@ -694,8 +699,14 @@ export function DispatchDialog({
                       </select>
                     </label>
                   </div>
-                  {agents.length === 0 && (
-                    <p className="run-hint">{t(localRunner ? "runs.noAgentsLocal" : "runs.noAgents")}</p>
+                  {agents.length === 0 && !localRunner && <p className="run-hint">{t("runs.noAgents")}</p>}
+                  {agents.length === 0 && localRunner && (
+                    <p className="run-hint">
+                      {t("runs.noAgentsLocal")}{" "}
+                      <button type="button" className="run-inline-link" onClick={openThisComputer}>
+                        {t("offerAsk.fixLocal")}
+                      </button>
+                    </p>
                   )}
 
                   <details className="run-advanced" data-testid="dispatch-fallbacks">
