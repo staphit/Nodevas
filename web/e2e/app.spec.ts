@@ -193,7 +193,7 @@ test.describe("context menus", () => {
     await cell.click({ button: "right" });
     const menu = page.locator(".lane-context-menu");
     await expect(menu).toBeVisible();
-    await expect(menu.getByText(/預期|里程碑|開始|死線/).first()).toBeVisible();
+    await expect(menu.getByText(/預期|里程碑|開始|截止/).first()).toBeVisible();
   });
 });
 

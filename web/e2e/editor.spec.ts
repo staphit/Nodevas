@@ -422,6 +422,50 @@ test.describe("canvas resize handles", () => {
       .toBe(resized);
   });
 
+  // A live test pressed Ctrl+Z after a resize and the card kept its new size.
+  // Its own test, not the end of the one above: that one reloads, and the
+  // undo history lives in the page.
+  test("undoes a resize with Ctrl+Z", async ({ page }) => {
+    await freshProject(page, ["可調整"]);
+    const card = page.locator(".lane-wrap.graph .col-card").filter({ hasText: "可調整" });
+    await card.first().click();
+
+    const handle = page.locator(".card-resize-frame .col-card-handle.e");
+    await expect(handle).toBeVisible();
+    const styleWidth = () =>
+      card.first().evaluate((element) => Number((element as HTMLElement).style.width.replace("px", "")));
+    const before = await styleWidth();
+
+    // The step is recorded once the hub has taken the new size, so the key
+    // waits for that answer.
+    const saved = page.waitForResponse(
+      (response) => response.url().includes("/api/graph/ops") && response.ok(),
+    );
+    await handle.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const at = (dx: number) => ({
+        bubbles: true,
+        pointerId: 1,
+        pointerType: "mouse",
+        button: 0,
+        clientX: rect.left + rect.width / 2 + dx,
+        clientY: rect.top + rect.height / 2,
+      });
+      element.dispatchEvent(new PointerEvent("pointerdown", at(0)));
+      element.dispatchEvent(new PointerEvent("pointermove", at(20)));
+      element.dispatchEvent(new PointerEvent("pointermove", at(40)));
+      element.dispatchEvent(new PointerEvent("pointerup", at(40)));
+    });
+    await saved;
+    await expect.poll(styleWidth).toBeGreaterThan(before);
+
+    // Opening the card may have put the keyboard in its document, where
+    // Ctrl+Z is the editor's own; the board's handle is where it is the app's.
+    await handle.focus();
+    await page.keyboard.press("Control+z");
+    await expect.poll(styleWidth).toBe(before);
+  });
+
   test("resizes with the keyboard from a focused handle", async ({ page }) => {
     await freshProject(page, ["可調整"]);
     const card = page.locator(".lane-wrap.graph .col-card").filter({ hasText: "可調整" });

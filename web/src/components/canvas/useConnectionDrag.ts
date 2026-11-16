@@ -16,6 +16,7 @@ export interface ConnectionDragState {
 
 export function useConnectionDrag({
   enabled,
+  withoutModifier = false,
   graphPointFromClient,
   connectionPointForNode,
   onSelectGate,
@@ -24,6 +25,12 @@ export function useConnectionDrag({
   connectLogicGateToNode,
 }: {
   enabled: boolean;
+  /**
+   * Start a connection on a plain drag from a card or a gate, for a pointer
+   * that cannot hold Alt. Set by the board's gesture mode; the modifier keeps
+   * working either way.
+   */
+  withoutModifier?: boolean;
   graphPointFromClient: (clientX: number, clientY: number) => Point | null;
   connectionPointForNode: (nodeId: string, toward: Point) => Point | null;
   onSelectGate: (gateId: string) => void;
@@ -43,10 +50,14 @@ export function useConnectionDrag({
     const hoveredElement = document.elementFromPoint(event.clientX, event.clientY);
     const hoveredNode = hoveredElement?.closest<HTMLElement>(".col-card[data-node-id]");
     const hoveredGate = hoveredElement?.closest<SVGGElement>(".logic-gate[data-gate-id]");
+    const hoveredId = hoveredNode?.dataset.nodeId ?? null;
     const next = {
       ...current,
       pointer,
-      targetId: hoveredNode?.dataset.nodeId ?? null,
+      // The card a line starts from is no target: its connect dot sits a few
+      // pixels off its edge, so a drag that comes back to it is a change of
+      // mind, not a request to make the card wait for itself.
+      targetId: hoveredId === current.sourceId ? null : hoveredId,
       targetGateId: current.sourceGateId ? null : hoveredGate?.dataset.gateId ?? null,
       moved:
         current.moved ||
@@ -82,8 +93,17 @@ export function useConnectionDrag({
     return true;
   };
 
-  const startNode = (event: PointerEvent<HTMLElement>, nodeId: string): boolean => {
-    if (!enabled || event.button !== 0 || !event.altKey) return false;
+  /**
+   * `fromPort` is a press on the card's connect dot: it means a connection
+   * whatever is held and whichever gesture mode the board is in.
+   */
+  const startNode = (
+    event: PointerEvent<HTMLElement>,
+    nodeId: string,
+    fromPort = false,
+  ): boolean => {
+    if (!enabled || event.button !== 0) return false;
+    if (!fromPort && !withoutModifier && !event.altKey) return false;
     const pointer = graphPointFromClient(event.clientX, event.clientY);
     const start = pointer ? connectionPointForNode(nodeId, pointer) : null;
     if (!pointer || !start) return false;
@@ -113,7 +133,8 @@ export function useConnectionDrag({
     gateId: string,
     start: Point,
   ): boolean => {
-    if (!enabled || event.button !== 0 || !event.altKey) return false;
+    if (!enabled || event.button !== 0) return false;
+    if (!withoutModifier && !event.altKey) return false;
     const pointer = graphPointFromClient(event.clientX, event.clientY);
     if (!pointer) return false;
     event.preventDefault();
@@ -142,7 +163,7 @@ export function useConnectionDrag({
     if (update(event)) return true;
     if (!enabled) return false;
     const target = event.currentTarget as HTMLElement;
-    if (event.altKey) {
+    if (event.altKey || withoutModifier) {
       const nodeId = target.dataset.nodeId;
       const pointer = graphPointFromClient(event.clientX, event.clientY);
       const point = pointer && nodeId ? connectionPointForNode(nodeId, pointer) : null;

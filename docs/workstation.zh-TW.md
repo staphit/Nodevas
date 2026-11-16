@@ -32,7 +32,7 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
   - hub 放在 Cloudflare Access 後面，runner 用 service token 連線。
   - 可以用驗證器 App 開啟兩步驟驗證（**設定 → 帳號**）。開啟後登入還要輸入 App 的驗證碼，step-up 也改問 App，不再寄 email。
 
-app 裡與 agent 有關的部分（runner、run、自動推進、Agent 對話與用量）預設隱藏，直到你打開 **設定 → Agent 與 Runner → 讓 agent 在這裡工作**，或這個工作區已經有 runner、run 或連線中的 agent。
+app 裡與 agent 有關的部分（runner、run、自動推進、Agent 對話與用量）預設隱藏，直到你打開 **設定 → Agent 與 Runner → 讓 agent 在這裡工作** 或進入工作站，或這個工作區已經有 runner、run 或連線中的 agent。只在一台電腦上自己用時，內建的 runner 一直都在，所以要等你替它加入 repo 之後才算。
 
 設定只要兩步：
 

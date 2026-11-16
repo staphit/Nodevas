@@ -1,12 +1,15 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { analyzeGraph } from "../../analysis";
+import { analyzeGraph, type GraphAnalysis } from "../../analysis";
+import { translate } from "../../i18n";
+import { localizeIssue } from "../../issueMessages";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import type { Issue } from "../../types";
-import { ProblemsPanel, problemCount } from "./ProblemsPanel";
+import { ProblemsPanel, hasUrgentProblem, problemCount } from "./ProblemsPanel";
 
 const empty = analyzeGraph(null, {});
 
@@ -20,6 +23,72 @@ const warning: Issue = { severity: "warning", nodeId: "b", msg: "unknown flag" }
 
 beforeEach(() => {
   useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+});
+
+// Two new cards nobody had connected yet turned the badge failure-red. Only
+// something actually wrong earns that colour; warnings alone are counted in a
+// calmer one.
+describe("hasUrgentProblem", () => {
+  it("is false for warnings and hints alone", () => {
+    expect(hasUrgentProblem(empty, [])).toBe(false);
+    expect(hasUrgentProblem(empty, [hint, warning])).toBe(false);
+  });
+
+  it("is true for an error, an overdue node or a broken dependency", () => {
+    expect(hasUrgentProblem(empty, [warning, { severity: "error", msg: "cycle" }])).toBe(true);
+    const overdue: GraphAnalysis = {
+      ...empty,
+      overdue: new Map([["a", [{ kind: "deadline", date: "2026-01-01" }]]]),
+    };
+    expect(hasUrgentProblem(overdue, [])).toBe(true);
+    const broken: GraphAnalysis = {
+      ...empty,
+      violations: [{ nodeId: "a", sourceIds: ["b"], kind: "actual", reason: { kind: "requires-false" } }],
+    };
+    expect(hasUrgentProblem(broken, [])).toBe(true);
+  });
+});
+
+// "Not connected to anything" is not put right in the node's document, which
+// is where picking it used to land. The row says where it goes instead.
+describe("ProblemsPanel's not-connected row", () => {
+  const disconnected: Issue = {
+    severity: "warning",
+    nodeId: "b",
+    msg: "node is not connected to anything",
+  };
+
+  function panel(onPick = vi.fn()) {
+    render(
+      <ProblemsPanel
+        analysis={empty}
+        issues={[localizeIssue(disconnected, "zh-TW"), localizeIssue(warning, "zh-TW")]}
+        nodeTitle={(id) => id ?? ""}
+        onPick={onPick}
+        onClose={() => undefined}
+      />,
+    );
+    return onPick;
+  }
+
+  it("opens the node on its Dependencies, and says so on the row", async () => {
+    const user = userEvent.setup();
+    const onPick = panel();
+    const label = translate("board.problemsConnect", "zh-TW");
+    const row = screen.getByRole("button", { name: new RegExp(label) });
+    await user.click(row);
+    expect(onPick).toHaveBeenCalledWith("b", "dependencies");
+  });
+
+  it("leaves every other row opening the node as before", async () => {
+    const user = userEvent.setup();
+    const onPick = panel();
+    const label = translate("board.problemsConnect", "zh-TW");
+    const other = screen.getByRole("button", { name: /unknown flag/ });
+    expect(other).not.toHaveTextContent(label);
+    await user.click(other);
+    expect(onPick).toHaveBeenCalledWith("b", undefined);
+  });
 });
 
 describe("ProblemsPanel", () => {

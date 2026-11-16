@@ -24,8 +24,8 @@ const CopilotProviderOff = "off"
 // detectLocalLLM finds the local server; tests replace it.
 var detectLocalLLM = localllm.New().Detect
 
-// localDetectWait bounds a detection made while answering a model call;
-// the hello's periodic re-detection keeps the cache warm.
+// localDetectWait bounds a detection made while answering a model call, and
+// the one each background look at this machine makes (detector.go).
 const localDetectWait = 2 * time.Second
 
 // autoCopilotLLM is the local model this runner offers when its owner set

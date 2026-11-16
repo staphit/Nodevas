@@ -2,11 +2,11 @@
 // no runner to pick, repos added right there, and not one word of "runner"
 // outside a collapsed Advanced.
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type Actor, type RunBudgetStatus, type Runner, type RunnerRepo } from "../api";
-import { localRunner, visibleText } from "../local/localFixtures";
+import { localRunner, restartedRunner, startingRunner, visibleText } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
 import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
@@ -28,6 +28,18 @@ const withinBudget: RunBudgetStatus = {
 
 const big: RunnerRepo = { id: "repo9", name: "big", path: "D:\\code\\big" };
 
+const STARTING = "Getting this computer ready to run agents… This usually takes a few seconds.";
+const UNAVAILABLE = "The part of Nodevas that runs agents isn't running. Restart Nodevas.";
+
+/** A runner the person connected by hand beside the app's own. */
+const laptop: Runner = {
+  ...localRunner(),
+  id: "r9",
+  name: "laptop",
+  builtIn: undefined,
+  hubLocal: undefined,
+};
+
 function withRepos(runner: Runner, repos: RunnerRepo[]): Runner {
   return { ...runner, info: { ...runner.info!, repos } };
 }
@@ -40,10 +52,10 @@ function serve(runners: Runner[]) {
   vi.spyOn(api, "listRunners").mockResolvedValue({ runners });
 }
 
-function dispatchDialog() {
+function dispatchDialog(onClose = vi.fn()) {
   return render(
     <EditionProvider edition="single">
-      <DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />
+      <DispatchDialog nodeId="alpha" onClose={onClose} onCreated={vi.fn()} />
     </EditionProvider>,
   );
 }
@@ -147,6 +159,106 @@ describe("DispatchDialog, single-user edition", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Manage runners" })).not.toBeInTheDocument();
   });
+
+  // The hub lists its own runner from the moment it starts, a few seconds
+  // before that runner connects. Until then the dialog showed a team hub's
+  // "None of your runners can take a run" and "Manage runners".
+  it.each([
+    ["on a first start", () => startingRunner()],
+    ["after a restart", () => restartedRunner()],
+  ])("waits calmly while this computer gets ready, %s", async (_when, runner) => {
+    serve([runner()]);
+    dispatchDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Dispatch to agent" });
+    expect(await screen.findByText(STARTING)).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("on this computer");
+    expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    // Nothing is wrong yet, so there is nothing to press.
+    expect(within(screen.getByTestId("local-not-ready")).queryByRole("button")).not.toBeInTheDocument();
+    expect(visibleText(dialog)).not.toMatch(/runner/i);
+
+    // It connects: the list changes and the form is there, no click needed.
+    act(() => useRunners.setState({ runners: [localRunner()] }));
+    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    expect(screen.queryByText(STARTING)).not.toBeInTheDocument();
+  });
+
+  it("offers what to try once it has stopped: check again, or open This computer", async () => {
+    const list = vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...localRunner(), online: false }] });
+    const onClose = vi.fn();
+    dispatchDialog(onClose);
+    const dialog = await screen.findByRole("dialog", { name: "Dispatch to agent" });
+    const block = await screen.findByTestId("local-not-ready");
+    expect(within(block).getByText(UNAVAILABLE)).toBeInTheDocument();
+    expect(
+      within(block).getByText(
+        "It may only need a moment: click Check again. If it still isn't running, close Nodevas completely and open it again.",
+      ),
+    ).toBeInTheDocument();
+    expect(visibleText(dialog)).not.toMatch(/runner/i);
+
+    // Check again asks the hub afresh; this time it is back.
+    list.mockResolvedValue({ runners: [localRunner()] });
+    fireEvent.click(within(block).getByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("opens This computer from the stopped state", async () => {
+    serve([{ ...localRunner(), online: false }]);
+    const onClose = vi.fn();
+    dispatchDialog(onClose);
+    fireEvent.click(await screen.findByRole("button", { name: "Open This computer" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
+  });
+
+  it("never falls back to a team hub's words when nothing here can take a run", async () => {
+    // No runner at all (serve --no-runner), or only one connected by hand
+    // that is offline.
+    for (const runners of [[], [{ ...laptop, online: false }]]) {
+      serve(runners);
+      const { unmount } = dispatchDialog();
+      const dialog = await screen.findByRole("dialog", { name: "Dispatch to agent" });
+      expect(await screen.findByText(UNAVAILABLE)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Manage runners" })).not.toBeInTheDocument();
+      expect(visibleText(dialog)).not.toMatch(/runner/i);
+      unmount();
+      useRunners.setState({ loaded: false, runners: [] });
+    }
+  });
+
+  it("still dispatches the classic way to a runner connected by hand that is online", async () => {
+    serve([startingRunner(), laptop]);
+    dispatchDialog();
+    const runner = (await screen.findByRole("combobox", { name: "Runner" })) as HTMLSelectElement;
+    expect(runner.value).toBe("r9");
+    expect(screen.queryByTestId("local-not-ready")).not.toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+  });
+
+  // The top-bar pill says "agents can't start" in this state; the dialog
+  // must agree and not offer the runner connected by hand.
+  it("sticks to this computer once its runner was welcomed, even with a runner connected by hand online", async () => {
+    serve([{ ...localRunner(), online: false }, laptop]);
+    dispatchDialog();
+    expect(await screen.findByTestId("local-not-ready")).toHaveTextContent(UNAVAILABLE);
+    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+  });
+
+  it("links to This computer when no agent is installed", async () => {
+    const base = localRunner();
+    serve([{ ...base, info: { ...base.info!, agents: [] } }]);
+    const onClose = vi.fn();
+    dispatchDialog(onClose);
+    const hint = await screen.findByText(/No agent is installed on this computer/);
+    fireEvent.click(within(hint).getByRole("button", { name: "Open This computer" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+  });
 });
 
 describe("GlobalAgentForm, single-user edition", () => {
@@ -201,5 +313,33 @@ describe("GlobalAgentForm, single-user edition", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0]).toMatchObject({ runnerId: "local1", repoId: "repo1", agent: "claude" });
+  });
+
+  // Before its runner connects, the form said "None of your runners can
+  // start a global agent now." over a disabled Runner box.
+  it("waits calmly while this computer gets ready, then shows the form", async () => {
+    serve([startingRunner()]);
+    const { container } = globalForm();
+    expect(await screen.findByText(STARTING)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("local-not-ready")).queryByRole("button")).not.toBeInTheDocument();
+    expect(visibleText(container)).not.toMatch(/runner/i);
+
+    act(() => useRunners.setState({ runners: [localRunner()] }));
+    expect(await screen.findByRole("textbox", { name: "Task" })).toBeInTheDocument();
+  });
+
+  it("offers what to try once it has stopped", async () => {
+    const list = vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...localRunner(), online: false }] });
+    const { container } = globalForm();
+    const block = await screen.findByTestId("local-not-ready");
+    expect(within(block).getByText(UNAVAILABLE)).toBeInTheDocument();
+    expect(visibleText(container)).not.toMatch(/runner/i);
+
+    fireEvent.click(within(block).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(await screen.findByTestId("local-not-ready")).getByRole("button", { name: "Open This computer" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
   });
 });

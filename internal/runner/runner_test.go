@@ -32,8 +32,58 @@ type fakeCommands struct {
 	outputs map[string]string
 	errs    map[string]error
 	calls   []string
+	// hung holds the commands that do not answer (hang); waiting counts the
+	// Runs of each that are waiting for it now (hanging).
+	hung    map[string]chan struct{}
+	waiting map[string]int
 	// gh answers RunIn (gh's calls); nil fails every one.
 	gh func(dir, stdin string, args []string) (string, error)
+}
+
+// hang makes every later Run of that command wait, as a CLI that never
+// answers does, until release is called or the command's context ends.
+func (f *fakeCommands) hang(key string) (release func()) {
+	gate := make(chan struct{})
+	f.mu.Lock()
+	if f.hung == nil {
+		f.hung = map[string]chan struct{}{}
+	}
+	f.hung[key] = gate
+	f.mu.Unlock()
+	return func() {
+		f.mu.Lock()
+		delete(f.hung, key)
+		f.mu.Unlock()
+		close(gate)
+	}
+}
+
+// hanging counts the Runs of that command waiting on hang right now.
+func (f *fakeCommands) hanging(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waiting[key]
+}
+
+// set changes what a command prints from now on, while a runner may be
+// running it.
+func (f *fakeCommands) set(key, output string) {
+	f.mu.Lock()
+	f.outputs[key] = output
+	f.mu.Unlock()
+}
+
+// ran counts the Runs of that command so far.
+func (f *fakeCommands) ran(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, call := range f.calls {
+		if call == key {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *fakeCommands) RunIn(_ context.Context, dir string, _ []string, stdin string, name string, args ...string) (string, error) {
@@ -54,10 +104,33 @@ func (f *fakeCommands) LookPath(name string) (string, error) {
 	return "", exec.ErrNotFound
 }
 
-func (f *fakeCommands) Run(_ context.Context, name string, args ...string) (string, error) {
+func (f *fakeCommands) Run(ctx context.Context, name string, args ...string) (string, error) {
 	key := strings.Join(append([]string{name}, args...), " ")
 	f.mu.Lock()
 	f.calls = append(f.calls, key)
+	gate := f.hung[key]
+	if gate != nil {
+		if f.waiting == nil {
+			f.waiting = map[string]int{}
+		}
+		f.waiting[key]++
+	}
+	f.mu.Unlock()
+	if gate != nil {
+		var err error
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+		f.mu.Lock()
+		f.waiting[key]--
+		f.mu.Unlock()
+		if err != nil {
+			return "", err
+		}
+	}
+	f.mu.Lock()
 	out, err := f.outputs[key], f.errs[key]
 	f.mu.Unlock()
 	return out, err
@@ -399,6 +472,27 @@ type fakeHub struct {
 	dropAfter atomic.Int32 // close after welcome on the first N connections
 	authSeen  atomic.Value
 	accessID  atomic.Value
+	// helloWithin is how long a connection has to say hello before the hub
+	// closes it, as the real hub does; zero waits for as long as it takes.
+	// late counts the connections closed that way.
+	helloWithin atomic.Int64
+	late        atomic.Int32
+
+	mu   sync.Mutex
+	conn *websocket.Conn // the connection that last said hello
+}
+
+// drop closes the current connection, as a hub restart would.
+func (h *fakeHub) drop() {
+	h.t.Helper()
+	h.mu.Lock()
+	conn := h.conn
+	h.conn = nil
+	h.mu.Unlock()
+	if conn == nil {
+		h.t.Fatal("no runner connected")
+	}
+	_ = conn.Close(websocket.StatusGoingAway, "restarting")
 }
 
 func newFakeHub(t *testing.T) (*fakeHub, *httptest.Server) {
@@ -427,6 +521,16 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	n := h.conns.Add(1)
 	ctx := r.Context()
+	// A timer and an explicit close, not a read deadline: the runner is told
+	// why, as the real hub tells it.
+	var late *time.Timer
+	if within := time.Duration(h.helloWithin.Load()); within > 0 {
+		late = time.AfterFunc(within, func() {
+			h.late.Add(1)
+			_ = conn.Close(websocket.StatusPolicyViolation, "expected hello")
+		})
+		defer late.Stop()
+	}
 	for {
 		var msg runnerwire.Envelope
 		if err := wsjson.Read(ctx, conn, &msg); err != nil {
@@ -434,6 +538,12 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		switch msg.Type {
 		case runnerwire.TypeHello:
+			if late != nil {
+				late.Stop()
+			}
+			h.mu.Lock()
+			h.conn = conn
+			h.mu.Unlock()
 			h.hellos <- *msg.Hello
 			_ = wsjson.Write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeWelcome,
 				Welcome: &runnerwire.Welcome{RunnerID: "r1", Name: "pc", Owner: "me"}})

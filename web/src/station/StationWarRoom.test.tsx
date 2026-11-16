@@ -7,6 +7,7 @@ import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { buildWorld } from "../game/buildWorld";
 import { GameActionsProvider } from "../game/GameActions";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useRuns } from "../runs/runStore";
 import { useSettingsRequest } from "../settings/openSettings";
@@ -486,6 +487,29 @@ describe("StationWarRoom", () => {
     expect(useApp.getState().preferences.projectMode).toBe("settings");
     // Straight to the add form, not just the runners list.
     expect(useSettingsRequest.getState().add).toBe(true);
+  });
+
+  // Single-user: there is no runner to add by hand, and "Add a runner"
+  // opened a form that edition does not have.
+  it("says this computer cannot run agents instead, in the single-user edition", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    useRunners.setState({ loaded: false, runners: [], error: null });
+    render(
+      <EditionProvider edition="single">
+        <GameActionsProvider>
+          <Harness />
+        </GameActionsProvider>
+      </EditionProvider>,
+    );
+
+    const block = await screen.findByTestId("local-not-ready");
+    expect(block).toHaveTextContent("The part of Nodevas that runs agents isn't running. Restart Nodevas.");
+    expect(screen.queryByRole("button", { name: "Add a runner" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No runner yet/)).not.toBeInTheDocument();
+    fireEvent.click(within(block).getByRole("button", { name: "Open This computer" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useSettingsRequest.getState().add).toBe(false);
   });
 });
 

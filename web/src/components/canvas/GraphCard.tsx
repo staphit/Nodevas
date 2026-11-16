@@ -1,5 +1,6 @@
 /**
- * One node card on the graph board, with its ⋯ button and resize frame.
+ * One node card on the graph board, with its ⋯ button, its connect dot and
+ * its resize frame.
  *
  * Memoized, and handed only values that are equal from one board render to the
  * next unless something about this card changed: everything is resolved to
@@ -16,7 +17,14 @@ import type { GraphNode, NodeType, Status, StatusDefinition } from "../../types"
 import { RunCardBadge } from "../../runs/RunChanges";
 import { AutopilotCardBadge } from "../../autopilot/AutopilotCardBadge";
 import { NodeTypeChip } from "../../nodeTypeTheme";
-import { CARD_HANDLES, CARD_MAX_H, CARD_MAX_W, CARD_MIN_H, CARD_MIN_W } from "./geometry";
+import {
+  CARD_HANDLES,
+  CARD_MAX_H,
+  CARD_MAX_W,
+  CARD_MIN_H,
+  CARD_MIN_W,
+  connectPortTop,
+} from "./geometry";
 
 /**
  * Stable entry points into the board's handlers, keyed by node id. GraphCanvas
@@ -35,6 +43,10 @@ export interface CardEvents {
   keyDown: (event: React.KeyboardEvent<HTMLElement>, id: string) => void;
   contextMenu: (event: React.MouseEvent<HTMLElement>, id: string) => void;
   moreClick: (event: React.MouseEvent<HTMLElement>, id: string) => void;
+  connectPointerDown: (event: React.PointerEvent<HTMLElement>, id: string) => void;
+  connectPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
+  connectPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
+  connectPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
   resizePointerDown: (
     event: React.PointerEvent<HTMLElement>,
     id: string,
@@ -252,12 +264,40 @@ export const GraphCard = memo(function GraphCard({
           title={t("board.nodeMenu.more", { title })}
           aria-haspopup="menu"
           onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
+          // Enter and Space are this button's own click, and the board must
+          // not also read them as "open the selected card". Every other key
+          // goes on up: Ctrl/⌘+Z and Escape belong to the window, and a
+          // button that swallowed them made undo do nothing after its menu
+          // closed and left the keyboard here.
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+          }}
           onClick={(event) => events.moreClick(event, n.id)}
         >
           ⋯
         </button>
       )}
+      {/* Where a connection starts: a round dot on the right edge, between
+          the squares that resize from there and short of the next card
+          (04-board.css says how far each way). A sibling for the same reason
+          as the menu button, shown on hover and on selection. It is a
+          pointer's affordance only: the keyboard connects through the card's
+          menu, so it takes no tab stop. Kept at every level of detail, and
+          at the minimal one held near its full on-screen size: a phone's
+          board opens there, and a finger has no Alt. */}
+      <span
+        className="col-card-connect"
+        style={{ left: left + width, top: top + connectPortTop(height, detail === "minimal") }}
+        role="img"
+        aria-label={t("canvas.connectPort", { title })}
+        title={t("canvas.connectPortTitle")}
+        onPointerDown={(event) => events.connectPointerDown(event, n.id)}
+        onPointerMove={events.connectPointerMove}
+        onPointerUp={events.connectPointerUp}
+        onPointerCancel={events.connectPointerCancel}
+        onLostPointerCapture={() => events.lostPointerCapture(n.id)}
+        onContextMenu={(event) => events.contextMenu(event, n.id)}
+      />
       {selected && (
         // Sibling of the card: a clipped shape would otherwise clip
         // its own handles away.

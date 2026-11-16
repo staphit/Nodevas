@@ -45,6 +45,18 @@ export const CARD_HANDLES = [
   { name: 'w', label: 'left', dirX: -1, dirY: 0 },
 ] as const;
 
+/**
+ * Where a card's connect dot sits on its right edge, as a distance from the
+ * card's top. At three quarters of the height it falls in the stretch of edge
+ * between the east and south-east resize squares, the only one wide enough on
+ * the shortest card; at the minimal level of detail the squares are not drawn
+ * and the dot, held at its on-screen size, needs the whole height, so it goes
+ * to the middle. 04-board.css sizes the dot to fit (connectPort.test.ts).
+ */
+export function connectPortTop(height: number, minimal: boolean): number {
+  return height * (minimal ? 0.5 : 0.75);
+}
+
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 2;
 export const ZOOM_STEP = 0.1;

@@ -18,6 +18,7 @@ import { DEFAULT_LINE } from "../../domain/graph/edgeStyle";
 import type { LogicGate, LogicGateOperator } from "../../types";
 import { useI18n } from "../../i18n";
 import { DependencyLine } from "./DependencyLine";
+import { useGraphGestureMode } from "./gestureMode";
 import {
   cardBoundary,
   cardCenter,
@@ -110,6 +111,9 @@ export function StandaloneLogicGate({
   obstacles: Rect[];
 }) {
   const { t } = useI18n();
+  // Alt+drag from a gate wires its output. A finger has no Alt, so the
+  // board's connect mode makes a plain drag mean the same thing.
+  const gestureMode = useGraphGestureMode();
   const [displayCenter, setDisplayCenter] = useState(center);
   const dragRef = useRef<{
     pointerId: number;
@@ -244,7 +248,7 @@ export function StandaloneLogicGate({
         }}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
-          if (event.altKey) {
+          if (event.altKey || gestureMode === "connect") {
             onStartConnection(event, {
               x: displayCenter.x + LOGIC_GATE_W / 2,
               y: displayCenter.y,

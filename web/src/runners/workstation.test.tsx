@@ -1,12 +1,15 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type Run } from "../api";
+import { api, type Run, type Runner } from "../api";
 import { useAgents } from "../agents/agentStore";
+import { localRunner, restartedRunner, startingRunner } from "../local/localFixtures";
 import { configurePreferenceStorage, readPreferences } from "../preferences";
 import { useRuns } from "../runs/runStore";
 import SettingsView from "../settings/SettingsView";
+import { setProjectMode } from "../station/projectMode";
 import { useApp } from "../store";
+import { EditionProvider } from "./edition";
 import { useRunners } from "./runnerStore";
 import { useWorkstationAutoEnable, useWorkstationVisible } from "./workstation";
 
@@ -132,5 +135,146 @@ describe("agent workstation visibility", () => {
 
     expect(screen.getByRole("switch", { name: "Let agents work here" })).toBeDisabled();
     expect(screen.getByText(/In use: this workspace has runners/)).toBeInTheDocument();
+  });
+});
+
+// A single-user hub starts a runner of its own at every start. It is part
+// of the app, not something the person added: on a brand-new board it
+// switched the whole workstation on before they had done anything.
+describe("agent workstation visibility on a single-user hub", () => {
+  /** This computer's runner with no repo added yet. */
+  const bare = (): Runner => {
+    const runner = localRunner();
+    return { ...runner, info: { ...runner.info!, repos: [] } };
+  };
+  const laptop = { id: "r9", name: "laptop", online: false } as Runner;
+
+  function SingleProbe() {
+    return (
+      <EditionProvider edition="single">
+        <Probe />
+      </EditionProvider>
+    );
+  }
+
+  /** The hub's answer to the probe and, once something loads it, the store. */
+  async function hubLists(runners: Runner[]) {
+    listRunners.mockResolvedValue({ runners });
+    render(<SingleProbe />);
+    await waitFor(() => expect(listRunners).toHaveBeenCalledTimes(1));
+    act(() => useRunners.setState({ runners }));
+  }
+
+  it.each([
+    ["before it has connected", () => startingRunner()],
+    ["after a restart, before it reconnects", () => ({ ...restartedRunner(), info: bare().info })],
+    ["connected, with no repo yet", bare],
+  ])("stays hidden with only the hub's own runner, %s", async (_when, runner) => {
+    await hubLists([runner()]);
+    expect(screen.getByText("hidden")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(false);
+  });
+
+  it("turns itself on once this computer has a repo", async () => {
+    listRunners.mockResolvedValue({ runners: [localRunner()] });
+    render(<SingleProbe />);
+    expect(await screen.findByText("shown")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+  });
+
+  it("turns itself on when a repo is added to a list already loaded", async () => {
+    await hubLists([bare()]);
+    expect(screen.getByText("hidden")).toBeInTheDocument();
+    act(() => useRunners.setState({ runners: [localRunner()] }));
+    expect(screen.getByText("shown")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+  });
+
+  // serve --repo on a first start: the repo is in the runner's settings, but
+  // the hub learns of it only from the runner's hello, which can come after
+  // the page asked. The probe runs once, so it has to keep following the list.
+  it("turns itself on when the hub's own runner brings its repos once it connects", async () => {
+    // Nothing has loaded the list: the workstation, and with it the pill, is hidden.
+    useRunners.setState({ loaded: false, loading: false, runners: [] });
+    listRunners.mockResolvedValue({ runners: [startingRunner()] });
+    render(<SingleProbe />);
+    await waitFor(() => expect(useRunners.getState().loaded).toBe(true));
+    await waitFor(() => expect(useRunners.getState().loading).toBe(false));
+    expect(screen.getByText("hidden")).toBeInTheDocument();
+
+    // It connects: the hub pushes runners-changed (App refreshes a loaded list).
+    listRunners.mockResolvedValue({ runners: [localRunner()] });
+    await act(() => useRunners.getState().refreshIfLoaded());
+    expect(screen.getByText("shown")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+  });
+
+  it("turns itself on for a runner connected by hand beside it", async () => {
+    listRunners.mockResolvedValue({ runners: [startingRunner(), laptop] });
+    render(<SingleProbe />);
+    expect(await screen.findByText("shown")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+  });
+
+  it("turns itself on for a run or a connected agent", async () => {
+    await hubLists([startingRunner()]);
+    act(() => useRuns.setState({ latestByNode: { a: { id: "run1", nodeId: "a" } as Run } }));
+    expect(screen.getByText("shown")).toBeInTheDocument();
+
+    act(() => {
+      useApp.getState().updateUIPreference("agentWorkstation", false);
+      useRuns.setState({ latestByNode: {} });
+    });
+    expect(screen.getByText("hidden")).toBeInTheDocument();
+    act(() => useAgents.setState({ sessions: [{ id: "claude:1" } as never] }));
+    expect(screen.getByText("shown")).toBeInTheDocument();
+  });
+
+  it("turns on when the person enters Station", async () => {
+    await hubLists([startingRunner()]);
+    act(() => setProjectMode("station"));
+    expect(screen.getByText("shown")).toBeInTheDocument();
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+  });
+
+  it("is the person's to switch on in Settings, which then shows This computer", async () => {
+    const user = userEvent.setup();
+    useRunners.setState({ loaded: true, loading: false, runners: [bare()] });
+    useApp.getState().updateUIPreference("settingsSection", "runners");
+    render(
+      <EditionProvider edition="single">
+        <SettingsView />
+      </EditionProvider>,
+    );
+
+    const agents = screen.getByRole("region", { name: "Agents" });
+    const toggle = within(agents).getByRole("switch", { name: "Let agents work here" });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(within(agents).getByText(/Everything for letting agents work on this computer/)).toBeInTheDocument();
+    expect(agents.textContent).not.toMatch(/runner/i);
+    expect(within(agents).queryByRole("heading", { name: "Agents found" })).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(useApp.getState().preferences.agentWorkstation).toBe(true);
+    expect(within(agents).getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
+    // Its own runner is no reason to keep it on: it can be switched off again.
+    expect(toggle).toBeEnabled();
+  });
+
+  it("says why it stays on once this computer has a repo, without a word about runners", () => {
+    useRunners.setState({ loaded: true, loading: false, runners: [localRunner()] });
+    useApp.getState().updateUIPreference("settingsSection", "workstation");
+    render(
+      <EditionProvider edition="single">
+        <SettingsView />
+      </EditionProvider>,
+    );
+
+    expect(screen.getByRole("switch", { name: "Let agents work here" })).toBeDisabled();
+    expect(
+      screen.getByText("In use: agents already have work or a project folder here, so this stays on."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/In use: this workspace has runners/)).not.toBeInTheDocument();
   });
 });

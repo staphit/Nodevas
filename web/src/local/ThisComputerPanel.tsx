@@ -19,11 +19,12 @@ import {
 import { confirmAction } from "../components/ConfirmDialog";
 import { agentName } from "../game/labels";
 import { formatList, useI18n } from "../i18n";
-import { useLocalRunner } from "../runners/edition";
+import { useLocalRunner, useLocalState } from "../runners/edition";
 import { runnerAgentProblem } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
 import { useGlobalAgents } from "../station/globalAgentsStore";
 import { AddRepoDialog } from "./AddRepoDialog";
+import { LocalNotReady } from "./LocalNotReady";
 import { holdRunner, repoErrorText } from "./useAddRepo";
 
 type Translate = ReturnType<typeof useI18n>["t"];
@@ -98,6 +99,7 @@ function settingsErrorText(t: Translate, error: unknown): string {
 export function ThisComputerPanel() {
   const { t } = useI18n();
   const runner = useLocalRunner();
+  const state = useLocalState();
   const loaded = useRunners((s) => s.loaded);
   const loading = useRunners((s) => s.loading);
   const [saving, setSaving] = useState(false);
@@ -112,9 +114,13 @@ export function ThisComputerPanel() {
   if (!runner) {
     return (
       <div className="this-computer">
-        <p className="this-computer-note" role="status">
-          {!loaded || loading ? t("common.loading") : t("local.unavailable")}
-        </p>
+        {!loaded || loading ? (
+          <p className="this-computer-note" role="status">
+            {t("common.loading")}
+          </p>
+        ) : (
+          <LocalNotReady starting={state === "starting"} />
+        )}
       </div>
     );
   }
@@ -158,11 +164,7 @@ export function ThisComputerPanel() {
 
   return (
     <div className="this-computer">
-      {!runner.online && (
-        <p className="this-computer-note" role="status">
-          {t("local.unavailable")}
-        </p>
-      )}
+      {!runner.online && <LocalNotReady starting={false} />}
       {(saving || note) && (
         <p className={`this-computer-saved${note?.kind === "error" ? " is-error" : ""}`} role="status">
           {saving ? t("local.saving") : note?.text}

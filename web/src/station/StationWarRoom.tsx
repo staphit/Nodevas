@@ -3,7 +3,8 @@
 // what it does not draw in tiles under it. A character's menu holds what the
 // run can be asked to do: open it, its changes, its node or goal, pause or
 // resume its autopilot, cancel it. With no runner and nothing under way, a
-// call to add a runner comes first.
+// call to add a runner comes first (single-user: that this computer cannot
+// run agents, and what to try).
 
 import { Suspense, useMemo } from "react";
 
@@ -13,6 +14,8 @@ import { mergeRuns } from "../game/useWorld";
 import type { World } from "../game/world";
 import { useI18n } from "../i18n";
 import { lazyWithRetry } from "../lazyWithRetry";
+import { LocalNotReady } from "../local/LocalNotReady";
+import { useEdition } from "../runners/edition";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
 import { autopilotIndex, autopilotOf, controlRows, liveAutopilots, type ControlRow } from "./control";
@@ -51,6 +54,7 @@ function useRowOf(): (runId: string) => ControlRow | undefined {
 
 export function StationWarRoom({ world }: { world: World }) {
   const { t } = useI18n();
+  const single = useEdition() === "single";
   useControlLoads();
   const active = useRuns((s) => s.activeRuns);
   const recent = useStation((s) => s.runs);
@@ -73,7 +77,10 @@ export function StationWarRoom({ world }: { world: World }) {
           {live.length}
         </span>
       </div>
-      {noRunner && (
+      {/* Single-user: there is no runner to add by hand, so none at all
+          means the part that runs agents is not there. */}
+      {noRunner && single && <LocalNotReady starting={false} onOpenSettings={() => openSettings("runners")} />}
+      {noRunner && !single && (
         <div className="station-cta" role="status">
           <p>{t("station.runner.none")}</p>
           <button type="button" className="ap-btn is-primary" onClick={() => openSettings("runners", { add: true })}>

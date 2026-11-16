@@ -285,6 +285,12 @@
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
 }
+/* Warnings and nothing worse: the colour the panel draws a warning row in,
+   so a new card nobody has connected yet is counted without looking broken. */
+.board-problems.has-problems.warnings-only .board-problems-badge {
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+}
 .board-title-spacer + .board-problems + .board-overflow {
   margin-left: 0;
 }

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { explorerApi } from "../api/explorer";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useApp } from "../store";
 import AgentsTab from "./AgentsTab";
 import { useExplorer } from "./explorerStore";
@@ -54,9 +55,36 @@ describe("AgentsTab", () => {
     expect(agents).toHaveBeenCalledTimes(2);
   });
 
-  it("says when there are no agents", async () => {
+  it("says when there are no agents, and what brings one", async () => {
     vi.spyOn(explorerApi, "agents").mockResolvedValue({ live: [], external: [], recent: [] });
     render(<AgentsTab />);
     expect(await screen.findByText("No agents yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Dispatch a task to an agent, or connect one over MCP, and it shows up here\./),
+    ).toBeInTheDocument();
+    // A team hub's way there is a runner of one's own, not a button here.
+    expect(screen.queryByRole("button", { name: "Open This computer" })).not.toBeInTheDocument();
+  });
+
+  // Single-user: a bare "No agents yet" left a new reader with nowhere to go.
+  it("leads to This computer in the single-user edition, leaving the workstation as it was", async () => {
+    vi.spyOn(explorerApi, "agents").mockResolvedValue({ live: [], external: [], recent: [] });
+    useApp.setState({ preferences: { ...useApp.getState().preferences, agentWorkstation: false, projectMode: "info" } });
+    const { container } = render(
+      <EditionProvider edition="single">
+        <AgentsTab />
+      </EditionProvider>,
+    );
+    expect(await screen.findByText("No agents yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/An agent shows up here once you send it a task\. First let agents work on this computer/),
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/runner|MCP/i);
+
+    await userEvent.click(screen.getByRole("button", { name: "Open This computer" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
+    // Opening Settings is not a yes to agents: the switch there is.
+    expect(useApp.getState().preferences.agentWorkstation).toBe(false);
   });
 });

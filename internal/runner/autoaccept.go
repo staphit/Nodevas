@@ -108,12 +108,14 @@ func (c *Config) MigrateLegacyAutoAccept(installed []string) string {
 	return LegacyAutoAcceptWarning
 }
 
-// InstalledKinds is the agent kinds found working on this machine.
+// InstalledKinds is the agent kinds found working on this machine. It asks
+// each CLI for its version only, never for its models, which is what takes
+// long.
 func InstalledKinds(ctx context.Context, cmds CommandRunner, cfg *Config) []string {
 	var kinds []string
-	for _, agent := range Detect(ctx, cmds, cfg) {
-		if agent.Installed {
-			kinds = append(kinds, agent.Kind)
+	for _, s := range newProber(cmds).versions(ctx, cfg) {
+		if s.agent.Installed {
+			kinds = append(kinds, s.agent.Kind)
 		}
 	}
 	return kinds

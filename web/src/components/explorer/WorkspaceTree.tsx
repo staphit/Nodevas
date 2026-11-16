@@ -621,7 +621,14 @@ ${
                                   y: event.clientY,
                                 });
                               }}
-                              title={t("explorer.nodeSelectionTitle", { title: node.title || node.id })}
+                              // The row says what the node is called and who
+                              // has it. Its file name is for whoever goes
+                              // looking for the file, so it waits in the
+                              // tooltip instead of taking half the line.
+                              title={`${t("explorer.nodeSelectionTitle", { title: node.title || node.id })}\n${t(
+                                "explorer.nodeFileTitle",
+                                { file: `${node.id}.md` },
+                              )}`}
                             >
                               <span className="tree-indent" />
                               <IconDoc size={13} />
@@ -634,7 +641,6 @@ ${
                                     node.assignee ? "" : " unassigned"
                                   }`}
                                 >
-                                  {node.id}.md ·{" "}
                                   {(node.assignee &&
                                     userNames.get(node.assignee)) ||
                                     t("explorer.unassigned")}
@@ -669,7 +675,19 @@ ${
                                   <small>{t("explorer.childPage", { parent: item.parentId ?? "" })}</small>
                                 </>
                               ) : (
-                                <span className="mono">{item.nodeId}.md</span>
+                                // A deleted node's title is not kept, so its
+                                // id is the name here; the file name is in
+                                // the tooltip, as on a node's row. The trash
+                                // keeps the file under a time-stamped name,
+                                // which is the one to look for on disk.
+                                <span
+                                  className="mono"
+                                  title={t("explorer.nodeFileTitle", {
+                                    file: item.file || `${item.nodeId}.md`,
+                                  })}
+                                >
+                                  {item.nodeId}
+                                </span>
                               )}
                             </span>
                             <button

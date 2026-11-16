@@ -50,6 +50,12 @@ type Client struct {
 	RedetectInterval time.Duration
 	BackoffMin       time.Duration
 	BackoffMax       time.Duration
+	// versionTimeout and catalogTimeout bound the commands that look at the
+	// agent CLIs (detect.go) and checkAgainWait a "check again" from the app
+	// (detector.go); zero means the defaults. Tests shorten them.
+	versionTimeout time.Duration
+	catalogTimeout time.Duration
+	checkAgainWait time.Duration
 	// HTTPClient dials the hub and carries the MCP proxy's requests; nil uses
 	// http.DefaultClient for the socket and a client without a timeout for
 	// the proxy.
@@ -108,8 +114,12 @@ type Client struct {
 	// reconnect logs only a change.
 	builtIn      atomic.Bool
 	builtInState atomic.Int32
+	// detect is what the runner knows about the agents on this machine,
+	// looked at off the connection (detector.go).
+	detect *detector
 	// infoChanged asks the connection for a new hello: the settings the app
-	// shows changed outside a settings request (localsettings.go).
+	// shows changed outside a settings request (localsettings.go), or a look
+	// at this machine found something new.
 	infoChanged chan struct{}
 	// admin lets one repo admin operation run at a time (repoadmin.go).
 	admin chan struct{}
@@ -194,6 +204,29 @@ func (c *Client) Run(ctx context.Context) error {
 	c.jobs.loadWorkspaceActions()
 	c.jobs.wg.Add(1)
 	go c.jobs.watchPRs(c.prPollInterval)
+	c.detect = newDetector(c)
+	detectCtx, stopDetecting := context.WithCancel(ctx)
+	detecting := make(chan struct{})
+	go func() {
+		defer close(detecting)
+		c.detect.run(detectCtx)
+	}()
+	defer func() {
+		stopDetecting()
+		<-detecting
+	}()
+	// The first look at this machine comes before the first connection, and
+	// only that one: no hub is waiting yet, so nothing can time out. The
+	// first hello must say what is really here. The hub offers queued runs
+	// right after it, and declining one because its agent or model was not
+	// known yet is final; the built-in runner's one-time settings carry-over
+	// (migrateBuiltIn) reads the installed agents from it too. Every later
+	// hello says what the last look found, at once.
+	select {
+	case <-c.detect.first:
+	case <-ctx.Done():
+		return nil
+	}
 	backoff := c.backoffMin()
 	for {
 		welcomed, err := c.session(ctx)
@@ -217,9 +250,10 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
-// session is one connection: dial, hello, welcome, then ping and re-detect
-// until something ends it. welcomed reports whether the hub accepted the
-// runner, which is what resets the backoff.
+// session is one connection: dial, hello, welcome, then ping until something
+// ends it. Nothing here waits for an agent CLI: every hello says what the
+// last look at this machine found (detector.go). welcomed reports whether
+// the hub accepted the runner, which is what resets the backoff.
 func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	cfg := c.cfg()
 	target, err := connectURL(cfg.Hub)
@@ -250,7 +284,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	// that never comes is asked as a classic runner's would be.
 	claim, _ := c.builtInClaim()
 	c.builtIn.Store(claim && c.builtIn.Load())
-	info := c.buildInfo(ctx)
+	info := c.info()
 	if err := c.hello(ctx, conn, info); err != nil {
 		return false, err
 	}
@@ -314,12 +348,10 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	repoOut := make(chan runnerwire.Envelope, 8)
 	// So do settings answers (settings.go) and repo admin answers
 	// (repoadmin.go), each after a hello.
-	settingsOut := make(chan settingsAnswer, 4)
+	settingsOut := make(chan runnerwire.SettingsDone, 4)
 	adminOut := make(chan repoAdminAnswer, 4)
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
-	redetect := time.NewTicker(c.redetectInterval())
-	defer redetect.Stop()
 	flushTick := time.NewTicker(c.flushInterval())
 	defer flushTick.Stop()
 	lastHeard := time.Now()
@@ -381,14 +413,16 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				if msg.Settings != nil {
 					req := *msg.Settings
 					go func() {
-						answer := settingsAnswer{done: c.applySettings(ownerID, req)}
-						if req.Redetect && answer.done.Code == "" {
-							// Look for the agent CLIs again before answering.
-							next := c.buildInfo(ctx)
-							answer.info = &next
+						done := c.applySettings(ownerID, req)
+						if req.Redetect && done.Code == "" {
+							// Look for the agent CLIs again before answering,
+							// but not for longer than the hub waits for the
+							// answer: a look that outlasts it still ends in a
+							// hello of its own.
+							c.detect.again(ctx, c.checkAgainTimeout())
 						}
 						select {
-						case settingsOut <- answer:
+						case settingsOut <- done:
 						case <-ctx.Done():
 						}
 					}()
@@ -433,22 +467,17 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			if err := c.write(ctx, conn, env); err != nil {
 				return true, err
 			}
-		case answer := <-settingsOut:
+		case done := <-settingsOut:
 			// The hello with the settings in effect first: by the time the
-			// hub hears the change is done, it offers by the new limit. The
-			// last hello with only the settings changed (refreshInfo), not
-			// BuildInfo: probing every agent CLI again can take longer than
-			// the hub waits for the answer; the next redetect looks at them
-			// as usual, unless the owner asked to look again now.
-			if answer.info != nil {
-				info = c.refreshInfo(*answer.info)
-			} else {
-				info = c.refreshInfo(info)
-			}
+			// hub hears the change is done, it offers by the new limit. It
+			// says what the last look at the agent CLIs found, never a new
+			// look: asking every CLI again can take longer than the hub
+			// waits for the answer. When the owner asked to check again,
+			// that look is already over (or took too long to wait for).
+			info = c.info()
 			if err := c.hello(ctx, conn, info); err != nil {
 				return true, err
 			}
-			done := answer.done
 			if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeSettingsDone, SettingsDone: &done}); err != nil {
 				return true, err
 			}
@@ -456,7 +485,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			// As settings: the new repos in a hello first, so the hub knows a
 			// repo by the time it hears it was added.
 			if answer.changed {
-				info = c.refreshInfo(info)
+				info = c.info()
 				if err := c.hello(ctx, conn, info); err != nil {
 					return true, err
 				}
@@ -466,7 +495,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				return true, err
 			}
 		case <-c.infoChanged:
-			if next := c.refreshInfo(info); !reflect.DeepEqual(next, info) {
+			// Only when it says something new: a hello already sent for
+			// another reason may have said it.
+			if next := c.info(); !reflect.DeepEqual(next, info) {
 				info = next
 				if err := c.hello(ctx, conn, info); err != nil {
 					return true, err
@@ -489,16 +520,6 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				return true, errors.New("hub stopped answering pings")
 			}
 			if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypePing}); err != nil {
-				return true, err
-			}
-		case <-redetect.C:
-			next := c.buildInfo(ctx)
-			if reflect.DeepEqual(next, info) {
-				continue
-			}
-			info = next
-			c.logf("agents or repositories changed; telling the hub")
-			if err := c.hello(ctx, conn, info); err != nil {
 				return true, err
 			}
 		}
@@ -554,9 +575,15 @@ func dialError(resp *http.Response, err error) error {
 	return fmt.Errorf("hub answered %s: %w", resp.Status, err)
 }
 
+// readError explains a connection that ended, with the hub's own reason when
+// it gave one: "expected hello" is what tells a late hello from a restart.
 func readError(err error) error {
-	if status := websocket.CloseStatus(err); status != -1 {
-		return fmt.Errorf("hub closed the connection (%d)", status)
+	var closed websocket.CloseError
+	if errors.As(err, &closed) {
+		if closed.Reason != "" {
+			return fmt.Errorf("hub closed the connection (%d: %s)", closed.Code, closed.Reason)
+		}
+		return fmt.Errorf("hub closed the connection (%d)", closed.Code)
 	}
 	var syntax *json.SyntaxError
 	if errors.As(err, &syntax) {
@@ -610,6 +637,13 @@ func (c *Client) redetectInterval() time.Duration {
 		return c.RedetectInterval
 	}
 	return defaultRedetect
+}
+
+func (c *Client) checkAgainTimeout() time.Duration {
+	if c.checkAgainWait > 0 {
+		return c.checkAgainWait
+	}
+	return defaultCheckAgain
 }
 
 func (c *Client) flushInterval() time.Duration {

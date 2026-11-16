@@ -32,7 +32,7 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
   - Put the hub behind Cloudflare Access; the runner connects with a service token.
   - Turn on two-factor authentication with an authenticator app (**Settings → Account**). Sign-in then needs the app's code too, and step-up asks the app instead of sending email.
 
-The agent parts of the app (runners, runs, autopilot, Agent chat and usage) stay hidden until you turn on **Settings → Agents → Let agents work here**, or until this workspace has a runner, a run or a connected agent.
+The agent parts of the app (runners, runs, autopilot, Agent chat and usage) stay hidden until you turn on **Settings → Agents → Let agents work here** or open Station, or until this workspace has a runner, a run or a connected agent. Alone on one machine the built-in runner is always there, so it counts only once you have added a repository to it.
 
 Set it up in two steps:
 

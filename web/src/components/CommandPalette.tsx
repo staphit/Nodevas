@@ -108,6 +108,11 @@ const HELP_SECTIONS: { title: string; rows: { keys: string[]; text: string }[] }
   {
     title: "palette.help.graph",
     rows: [
+      // The first things anyone does on the board. palette.newNode is the
+      // toolbar button's own label, so the row names the button as it reads.
+      { keys: ["palette.newNode", "palette.key.rightClick"], text: "palette.help.createNode" },
+      { keys: ["palette.key.dragDot", "Alt palette.key.drag"], text: "palette.help.connectNodes" },
+      { keys: [`${MOD} Z`], text: "palette.help.undoGraph" },
       { keys: [`${MOD} palette.key.drag`], text: "palette.help.selectNodes" },
       { keys: [`${MOD} palette.key.click`], text: "palette.help.selectItems" },
       { keys: ["palette.key.divider"], text: "palette.help.resize" },
@@ -121,6 +126,23 @@ const USAGE_STEPS = [
   "palette.usage.views",
   "palette.usage.export",
 ];
+
+/** The guides the help view links to, on GitHub like the agent panel's MCP guide. */
+export const GETTING_STARTED_DOCS_URL =
+  "https://github.com/staphit/Nodevas/blob/master/docs/getting-started.md#first-steps-in-the-app";
+export const CONCEPTS_DOCS_URL = "https://github.com/staphit/Nodevas/blob/master/docs/concepts.md";
+
+const HELP_LINKS = [
+  { href: GETTING_STARTED_DOCS_URL, label: "palette.help.docsStart" },
+  { href: CONCEPTS_DOCS_URL, label: "palette.help.docsConcepts" },
+];
+
+/**
+ * The commands the help view offers as buttons, for someone who opened help
+ * before knowing what to search for. They are the palette's own commands, so
+ * each shows here exactly when the list offers it.
+ */
+const HELP_COMMANDS = ["open-example", "tour"];
 
 export function CommandPalette() {
   const { language, t } = useI18n();
@@ -672,13 +694,17 @@ export function CommandPalette() {
     // items and choose are this render's, the ones the answer filled.
   }, [enterWaitsFor, searching]);
 
+  const runCommand = async (command: Command) => {
+    // The help view replaces the list in place; closing first would make the
+    // palette blink shut and reopen.
+    if (command.key !== "help") setOpen(false);
+    await command.run();
+  };
+
   const choose = async (item: PaletteItem | undefined) => {
     if (!item) return;
     if (item.kind === "action") {
-      // The help view replaces the list in place; closing first would make the
-      // palette blink shut and reopen.
-      if (item.key !== "help") setOpen(false);
-      await item.run();
+      await runCommand(item);
       return;
     }
     setOpen(false);
@@ -714,6 +740,27 @@ export function CommandPalette() {
               </button>
             </div>
             <div className="command-palette-help">
+              <p className="command-palette-help-lead">{t("palette.help.about")}</p>
+              {/* Where to go from here, before the shortcut tables: the
+                  guides, an example to look around in, and the tour. */}
+              <ul className="command-palette-help-links">
+                {HELP_LINKS.map((link) => (
+                  <li key={link.href}>
+                    <a href={link.href} target="_blank" rel="noreferrer noopener">
+                      {t(link.label)}
+                    </a>
+                  </li>
+                ))}
+                {commands
+                  .filter((command) => HELP_COMMANDS.includes(command.key))
+                  .map((command) => (
+                    <li key={command.key}>
+                      <button type="button" onClick={() => void runCommand(command).catch(reportError)}>
+                        {command.title}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
               {HELP_SECTIONS.map((section) => (
                 <section key={section.title}>
                   <h3>{t(section.title)}</h3>

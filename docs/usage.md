@@ -2,7 +2,7 @@
 
 Nodevas keeps what the coding agents and the voice copilot spent, so the owner can see where tokens go and judge whether a plan, a model or a harness is worth it.
 
-In the app it is **Settings → Agents → Advanced → Usage details** (Overview, Sessions, Prices), or **Usage** in the command palette (Ctrl/⌘+K). Both appear once the agent workstation is shown: **Let agents work here** is on, or the workspace already has a runner, a run or a connected agent.
+In the app it is **Settings → Agents → Advanced → Usage details** (Overview, Sessions, Prices), or **Usage** in the command palette (Ctrl/⌘+K). Both appear once the agent workstation is shown: **Let agents work here** is on (opening Station turns it on too), or the workspace already has a runner, a run or a connected agent. Alone on one machine the built-in runner is always there, so it counts only once you have added a repository to it.
 
 Three sources feed it:
 

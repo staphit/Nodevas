@@ -7,12 +7,14 @@ import { readPreferences } from "../preferences";
 import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
-import { LOCAL_CONFIG, localRunner, visibleText } from "./localFixtures";
+import { LOCAL_CONFIG, localRunner, restartedRunner, startingRunner, visibleText } from "./localFixtures";
 import { localCommands, localSummary, permissionOf, ThisComputerPanel } from "./ThisComputerPanel";
 import { ThisComputerCard } from "./ThisComputerCard";
 import { translate } from "../i18n";
 
 const t = (key: string, values?: Record<string, string | number>) => translate(key, "en", values);
+
+const UNAVAILABLE = "The part of Nodevas that runs agents isn't running. Restart Nodevas.";
 
 function hold(runners: Runner[]) {
   useRunners.setState({ loaded: true, loading: false, runners, error: null, creating: false, revoking: {} });
@@ -223,6 +225,55 @@ describe("ThisComputerPanel", () => {
     ).toBeInTheDocument();
   });
 
+  // Every start, for a few seconds: the hub lists its own runner before
+  // that runner has connected. Not an error, and nothing to press.
+  it.each([
+    ["on a first start", () => startingRunner()],
+    ["after a restart", () => restartedRunner()],
+  ])("waits calmly while this computer gets ready, %s", (_when, runner) => {
+    hold([runner()]);
+    const { container } = renderPanel();
+    expect(
+      screen.getByText("Getting this computer ready to run agents… This usually takes a few seconds."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("If it is still not ready after a minute, close Nodevas completely and open it again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(visibleText(container)).not.toMatch(/runner/i);
+
+    // It connects: the panel is there without a click.
+    act(() => hold([localRunner()]));
+    expect(screen.getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
+  });
+
+  it("offers to check again once it has stopped, above what it last knew", async () => {
+    hold([{ ...localRunner(), online: false }]);
+    const list = vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [localRunner()] });
+    renderPanel();
+    const block = screen.getByTestId("local-not-ready");
+    expect(within(block).getByText(UNAVAILABLE)).toBeInTheDocument();
+    // Already in This computer: no button that leads here.
+    expect(within(block).queryByRole("button", { name: "Open This computer" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add repo" })).toBeDisabled();
+
+    fireEvent.click(within(block).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(screen.queryByTestId("local-not-ready")).not.toBeInTheDocument());
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "+ Add repo" })).toBeEnabled();
+  });
+
+  it("offers to check again when the hub names no runner of its own", async () => {
+    hold([]);
+    const list = vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+    renderPanel();
+    expect(screen.getByText(UNAVAILABLE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(UNAVAILABLE)).toBeInTheDocument();
+  });
+
   it("shows nothing of this computer on a team hub", () => {
     renderPanel("team");
     expect(screen.queryByText("Agents found")).not.toBeInTheDocument();
@@ -242,6 +293,19 @@ describe("ThisComputerCard", () => {
     fireEvent.click(button);
     expect(screen.getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("says it is starting, not that it is not running, until its runner connects", () => {
+    hold([startingRunner()]);
+    render(
+      <EditionProvider edition="single">
+        <ThisComputerCard />
+      </EditionProvider>,
+    );
+    expect(screen.getByText("Starting…")).toBeInTheDocument();
+    expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument();
+    act(() => hold([{ ...localRunner(), online: false }]));
+    expect(screen.getByText(UNAVAILABLE)).toBeInTheDocument();
   });
 });
 

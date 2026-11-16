@@ -26,6 +26,7 @@ export function localRunner(overrides: Partial<Runner> = {}): Runner {
     lastSeenAt: "2026-11-14T08:00:00Z",
     online: true,
     builtIn: true,
+    hubLocal: true,
     info: {
       version: "2.1.0",
       hostname: "PC-01",
@@ -60,6 +61,31 @@ export function localRunner(overrides: Partial<Runner> = {}): Runner {
     },
     ...overrides,
   };
+}
+
+/** The same runner as the hub lists it before it has connected since the
+ * hub started: registered as the hub's own, not online, not yet welcomed as
+ * built in. This is a first start, where it never connected at all;
+ * restartedRunner is any later one. */
+export function startingRunner(overrides: Partial<Runner> = {}): Runner {
+  return {
+    id: "local1",
+    name: "this machine",
+    ownerId: "local",
+    ownerName: "",
+    createdAt: "2026-11-01T00:00:00Z",
+    lastSeenAt: "",
+    online: false,
+    hubLocal: true,
+    ...overrides,
+  };
+}
+
+/** startingRunner after a restart of the hub: the database still holds when
+ * it was last seen and its last hello, from before the restart. */
+export function restartedRunner(): Runner {
+  const { lastSeenAt, info } = localRunner();
+  return startingRunner({ lastSeenAt, info });
 }
 
 /** A run of the built-in runner's, offered and asked about in the app. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { translate } from "../i18n";
-import { ADVANCED_ROWS, SETTINGS_PLACES, sectionFor, type SettingsSection } from "./openSettings";
+import { PREFERENCE_SCHEMA } from "../preferences/schema";
+import { ADVANCED_ROWS, SETTINGS_PAGES, SETTINGS_PLACES, sectionFor, type SettingsSection } from "./openSettings";
 import { searchSettings, SETTINGS_ENTRIES, type SettingsNeed } from "./settingsSearch";
 
 const ALL: SettingsSection[] = [
@@ -56,6 +57,19 @@ describe("where the old parts live", () => {
     expect(sectionFor("agents", "autoAccept")).toBe("workstation");
     expect(sectionFor("project", "statuses")).toBe("project");
     expect(sectionFor("general", "layout")).toBe("appearance");
+  });
+});
+
+describe("where Settings opens before any section was chosen", () => {
+  // The list's first item, and where the tour says the replay, help and the
+  // theme are.
+  it("is General", () => {
+    const first = PREFERENCE_SCHEMA.settingsSection.fallback();
+    expect(SETTINGS_PLACES[first]).toEqual({ page: "general" });
+    expect(SETTINGS_PAGES[0]).toBe("general");
+    // General is remembered under the same name, so leaving it and coming
+    // back changes nothing.
+    expect(sectionFor("general", null)).toBe(first);
   });
 });
 

@@ -10,6 +10,7 @@ import { unseenCount, useAgents } from "../agents/agentStore";
 import { agentColorKey, agentWho, areaName, poseLabel } from "../game/labels";
 import type { Actor, World } from "../game/world";
 import { useI18n } from "../i18n";
+import { isHubRunner, localState, useEdition, type LocalState } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
@@ -136,6 +137,7 @@ export function StationSide({ world }: { world: World }) {
  */
 function StationToday({ world }: { world: World }) {
   const { t } = useI18n();
+  const single = useEdition() === "single";
   const report = useUsage((s) => s.report);
   const usageError = useUsage((s) => s.error);
   const budget = useBudget((s) => s.status);
@@ -191,7 +193,7 @@ function StationToday({ world }: { world: World }) {
       </button>
       {rosterOpen &&
         (actors.length === 0 ? (
-          <p className="station-empty">{t("station.roster.empty")}</p>
+          <p className="station-empty">{t(single ? "station.roster.emptyLocal" : "station.roster.empty")}</p>
         ) : (
           <ul id="station-roster-list" className="station-roster-list" aria-label={t("station.roster.title")}>
             {actors.map((actor) => (
@@ -223,11 +225,20 @@ function StationToday({ world }: { world: World }) {
   );
 }
 
+const LOCAL_STATUS: Record<LocalState, { key: string; dot: string }> = {
+  ready: { key: "local.statusReady", dot: "status-running" },
+  starting: { key: "local.statusStarting", dot: "status-waiting" },
+  stopped: { key: "local.statusStopped", dot: "is-off" },
+};
+
 /** The runners, one line each (online or not); "Manage" is Settings →
  * Runners. Nothing while there is none: the "In progress" card then asks
- * for one instead. */
+ * for one instead. Single-user: the card is "This computer", and its own
+ * line says how the part that runs agents is doing (ready, starting, not
+ * running) instead of naming a runner as online or offline. */
 function StationRunners() {
   const { t } = useI18n();
+  const single = useEdition() === "single";
   const runners = useRunners((s) => s.runners);
   const loaded = useRunners((s) => s.loaded);
   const loading = useRunners((s) => s.loading);
@@ -235,24 +246,32 @@ function StationRunners() {
   if (!loaded || (loading && runners.length === 0)) return null;
   if (!error && runners.length === 0) return null;
   const shown = runners.slice(0, 4);
+  const local = LOCAL_STATUS[localState(runners)];
   return (
     <section className="station-panel station-runners" aria-labelledby="station-runners-title">
       <div className="station-panel-head">
-        <h2 id="station-runners-title">{t("station.runner.title")}</h2>
+        <h2 id="station-runners-title">{t(single ? "local.title" : "station.runner.title")}</h2>
         <button type="button" className="run-link-button station-head-end" onClick={() => openSettings("runners")}>
-          {t("station.runner.manage")}
+          {t(single ? "local.configure" : "station.runner.manage")}
         </button>
       </div>
       <ul className="station-runner-list">
-        {shown.map((runner) => (
-          <li key={runner.id}>
-            <span className={`station-dot ${runner.online ? "status-running" : "is-off"}`} aria-hidden="true" />
-            <span className="station-runner-name">{runnerDisplayName(t, runner.name)}</span>
-            <span className="station-panel-meta">
-              {runner.online ? t("game.room.online") : t("game.room.offline")}
-            </span>
-          </li>
-        ))}
+        {shown.map((runner) =>
+          single && isHubRunner(runner) ? (
+            <li key={runner.id}>
+              <span className={`station-dot ${local.dot}`} aria-hidden="true" />
+              <span className="station-runner-name">{t(local.key)}</span>
+            </li>
+          ) : (
+            <li key={runner.id}>
+              <span className={`station-dot ${runner.online ? "status-running" : "is-off"}`} aria-hidden="true" />
+              <span className="station-runner-name">{runnerDisplayName(t, runner.name)}</span>
+              <span className="station-panel-meta">
+                {runner.online ? t("game.room.online") : t("game.room.offline")}
+              </span>
+            </li>
+          ),
+        )}
       </ul>
       {runners.length > shown.length && (
         <p className="station-panel-meta">{t("station.runner.more", { count: runners.length - shown.length })}</p>

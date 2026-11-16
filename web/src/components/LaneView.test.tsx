@@ -6,6 +6,7 @@ import { readPreferences } from "../preferences";
 import { useApp, usePreference } from "../store";
 import type { Graph, RunState } from "../types";
 import { installPointerShims } from "./canvas/boardTestKit";
+import { useNodeDetailView } from "./drawer/openNodeDetail";
 import { LaneView } from "./LaneView";
 
 vi.mock("../api", async (importOriginal) => {
@@ -273,6 +274,84 @@ describe("LaneView", () => {
     expect(container.querySelector(".board-title-hint.open")).not.toBeNull();
   });
 
+  // The timeline's ? opened its tips over the board and nothing but the ?
+  // closed them again. They leave the way a menu does.
+  it("closes the timeline's tips on Escape and on a press elsewhere", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+    const toggle = screen.getByRole("button", { name: "操作提示" });
+    const isOpen = () => container.querySelector(".board-title-hint.open") !== null;
+
+    await user.click(toggle);
+    expect(isOpen()).toBe(true);
+    // Reading the tips is not a press elsewhere.
+    fireEvent.pointerDown(container.querySelector(".board-title-hint")!);
+    expect(isOpen()).toBe(true);
+    await user.keyboard("{Escape}");
+    expect(isOpen()).toBe(false);
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    expect(isOpen()).toBe(true);
+    fireEvent.pointerDown(document.body);
+    expect(isOpen()).toBe(false);
+
+    // The ? itself still toggles: its press is not read as one elsewhere.
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(isOpen()).toBe(false);
+  });
+
+  // On the graph the tips are the ⋯ menu's Help, a checkbox the menu stays
+  // open for. A second click on it is the way to turn them off, so its press
+  // must not count as one elsewhere that closes them first, for the click to
+  // open them again.
+  it("turns the graph's tips off from Help as well as on", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const isOpen = () => container.querySelector(".board-title-hint.open") !== null;
+
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
+    const menu = screen.getByRole("menu", { name: "更多關係圖工具" });
+    const help = within(menu).getByRole("menuitemcheckbox", { name: "操作說明" });
+    await user.click(help);
+    expect(isOpen()).toBe(true);
+    await user.click(help);
+    expect(isOpen()).toBe(false);
+    expect(help).toHaveAttribute("aria-checked", "false");
+  });
+
+  // The tips stay open while the keyboard goes on to a dialog (the command
+  // palette opens from a shortcut, with no press to close them). That
+  // dialog's Escape is its own: the tips must not take it and pull the
+  // keyboard back to the ? behind it.
+  it("leaves Escape to a dialog opened over the timeline's tips", async () => {
+    const user = userEvent.setup();
+    const dialogEscape = vi.fn();
+    const { container } = render(
+      <>
+        <LaneView variant="timeline" {...paneProps} />
+        <div role="dialog" aria-modal="true" aria-label="dialog">
+          <input
+            aria-label="dialog field"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") dialogEscape();
+            }}
+          />
+        </div>
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "操作提示" }));
+    expect(container.querySelector(".board-title-hint.open")).not.toBeNull();
+    const field = screen.getByRole("textbox", { name: "dialog field" });
+    field.focus();
+
+    await user.keyboard("{Escape}");
+    expect(dialogEscape).toHaveBeenCalledTimes(1);
+    expect(field).toHaveFocus();
+  });
+
   it("filters from a popover and counts the filters that are on", async () => {
     const user = userEvent.setup();
     const updateCanvasLayout = vi.fn(async () => ({ ok: true as const }));
@@ -346,6 +425,42 @@ describe("LaneView", () => {
     expect(openTab).toHaveBeenCalledWith("a");
     expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
     expect(problems).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // Two new cards turned the badge failure-red with "not connected to
+  // anything", and picking the row opened the card's document, where nothing
+  // connects it. Warnings alone are counted in the calmer warning colour, and
+  // that row opens the node on its Dependencies.
+  it("counts unconnected cards calmly and opens them where they can be connected", async () => {
+    const user = userEvent.setup();
+    const openTab = vi.fn(async () => {});
+    useApp.setState({
+      openTab,
+      issues: [{ severity: "warning", nodeId: "a", msg: "node is not connected to anything" }],
+    });
+    useNodeDetailView.getState().clearRequest();
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    const problems = screen.getByRole("button", { name: "問題：1 項" });
+    expect(problems).toHaveClass("has-problems", "warnings-only");
+    await user.click(problems);
+    const panel = screen.getByRole("complementary", { name: "問題" });
+    await user.click(within(panel).getByRole("button", { name: /開啟「相依」分頁來連線/ }));
+    expect(useNodeDetailView.getState().request).toMatchObject({ nodeId: "a", view: "dependencies" });
+    expect(openTab).toHaveBeenCalledWith("a");
+  });
+
+  it("keeps the failure colour for an error among the warnings", () => {
+    useApp.setState({
+      issues: [
+        { severity: "warning", nodeId: "a", msg: "node is not connected to anything" },
+        { severity: "error", nodeId: "a", field: "requires", msg: "未知的節點" },
+      ],
+    });
+    render(<LaneView variant="graph" {...paneProps} />);
+    const problems = screen.getByRole("button", { name: "問題：2 項" });
+    expect(problems).toHaveClass("has-problems");
+    expect(problems).not.toHaveClass("warnings-only");
   });
 
   it("keeps Problems and the node drawer from sharing the side", async () => {

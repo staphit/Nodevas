@@ -29,6 +29,16 @@ Open <http://127.0.0.1:5666>. There is no sign-in page: on a loopback server the
 
 Accounts, the audit trail, settings and the search index live in a PostgreSQL database that `serve` starts for you on `127.0.0.1` and stops with it. The first start downloads the pinned PostgreSQL build once (about 40–93 MB, checked against a SHA-256 compiled into the binary) and creates the database, which takes a few seconds; the desktop app ships the binaries and downloads nothing. Linux needs glibc 2.36 or newer (Debian 12, Ubuntu 23.04); elsewhere point `NODEVAS_DATABASE_URL` at a server. Back up with `nodevas db dump`. See [Operations: Database](./operations.md#database).
 
+### First steps in the app
+
+A new workspace opens on a welcome screen: start with a blank project, or open one of the examples to look around. An example is copied into your workspace as a new project, so change or delete it freely.
+
+- **Create a node.** Click **New node** in the board's toolbar, or right-click an empty spot on the canvas.
+- **Connect two nodes.** Drag the round dot on a card's right edge onto another card; the second card then waits for the first. Holding Alt and dragging from the card itself does the same. Ctrl/⌘ Z undoes the last change.
+- **Find help.** **Settings → General** has **Help and shortcuts** and **Replay the tour**. Ctrl/⌘ K opens the command palette, where every action can be searched.
+
+The agent features stay out of the way until you open **Station** or turn on **Settings → Agents → Let agents work here**. [Concepts](./concepts.md) explains nodes, dependencies, and readiness.
+
 ### Run coding agents too
 
 The same command starts a runner for this server on this machine. Name the repositories agents may work in:

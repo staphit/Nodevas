@@ -5,13 +5,14 @@
 import { useEffect, useId, useState } from "react";
 
 import { useI18n } from "../i18n";
-import { useLocalRunner } from "../runners/edition";
+import { useLocalRunner, useLocalState } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { localSummary, ThisComputerPanel } from "./ThisComputerPanel";
 
 export function ThisComputerCard() {
   const { t } = useI18n();
   const runner = useLocalRunner();
+  const starting = useLocalState() === "starting";
   const loaded = useRunners((s) => s.loaded);
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -21,7 +22,12 @@ export function ThisComputerCard() {
     if (!useRunners.getState().loaded) void useRunners.getState().refresh();
   }, []);
 
-  const summary = loaded ? localSummary(t, runner) : t("common.loading");
+  // Still on its way up after the app started: not "isn't running".
+  const summary = !loaded
+    ? t("common.loading")
+    : starting
+      ? t("local.statusStarting")
+      : localSummary(t, runner);
 
   return (
     <section className="station-panel this-computer-card" aria-labelledby={titleId}>

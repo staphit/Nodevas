@@ -266,7 +266,9 @@ export function AgentsSection({
         {/* What turning it on brings, or why it cannot be turned off. */}
         {(!on || inUse) && (
           <p id={hintId} className="settings-hint">
-            {inUse ? t("workstation.inUse") : t("workstation.hint")}
+            {inUse
+              ? t(single ? "workstation.inUseLocal" : "workstation.inUse")
+              : t(single ? "workstation.hintLocal" : "workstation.hint")}
           </p>
         )}
         {on &&

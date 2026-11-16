@@ -12,7 +12,9 @@ import { useEffect, useRef } from "react";
 import type { GraphAnalysis } from "../../analysis";
 import { IconClose, IconWarning } from "../../icons";
 import { useI18n } from "../../i18n";
+import type { LocalizedIssue } from "../../issueMessages";
 import type { Issue } from "../../types";
+import type { NodeDetailView } from "../drawer/openNodeDetail";
 import { GraphAnalysisPanel } from "../lane/GraphAnalysisPanel";
 
 /**
@@ -43,12 +45,29 @@ export function problemCount(analysis: GraphAnalysis, issues: Issue[]): number {
   );
 }
 
+/**
+ * Whether anything the button counts is more than a warning: a validation
+ * error, an overdue node or a dependency that is broken. Only then does the
+ * count take the failure colour. Two cards nobody has connected yet are
+ * warnings — worth a number, not an alarm on a board five minutes old.
+ */
+export function hasUrgentProblem(analysis: GraphAnalysis, issues: Issue[]): boolean {
+  return (
+    analysis.overdue.size > 0 ||
+    analysis.violations.length > 0 ||
+    issues.some((issue) => issue.severity === "error")
+  );
+}
+
 export interface ProblemsPanelProps {
   analysis: GraphAnalysis;
-  issues: Issue[];
+  issues: LocalizedIssue[];
   nodeTitle: (id: string | undefined) => string;
-  /** Selects the node on the board and opens it. */
-  onPick: (nodeId: string) => void;
+  /**
+   * Selects the node on the board and opens it — on `view` when the finding
+   * is put right in one of the panel's views rather than in the document.
+   */
+  onPick: (nodeId: string, view?: NodeDetailView) => void;
   onClose: () => void;
 }
 
@@ -103,6 +122,9 @@ export function ProblemsPanel({
           <h4>{t("board.problemsValidation")}</h4>
           <ul className="problems-issues">
             {problems.map((issue, index) => {
+              // A node with nothing connected to it is not put right in its
+              // document: the row opens where it can be connected, and says so.
+              const connects = issue.rule === "disconnected" && Boolean(issue.nodeId);
               const body = (
                 <>
                   <IconWarning size={12} />
@@ -114,6 +136,9 @@ export function ProblemsPanel({
                       {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
                     </span>
                     <small>{issue.msg}</small>
+                    {connects && (
+                      <span className="problems-issue-action">{t("board.problemsConnect")}</span>
+                    )}
                   </span>
                 </>
               );
@@ -123,7 +148,7 @@ export function ProblemsPanel({
                     <button
                       type="button"
                       className={`problems-issue issue-${issue.severity}`}
-                      onClick={() => onPick(issue.nodeId!)}
+                      onClick={() => onPick(issue.nodeId!, connects ? "dependencies" : undefined)}
                     >
                       {body}
                     </button>

@@ -1,7 +1,10 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { explorerApi, type RepoEntry, type RepoSummary, type WorkspaceEntry } from "../api/explorer";
 import { useI18n } from "../i18n";
-import { runnerDisplayName } from "../runners/runnerName";
+import { useEdition } from "../runners/edition";
+import { LOCAL_RUNNER_NAME, runnerDisplayName } from "../runners/runnerName";
+import { useWorkstationVisible } from "../runners/workstation";
+import { openSettings } from "../settings/openSettings";
 import { useApp } from "../store";
 import { baseName } from "./explorerFormat";
 import { useExplorer, type ExplorerView } from "./explorerStore";
@@ -192,9 +195,17 @@ function WorkspaceFiles({ query }: { query: string }) {
   );
 }
 
+/** Whether `repo` is on this computer's own runner in the single-user
+ * edition, where the runner is part of the app: what is said about the repo
+ * then never names a runner or a command to type. */
+function useLocalRepo(repo: RepoSummary): boolean {
+  return useEdition() === "single" && repo.runnerName === LOCAL_RUNNER_NAME;
+}
+
 /** One directory of a repo, fetched from its runner when opened. */
 function RepoDir({ repo, path, depth, query }: { repo: RepoSummary; path: string; depth: number; query: string }) {
   const { t } = useI18n();
+  const local = useLocalRepo(repo);
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
   const listing = useLoad(
@@ -261,8 +272,10 @@ function RepoDir({ repo, path, depth, query }: { repo: RepoSummary; path: string
       {depth === 0 && listing.data && (
         <p className="ex-note">
           {listing.data.hidden > 0
-            ? t("explorer.files.readOnlyNote", { count: listing.data.hidden })
-            : t("explorer.files.readOnlyNoteNone")}
+            ? t(local ? "explorer.files.readOnlyNoteLocal" : "explorer.files.readOnlyNote", {
+                count: listing.data.hidden,
+              })
+            : t(local ? "explorer.files.readOnlyNoteNoneLocal" : "explorer.files.readOnlyNoteNone")}
         </p>
       )}
       {listing.data?.truncated && (
@@ -276,13 +289,22 @@ function RepoDir({ repo, path, depth, query }: { repo: RepoSummary; path: string
 function RepoSection({ repo, query }: { repo: RepoSummary; query: string }) {
   const { t } = useI18n();
   const label = t("explorer.files.repo", { name: repo.name });
+  const local = useLocalRepo(repo);
   let body: ReactElement;
   if (!repo.online) {
-    body = <p className="ex-note">{t("explorer.files.offlineNote", { runner: runnerDisplayName(t, repo.runnerName) })}</p>;
+    body = (
+      <p className="ex-note">
+        {local
+          ? t("explorer.files.offlineNoteLocal")
+          : t("explorer.files.offlineNote", { runner: runnerDisplayName(t, repo.runnerName) })}
+      </p>
+    );
   } else if (!repo.browsable) {
     body = (
       <p className="ex-note">
-        {repo.reason && repo.reason !== "REPO_BROWSE_OFF" ? repo.reason : t("explorer.files.browseOff")}
+        {repo.reason && repo.reason !== "REPO_BROWSE_OFF"
+          ? repo.reason
+          : t(local ? "explorer.files.browseOffLocal" : "explorer.files.browseOff")}
       </p>
     );
   } else {
@@ -306,6 +328,8 @@ function RepoSection({ repo, query }: { repo: RepoSummary; query: string }) {
 /** Workspace files and the runners' repos, read-only. */
 export default function FilesPanel() {
   const { t } = useI18n();
+  const single = useEdition() === "single";
+  const agentsOn = useWorkstationVisible();
   const [query, setQuery] = useState("");
   const repos = useLoad(() => explorerApi.repos(), "repos");
   return (
@@ -326,7 +350,18 @@ export default function FilesPanel() {
         {(repos.data ?? []).map((repo) => (
           <RepoSection key={`${repo.runnerId}/${repo.repoId}`} repo={repo} query={query} />
         ))}
-        {repos.data && repos.data.length === 0 && <p className="ex-note">{t("explorer.files.noRepos")}</p>}
+        {repos.data && repos.data.length === 0 && !single && <p className="ex-note">{t("explorer.files.noRepos")}</p>}
+        {/* Single-user: repos are added in the app, not from a command line.
+            While agents are off, This computer shows only the switch that
+            lets them in, so the note names it. */}
+        {repos.data && repos.data.length === 0 && single && (
+          <p className="ex-note">
+            {t(agentsOn ? "explorer.files.noReposLocal" : "explorer.files.noReposOffLocal")}{" "}
+            <button type="button" className="run-inline-link" onClick={() => openSettings("runners")}>
+              {t("offerAsk.fixLocal")}
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );

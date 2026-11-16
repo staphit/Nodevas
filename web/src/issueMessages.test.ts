@@ -39,6 +39,33 @@ describe("validation messages in Traditional Chinese", () => {
 
   it("localizes an issue without touching its other fields", () => {
     const issue = { severity: "warning" as const, nodeId: "n1", field: "", msg: "node is not connected to anything" };
-    expect(localizeIssue(issue, "zh-TW")).toEqual({ ...issue, msg: "這個節點沒有連到任何節點。" });
+    expect(localizeIssue(issue, "zh-TW")).toEqual({
+      ...issue,
+      msg: "這個節點沒有連到任何節點。",
+      rule: "disconnected",
+    });
+  });
+});
+
+// The hub sends no code with a finding and the Problems panel sees only the
+// translated text, so the rule a message matched travels with the issue. That
+// is what lets a "not connected" row open the node where it can be connected.
+describe("the rule a finding matched", () => {
+  const issue = { severity: "warning" as const, nodeId: "n1", msg: "node is not connected to anything" };
+
+  it("is named in every language, English included", () => {
+    expect(localizeIssue(issue, "zh-TW").rule).toBe("disconnected");
+    expect(localizeIssue(issue, "en")).toEqual({ ...issue, rule: "disconnected" });
+  });
+
+  it("names each finding by its own rule", () => {
+    expect(localizeIssue({ severity: "error", msg: "dependency cycle: a -> b -> a" }, "en").rule).toBe("cycle");
+    expect(localizeIssue({ severity: "error", msg: 'unknown node "build"' }, "zh-TW").rule).toBe("unknownNode");
+  });
+
+  it("is absent for a message this list does not know, and the issue is left as it was", () => {
+    const unknown = { severity: "warning" as const, nodeId: "n1", msg: "something new from the hub" };
+    expect(localizeIssue(unknown, "zh-TW")).toBe(unknown);
+    expect(localizeIssue(unknown, "en").rule).toBeUndefined();
   });
 });
