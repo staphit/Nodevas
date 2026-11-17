@@ -14,8 +14,8 @@ A copilot inside the Nodevas UI that you talk to or type to. It reads and edits 
 
 A configured provider or key always wins: **Anthropic** or **OpenAI-compatible** chosen by an administrator as the **Model** in **Settings → General → Voice copilot** (or with `copilot.provider` or `NODEVAS_COPILOT_PROVIDER`); a key on the server, whose vendor answers while the provider is left automatic (Anthropic for a key that does not say); or `copilotProvider` set on your runner (unless **API key lives on**, below, is **This server**). With none of them, the default, it uses a free model and no key, in this order:
 
-1. the browser's built-in model (Gemini Nano in Chrome 148 or later on a desktop), when it is ready;
-2. Ollama (`127.0.0.1:11434`) or LM Studio (`127.0.0.1:1234`) on your runner's PC, else on the server, preferring a model that can call tools;
+1. Ollama (`127.0.0.1:11434`) or LM Studio (`127.0.0.1:1234`) on your runner's PC, else on the server, preferring a model that can call tools;
+2. the browser's built-in model (Gemini Nano in Chrome 148 or later on a desktop), when it is ready: it is the smallest and is declared for English (and your interface language when Chrome's model takes it), so it comes last;
 3. the browser's model again, once you click **Download the on-device model**.
 
 When none is available, the button opens a help panel: use Chrome on a desktop, install Ollama and `ollama pull qwen3:8b`, or set a key on the server or your runner.

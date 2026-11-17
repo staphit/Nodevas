@@ -126,6 +126,7 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 		"0030_agent_ask_kinds", "0031_agent_ask_run_key", "0032_agent_ask_input_truncated",
 		"0033_permission_prompt_action_details", "0034_agent_message_hub_notice", "0035_run_changes_patch_pruned",
 		"0036_run_workspace", "0036_theme_packs", "0037_global_runs", "0038_run_origin", "0039_account_preferences",
+		"0040_copilot_entry_data",
 	}
 	if n := len(names); n < len(want) || !slices.Equal(names[n-len(want):], want) {
 		t.Fatalf("chain ends %v, want ... %v", names[max(0, n-len(want)-1):], want)

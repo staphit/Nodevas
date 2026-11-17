@@ -1214,6 +1214,15 @@ CREATE TABLE IF NOT EXISTS account_preferences (
 );
 `,
 	},
+	{
+		// A copilot entry's own JSON for the panel: a draft's proposed
+		// nodes, their issues and whether the person created or discarded
+		// them (internal/copilot, EntryDraft). Empty for every other kind.
+		name: "0040_copilot_entry_data",
+		stmt: `
+ALTER TABLE copilot_entries ADD COLUMN IF NOT EXISTS data TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

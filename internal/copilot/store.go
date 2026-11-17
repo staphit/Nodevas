@@ -28,6 +28,10 @@ const (
 	// run the conversation started has ended (followup.go). Its message is a
 	// user-role note for the model, written by the server, never the person.
 	EntryEvent = "event"
+	// EntryDraft is proposed nodes from the drafter (draft.go): its data holds
+	// the draft, its issues and whether the person created or discarded it;
+	// its message tells the model, in later turns, what was proposed.
+	EntryDraft = "draft"
 )
 
 // Tool entry outcomes, as stored in copilot_entries.tool_status.
@@ -72,7 +76,9 @@ type Entry struct {
 	// Message is the provider.Message JSON the next turn replays. It never
 	// goes to the browser: it can hold a vendor's raw reasoning blocks, and
 	// the display columns already say everything the panel shows.
-	Message   string `json:"-"`
+	Message string `json:"-"`
+	// Data is a kind's own JSON for the panel (a draft's DraftData).
+	Data      string `json:"data,omitempty"`
 	CreatedAt int64  `json:"createdAt"`
 }
 
@@ -232,7 +238,7 @@ func (s *Store) DeleteConversation(ctx context.Context, accountID, id string) er
 	return nil
 }
 
-const entryColumns = `id, conversation_id, seq, kind, source, text, tool_name, tool_input, tool_output, tool_status, message, created_at`
+const entryColumns = `id, conversation_id, seq, kind, source, text, tool_name, tool_input, tool_output, tool_status, message, data, created_at`
 
 // Entries returns a conversation's transcript in order. The caller has
 // already established that the conversation is the caller's own.
@@ -249,12 +255,41 @@ func (s *Store) Entries(ctx context.Context, conversationID string) ([]Entry, er
 		var entry Entry
 		if err := rows.Scan(&entry.ID, &entry.ConversationID, &entry.Seq, &entry.Kind,
 			&entry.Source, &entry.Text, &entry.ToolName, &entry.ToolInput, &entry.ToolOutput,
-			&entry.ToolStatus, &entry.Message, &entry.CreatedAt); err != nil {
+			&entry.ToolStatus, &entry.Message, &entry.Data, &entry.CreatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
+}
+
+// SetEntryData replaces the data of one entry of the given kind, in a
+// conversation the account owns, and returns the entry. Anything else,
+// including another account's entry, is ErrNotFound.
+func (s *Store) SetEntryData(ctx context.Context, accountID, conversationID, entryID, kind, data string) (Entry, error) {
+	result, err := s.database.ExecContext(ctx, `
+UPDATE copilot_entries SET data = ?
+WHERE id = ? AND conversation_id = ? AND kind = ?
+  AND conversation_id IN (SELECT id FROM copilot_conversations WHERE id = ? AND account_id = ?)`,
+		data, entryID, conversationID, kind, conversationID, accountID)
+	if err != nil {
+		return Entry{}, err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return Entry{}, err
+	} else if n == 0 {
+		return Entry{}, ErrNotFound
+	}
+	var entry Entry
+	err = s.database.QueryRowContext(ctx,
+		`SELECT `+entryColumns+` FROM copilot_entries WHERE id = ?`, entryID).Scan(
+		&entry.ID, &entry.ConversationID, &entry.Seq, &entry.Kind,
+		&entry.Source, &entry.Text, &entry.ToolName, &entry.ToolInput, &entry.ToolOutput,
+		&entry.ToolStatus, &entry.Message, &entry.Data, &entry.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Entry{}, ErrNotFound
+	}
+	return entry, err
 }
 
 // AppendEntry stores an entry at the end of a conversation and touches the
@@ -275,10 +310,10 @@ func (s *Store) AppendEntry(ctx context.Context, entry Entry) (Entry, error) {
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO copilot_entries (`+entryColumns+`)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.ID, entry.ConversationID, entry.Seq, entry.Kind, entry.Source, entry.Text,
 			entry.ToolName, entry.ToolInput, entry.ToolOutput, entry.ToolStatus, entry.Message,
-			entry.CreatedAt); err != nil {
+			entry.Data, entry.CreatedAt); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
