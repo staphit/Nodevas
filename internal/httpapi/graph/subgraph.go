@@ -21,13 +21,27 @@ const maxSubgraphRequestBytes = 2 << 20
 // recorded for POST /api/graph/batches/:id/undo, and the answer carries
 // batchId and undoable (false when the record could not be written; the nodes
 // were made all the same). A via starting "copilot-draft:" is held to
-// store.MaxCopilotDraftNodes.
+// store.MaxCopilotDraftNodes. A draft plan run's call (P6) is recorded
+// through planDraft instead, and answered 200 with draft true.
 func (a *API) postSubgraph(c *gin.Context) {
 	var spec store.SubgraphSpec
 	if !httpx.DecodeJSONLimit(c, &spec, maxSubgraphRequestBytes) {
 		return
 	}
-	result, err := httpx.StoreFor(c.Request, a.pm).CreateSubgraph(auth.ActorFrom(c.Request), spec)
+	st := httpx.StoreFor(c.Request, a.pm)
+	if a.planDraft != nil {
+		if held, handled, err := a.planDraft(c.Request, st, spec); handled {
+			if err != nil {
+				writeSubgraphError(c, err)
+				return
+			}
+			c.JSON(http.StatusOK, map[string]any{"ok": true, "draft": true, "ids": held.IDs,
+				"created": []store.SubgraphCreated{}, "issues": held.Issues, "note": PlanDraftNote,
+				"draftNodes": held.Nodes})
+			return // no broadcast: nothing changed
+		}
+	}
+	result, err := st.CreateSubgraph(auth.ActorFrom(c.Request), spec)
 	if err != nil {
 		writeSubgraphError(c, err)
 		return
@@ -69,6 +83,11 @@ func subgraphBody(result store.SubgraphResult) map[string]any {
 // writeSubgraphError answers a refused subgraph, the same for the commit and
 // its dry run.
 func writeSubgraphError(c *gin.Context, err error) {
+	var refusal *PlanDraftRefusal
+	if errors.As(err, &refusal) {
+		httpx.Coded(c, refusal.Status, refusal.Code, refusal.Err, fieldExtras(refusal.Field))
+		return
+	}
 	if httpx.WriteDenied(c, err) {
 		return
 	}

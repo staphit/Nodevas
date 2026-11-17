@@ -22,6 +22,7 @@ import (
 	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/runnerwire"
 )
 
 var (
@@ -107,6 +108,10 @@ type Options struct {
 	// tasks in dependency order from a project's board.
 	LookupRun func(ctx context.Context, runID string) (RunInfo, error)
 	GoalTasks func(ctx context.Context, project, goalNodeID string) (Goal, error)
+	// PlanDraft reads what a draft plan run recorded, as accountID (the run's
+	// creator, its runner's owner or an admin may; runs.Store.PlanDraftFor).
+	// Optional: without it start_breakdown starts plain plan runs (P6).
+	PlanDraft func(ctx context.Context, runID, accountID string) (runnerwire.PlanDraft, error)
 	// NotifyFollowup tells the account's browsers a follow-up landed in a
 	// conversation. Optional.
 	NotifyFollowup func(accountID, conversationID string)

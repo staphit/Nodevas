@@ -43,7 +43,7 @@ func (s *Server) Handler() http.Handler {
 	router.Use(recoverPanics(), s.secureHTTP, s.accessGate(), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withRoleGuard, s.withAuditTrail, s.withScorecardInvalidation)
 
 	api := router.Group("/api")
-	graph.New(s.pm, s.hub).SetActiveRun(s.activeRunOn).Register(api)
+	graph.New(s.pm, s.hub).SetActiveRun(s.activeRunOn).SetPlanDraft(s.capturePlanDraft).Register(api)
 	nodeAPI := node.New(s.pm, s.hub)
 	if s.members != nil {
 		// A transfer names two projects in its body; the gate sees neither.

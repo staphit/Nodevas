@@ -272,8 +272,14 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		}
 		if s.followupsOn() {
 			// The plan run's end comes back to this conversation by itself.
-			server.followup = func(goal, runID string, revision *Revision) {
-				s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language, revision)
+			server.followup = func(goal, runID string, revision *Revision) error {
+				return s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language, revision)
+			}
+			// P6: a breakdown's plan comes back as a draft, and nothing
+			// starts on the goal while it is one.
+			server.draftPlans = s.opts.PlanDraft != nil
+			server.planDraftBusy = func(ctx context.Context, goal string) (string, error) {
+				return s.planDraftBusy(ctx, req.Actor.ID, conversation.Project, goal)
 			}
 		}
 	}
@@ -607,6 +613,13 @@ func (r *turnRun) finish(call provider.Block, input json.RawMessage, status, out
 func historyFrom(entries []Entry) []provider.Message {
 	var history []provider.Message
 	for _, entry := range entries {
+		// A coding agent's plan draft (P6) has no message of its own: the
+		// model reads its state as it is now, folded into the follow-up's
+		// note right before it.
+		if message, ok := planDraftHistoryMessage(entry); ok {
+			history = appendMessage(history, message)
+			continue
+		}
 		if entry.Message == "" {
 			continue
 		}

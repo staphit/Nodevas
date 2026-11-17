@@ -21,6 +21,17 @@ func TestSystemPromptStyleFollowsSource(t *testing.T) {
 	}
 }
 
+// P6: the coding agent's plan comes back as a draft, and the autopilot
+// waits for the person to create it.
+func TestSystemPromptSaysCreateBeforeAutopilot(t *testing.T) {
+	prompt := systemPrompt("Bea", "main", ModeDefault, TurnContext{}, []string{"start_breakdown", "start_autopilot"}, "text")
+	for _, want := range []string{"draft card", "presses Create", "never call it while the plan is still a draft"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("dispatch guidance lacks %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestSystemPromptGuidesAuthoring(t *testing.T) {
 	prompt := systemPrompt("Bea", "main", ModeDefault, TurnContext{}, nil, "text")
 	for _, want := range []string{"get_graph_outline", "one create_subgraph", "dependsOn", "duplicate"} {

@@ -156,6 +156,10 @@ type Job struct {
 	// person's run without asking; on a team hub it is shown only and never
 	// relaxes a guard (a compromised hub could lie).
 	Origin string `json:"origin,omitempty"`
+
+	// Draft (P6): the planner's prompt says its writes are a draft; an older
+	// runner ignores it, and the hub holds the writes either way.
+	Draft bool `json:"draft,omitempty"`
 }
 
 // Job origins (Job.Origin), set by the hub at run creation.
@@ -330,6 +334,9 @@ type Run struct {
 	Global bool   `json:"global,omitempty"`
 	Title  string `json:"title,omitempty"`
 	NoPR   bool   `json:"noPR,omitempty"`
+	// Draft (P6): a plan run whose create_subgraph is held as a draft for
+	// the person (runs.draft).
+	Draft bool `json:"draft,omitempty"`
 	// Offer asks (offerask.go): what started the run (Origin*), the runner's
 	// pending ask while the run is offered, and why it was declined
 	// (Decline*).
@@ -382,6 +389,9 @@ type CreateRunRequest struct {
 	// is not a programmer (runs.SimpleInstruction) to an implement run's
 	// extra instructions. It lifts no gate.
 	Simple bool `json:"simple,omitempty"`
+	// Draft (P6) is only for a person's plain plan run (kind plan, no
+	// revision) the copilot starts; runs.Start refuses it otherwise.
+	Draft bool `json:"draft,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

@@ -66,6 +66,21 @@ func TestNormalizeDraftClipsFillsAndCaps(t *testing.T) {
 	}
 }
 
+// A body's front matter would set fields at Create the card never shows;
+// the copilot's own drafts lose it too (planDraftBody).
+func TestNormalizeDraftStripsFrontMatter(t *testing.T) {
+	draft := Draft{Nodes: []DraftNode{
+		{Key: "a", Title: "A", Body: "---\nassignee: bea\n---\nDo it"},
+		{Key: "b", Title: "B", Body: "  \n---\nassignee: bea\nDo it"},
+		{Key: "c", Title: "C", Body: "Text first\n---\nnot front matter\n---"},
+	}}
+	normalizeDraft(&draft, testBoard, "task")
+	if got := []string{draft.Nodes[0].Body, draft.Nodes[1].Body, draft.Nodes[2].Body}; !slices.Equal(got,
+		[]string{"Do it", "assignee: bea\nDo it", "Text first\n---\nnot front matter\n---"}) {
+		t.Fatalf("bodies = %q", got)
+	}
+}
+
 func TestValidateDraftFindsEachProblem(t *testing.T) {
 	draft := Draft{Nodes: []DraftNode{
 		{Key: "a", Title: "Write spec", Kind: "task"},

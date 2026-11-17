@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -261,6 +262,39 @@ func (s *Store) Entries(ctx context.Context, conversationID string) ([]Entry, er
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
+}
+
+// openPlanDrafts lists the account's draft entries in the project whose
+// data has an origin on goal and state open: a coding agent's plan (P6) the
+// person has neither created nor discarded, in any of their conversations of
+// the project. Decoded and filtered here, not in SQL: data is plain text.
+func (s *Store) openPlanDrafts(ctx context.Context, accountID, project, goal string) ([]Entry, error) {
+	columns := "e." + strings.ReplaceAll(entryColumns, ", ", ", e.")
+	rows, err := s.database.QueryContext(ctx, `
+SELECT `+columns+` FROM copilot_entries e
+  JOIN copilot_conversations c ON c.id = e.conversation_id
+ WHERE c.account_id = ? AND c.project = ? AND e.kind = ?
+ ORDER BY e.seq`, accountID, project, EntryDraft)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var entry Entry
+		if err := rows.Scan(&entry.ID, &entry.ConversationID, &entry.Seq, &entry.Kind,
+			&entry.Source, &entry.Text, &entry.ToolName, &entry.ToolInput, &entry.ToolOutput,
+			&entry.ToolStatus, &entry.Message, &entry.Data, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		var data DraftData
+		if json.Unmarshal([]byte(entry.Data), &data) != nil || data.Origin == nil ||
+			data.Origin.GoalID != goal || data.State != DraftOpen {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
 }
 
 // SetEntryData replaces the data of one entry of the given kind, in a

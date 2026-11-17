@@ -56,6 +56,29 @@ type DraftData struct {
 	// BatchID and CreatedIDs are set once the person created it.
 	BatchID    string   `json:"batchId,omitempty"`
 	CreatedIDs []string `json:"createdIds,omitempty"`
+	// Origin and Extras are set on a coding agent's plan (P6): the run it
+	// came from, and by key what the planner wrote that the card does not
+	// edit, which the web sends with the Create.
+	Origin *DraftOrigin           `json:"origin,omitempty"`
+	Extras map[string]DraftExtras `json:"extras,omitempty"`
+}
+
+// DraftOrigin names the plan run a draft came from (a coding agent's plan,
+// P6); nil for the copilot's own drafts.
+type DraftOrigin struct {
+	RunID     string `json:"runId"`
+	GoalID    string `json:"goalId"`
+	GoalTitle string `json:"goalTitle,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	Model     string `json:"model,omitempty"`
+}
+
+// DraftExtras is what the planner wrote for a node that the card does not
+// edit; the web sends it with the Create, merged by key.
+type DraftExtras struct {
+	Tags       []string `json:"tags,omitempty"`
+	Acceptance []string `json:"acceptance,omitempty"`
+	Priority   string   `json:"priority,omitempty"`
 }
 
 // Draft-specific bounds.
@@ -433,7 +456,7 @@ func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, 
 	if batchID != "" && !nodeIDPattern.MatchString(batchID) {
 		return Entry{}, fmt.Errorf("%w: bad batch id", ErrInvalid)
 	}
-	if len(ids) > MaxDraftNodes {
+	if len(ids) > MaxPlanDraftNodes {
 		return Entry{}, fmt.Errorf("%w: too many node ids", ErrInvalid)
 	}
 	for _, id := range ids {
@@ -455,6 +478,14 @@ func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, 
 	var data DraftData
 	if err := json.Unmarshal([]byte(entries[index].Data), &data); err != nil {
 		return Entry{}, fmt.Errorf("copilot: draft %s: %w", entryID, err)
+	}
+	// A coding agent's plan holds up to 100 nodes; the copilot's own, 40.
+	limit := MaxDraftNodes
+	if data.Origin != nil {
+		limit = MaxPlanDraftNodes
+	}
+	if len(ids) > limit {
+		return Entry{}, fmt.Errorf("%w: too many node ids", ErrInvalid)
 	}
 	data.State = state
 	if state == DraftCommitted {

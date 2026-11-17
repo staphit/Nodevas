@@ -224,6 +224,9 @@ func batchHistoryNote(via string) string {
 	if strings.HasPrefix(via, CopilotDraftVia) {
 		return "created from a Copilot draft (" + via + ")"
 	}
+	if strings.HasPrefix(via, CopilotPlanVia) {
+		return "created from a coding agent's plan (via Copilot) (" + via + ")"
+	}
 	return ""
 }
 

@@ -62,6 +62,11 @@ func copilotFollowups(srv *server.Server, pm *project.ProjectManager) func(*copi
 			}
 			return goal, nil
 		}
+		// P6: a draft plan run's recorded plan, read as the follow-up's
+		// account, which deliver has already checked is the run's creator.
+		opts.PlanDraft = func(ctx context.Context, runID, accountID string) (runnerwire.PlanDraft, error) {
+			return dispatcher.Store().PlanDraftFor(ctx, runID, accountID, false)
+		}
 		// A follow-up works as its owner, who may have lost the project.
 		opts.MayWork = srv.AccountMayWrite
 		opts.NotifyFollowup = func(accountID, conversationID string) {
@@ -115,6 +120,7 @@ func copilotRunInfo(r runs.Record) copilot.RunInfo {
 	return copilot.RunInfo{
 		ID: r.ID, Project: r.Project, NodeID: r.NodeID, Kind: r.Kind, Status: r.Status, Error: r.Error,
 		CreatedBy: r.CreatedBy, RetryOf: r.RetryOf, Summary: r.Summary,
+		Draft: r.Draft, Agent: r.Agent, Model: r.Model,
 		MayFallBack: r.Status == runnerwire.RunFailed && runnerwire.FallbackWorthy(r.FailureKind) && len(r.Fallbacks) > 0,
 	}
 }

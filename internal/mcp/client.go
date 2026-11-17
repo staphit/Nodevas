@@ -61,6 +61,9 @@ const (
 	CodeAgentRestoreDenied   = "AGENT_RESTORE_DENIED"
 	CodeInvalidSubgraph      = "INVALID_SUBGRAPH"
 	CodeSubgraphTooLarge     = "SUBGRAPH_TOO_LARGE"
+	// CodePlanRunDrafts: a draft plan run (P6) wrote something other than
+	// its one create_subgraph; the hub's message says what to do instead.
+	CodePlanRunDrafts = "PLAN_RUN_DRAFTS"
 )
 
 // APIError is a failed call to the Nodevas server, carrying whatever the agent

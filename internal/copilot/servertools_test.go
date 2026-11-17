@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -459,6 +460,154 @@ func TestDispatchToolsAlwaysAsk(t *testing.T) {
 	}
 	if len(plan.calls()) != 0 {
 		t.Fatalf("plan mode reached the API: %+v", plan.calls())
+	}
+}
+
+// P6: with draft plans on, start_breakdown asks for a draft plan run, and
+// says its plan comes back as a draft.
+func TestStartBreakdownAsksForADraft(t *testing.T) {
+	ctx := context.Background()
+	api := standardAPI()
+	env := toolEnv(api)
+	env.draftPlans = true
+	followed := ""
+	env.followup = func(goal, runID string, _ *Revision) error { followed = goal + "/" + runID; return nil }
+	result := runStartBreakdown(ctx, env, json.RawMessage(`{"requirement":"build the login page"}`))
+	if result.IsError {
+		t.Fatal(result.Output)
+	}
+	if run := api.find(http.MethodPost, "/api/runs"); run == nil || run.body["draft"] != true {
+		t.Fatalf("run request = %+v", run)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result.Output), &out); err != nil || out["draft"] != true ||
+		!strings.Contains(out["note"].(string), "Nothing is written to the board") || followed != "node-0042/run-7" {
+		t.Fatalf("output = %s (followed %q)", result.Output, followed)
+	}
+
+	// Without it: no draft key at all.
+	api = standardAPI()
+	env = toolEnv(api)
+	env.followup = func(string, string, *Revision) error { return nil }
+	result = runStartBreakdown(ctx, env, json.RawMessage(`{"requirement":"build the login page"}`))
+	if result.IsError {
+		t.Fatal(result.Output)
+	}
+	if run := api.find(http.MethodPost, "/api/runs"); run == nil {
+		t.Fatal("no run")
+	} else if _, has := run.body["draft"]; has {
+		t.Fatalf("a plain breakdown sent draft: %+v", run.body)
+	}
+	if strings.Contains(result.Output, `"draft"`) {
+		t.Fatalf("a plain breakdown says draft: %s", result.Output)
+	}
+}
+
+// A draft run's plan comes back only through its follow-up: when that
+// cannot be recorded, the run is cancelled and the tool says so.
+func TestStartBreakdownCancelsADraftRunWithoutAFollowup(t *testing.T) {
+	ctx := context.Background()
+	api := standardAPI()
+	env := toolEnv(api)
+	env.draftPlans = true
+	env.followup = func(string, string, *Revision) error { return errors.New("database is down") }
+	result := runStartBreakdown(ctx, env, json.RawMessage(`{"goalNodeId":"node-0001"}`))
+	if !result.IsError || !strings.Contains(result.Output, "run-7 was cancelled") ||
+		!strings.Contains(result.Output, "database is down") {
+		t.Fatalf("result = %+v", result)
+	}
+	if api.find(http.MethodPost, "/api/runs/run-7/cancel") == nil {
+		t.Fatal("the draft run was not cancelled")
+	}
+	result = runStartBreakdown(ctx, toolEnvWithFollowupError(standardAPI(), true), json.RawMessage(`{"requirement":"x"}`))
+	if !result.IsError || !strings.Contains(result.Output, "Created the goal node node-0042, but could not start the breakdown") {
+		t.Fatalf("with a new goal: %+v", result)
+	}
+
+	// A plain run with the same failure is not cancelled: its tasks reach
+	// the board anyway.
+	api = standardAPI()
+	result = runStartBreakdown(ctx, toolEnvWithFollowupError(api, false), json.RawMessage(`{"goalNodeId":"node-0001"}`))
+	if result.IsError || api.find(http.MethodPost, "/api/runs/run-7/cancel") != nil {
+		t.Fatalf("plain run: %+v, cancel %v", result, api.find(http.MethodPost, "/api/runs/run-7/cancel"))
+	}
+}
+
+func toolEnvWithFollowupError(api *fakeAPI, draft bool) *serverToolEnv {
+	env := toolEnv(api)
+	env.draftPlans = draft
+	env.followup = func(string, string, *Revision) error { return errors.New("database is down") }
+	return env
+}
+
+// While the goal's plan is a draft, nothing starts or replans on it: the
+// prompt's rule is enforced here, before any write.
+func TestDraftGoalRefusesAutopilotBreakdownAndRevise(t *testing.T) {
+	ctx := context.Background()
+	busy := func(_ context.Context, goal string) (string, error) {
+		if goal == "node-0042" {
+			return "the plan for this goal is still a draft", nil
+		}
+		return "", nil
+	}
+	for _, tc := range []struct {
+		name, input, refused string
+		run                  func(context.Context, *serverToolEnv, json.RawMessage) toolbridge.Result
+	}{
+		{"start_autopilot", `{"goalNodeId":"node-0042"}`, "Not started", runStartAutopilot},
+		{"start_breakdown", `{"goalNodeId":"node-0042"}`, "Not started", runStartBreakdown},
+		{"revise_goal", `{"goalNodeId":"node-0042","change":"add SSO"}`, "Not revised", runReviseGoal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := revisingAPI()
+			// A member-less goal: with a Planner stage the autopilot would
+			// plan it again, directly.
+			api.latest = ""
+			env := toolEnv(api)
+			env.draftPlans = true
+			env.followup = func(string, string, *Revision) error { t.Error("a follow-up was recorded"); return nil }
+			env.planDraftBusy = busy
+			result := tc.run(ctx, env, json.RawMessage(tc.input))
+			if !result.IsError || !strings.Contains(result.Output, tc.refused+": the plan for this goal is still a draft") {
+				t.Fatalf("result = %+v", result)
+			}
+			for _, r := range api.calls() {
+				if r.method != http.MethodGet {
+					t.Errorf("a refusal wrote: %s %s", r.method, r.path)
+				}
+			}
+		})
+	}
+	// A busy check that fails refuses too.
+	env := toolEnv(standardAPI())
+	env.planDraftBusy = func(context.Context, string) (string, error) { return "", errors.New("no database") }
+	if result := runStartAutopilot(ctx, env, json.RawMessage(`{"goalNodeId":"node-0042"}`)); !result.IsError ||
+		!strings.Contains(result.Output, "Could not check the goal's plan draft") {
+		t.Fatalf("result = %+v", result)
+	}
+	// Another goal, or no draft, starts as today.
+	api := standardAPI()
+	env = toolEnv(api)
+	env.planDraftBusy = busy
+	if result := runStartAutopilot(ctx, env, json.RawMessage(`{"goalNodeId":"node-0001"}`)); result.IsError {
+		t.Fatal(result.Output)
+	}
+	if api.find(http.MethodPost, "/api/autopilot") == nil {
+		t.Fatal("start_autopilot did not post")
+	}
+}
+
+// Every request a server tool replays carries the marker that lets POST
+// /api/runs take a draft (auth.CopilotServerTool).
+func TestServerToolRequestsAreMarked(t *testing.T) {
+	marked := false
+	env := toolEnv(nil)
+	env.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		marked = auth.CopilotServerTool(r.Context())
+		_, _ = w.Write([]byte(`{}`))
+	})
+	if err := env.do(context.Background(), http.MethodGet, "/api/runners", nil, nil); err != nil || !marked {
+		t.Fatalf("marked = %v, err = %v", marked, err)
 	}
 }
 

@@ -34,6 +34,11 @@ const MaxCopilotDraftNodes = 40
 // draft: "copilot-draft:<draft id>".
 const CopilotDraftVia = "copilot-draft:"
 
+// CopilotPlanVia prefixes the batch via of a commit made from a coding
+// agent's plan draft (P6): "copilot-plan:<entry id>". Held to the general cap
+// (maxSubgraphNodes, 100), as the plan run was.
+const CopilotPlanVia = "copilot-plan:"
+
 // Bounds of a position on the board's grid, as the web client keeps them
 // (web/src/components/canvas/useBoardColumns.ts MAX_COL, MAX_ROW).
 const (

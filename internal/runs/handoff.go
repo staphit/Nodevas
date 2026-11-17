@@ -123,7 +123,7 @@ func (d *Dispatcher) waitForReset(ctx context.Context, r Record) bool {
 		SteppedUpAt:      r.SteppedUpAt,
 		JobHandoffBranch: branch, JobHandoffNote: handoffNote,
 		RetryAt: formatStamp(at), LimitWaits: r.LimitWaits + 1,
-		Role: r.Role, JobRoles: r.JobRoles,
+		Role: r.Role, JobRoles: r.JobRoles, Draft: r.Draft,
 		// Nobody clicks for it: it starts on its own when the limit resets,
 		// on a note the agent left (a person's "retry now" makes it theirs).
 		Origin: runnerwire.OriginHandoff,

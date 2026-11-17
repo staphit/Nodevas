@@ -21,6 +21,9 @@ type API struct {
 	// on the node; batch undo keeps such a node. Wired by the server, which
 	// holds the run records.
 	activeRun func(ctx context.Context, st *store.Store, nodeID string) bool
+	// planDraft, when set, records a draft plan run's create_subgraph
+	// instead of writing it (P6, SetPlanDraft).
+	planDraft PlanDraftCapture
 }
 
 // SetActiveRun gives batch undo a way to see runs (internal/runs), which this

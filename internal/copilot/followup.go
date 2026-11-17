@@ -81,6 +81,10 @@ type RunInfo struct {
 	// Summary is the run's final message; a replan's ends with its
 	// reconciliation (runnerwire.ReconcileStart).
 	Summary string
+	// Draft (P6): a plan run whose create_subgraph the hub held as a draft
+	// (Options.PlanDraft reads it); Agent and Model are who planned it.
+	Draft        bool
+	Agent, Model string
 }
 
 // GoalTask is one task under a goal, as the follow-up lists it.
@@ -217,24 +221,27 @@ func (s *Service) followupsOn() bool {
 
 // recordFollowup remembers a plan run a turn started: a breakdown's, or a
 // revision's replan when revision is set. It is delivered after the turn, at
-// the earliest: the turn holds the conversation.
+// the earliest: the turn holds the conversation. The error is the row's
+// (nil when follow-ups are off): a draft plan run without its follow-up has
+// no way back to the person, so start_breakdown cancels it then.
 func (s *Service) recordFollowup(ctx context.Context, conversation Conversation, accountID, goal, runID, language string,
-	revision *Revision) {
+	revision *Revision) error {
 	if !s.followupsOn() || goal == "" || runID == "" {
-		return
+		return nil
 	}
 	if _, err := s.store.addFollowup(ctx, Followup{
 		ConversationID: conversation.ID, AccountID: accountID, GoalNodeID: goal, RunID: runID,
 		Language: clip(language), Revision: revision,
 	}); err != nil {
 		slog.Warn("copilot: record follow-up", slog.String("run", runID), slog.Any("error", err))
-		return
+		return err
 	}
 	// A run can end at once (its runner declines it): look again when the
 	// turn lets go of the conversation.
 	s.mu.Lock()
 	s.deferred[conversation.ID] = true
 	s.mu.Unlock()
+	return nil
 }
 
 // RunChanged is the run dispatcher's observer hook: a plan run ending
@@ -424,6 +431,24 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 	if goal, goalErr = s.opts.GoalTasks(ctx, run.Project, current.GoalNodeID); goalErr != nil {
 		slog.Warn("copilot: follow-up tasks", slog.String("goal", current.GoalNodeID), slog.Any("error", goalErr))
 		goal = Goal{}
+	}
+	// A draft plan run (P6) wrote nothing on the board: its plan is the
+	// draft the hub recorded, delivered as a draft card.
+	if current.Kind == followupBreakdown && run.Draft {
+		if run.Status == runnerwire.RunSucceeded && s.opts.PlanDraft != nil {
+			capture, err := s.opts.PlanDraft(ctx, run.ID, current.AccountID)
+			if err != nil {
+				// Could not read it: it stays pending, like a LookupRun error.
+				slog.Warn("copilot: follow-up plan draft", slog.String("run", run.ID), slog.Any("error", err))
+				return
+			}
+			if len(capture.Nodes) > 0 {
+				s.deliverPlanDraft(ctx, current, conversation, run, goal.Title, capture)
+				return
+			}
+		}
+		// Nothing was written: an empty draft is "added no tasks".
+		goal.Tasks, goalErr = nil, nil
 	}
 	var note, shown, reply string
 	if current.Kind == followupRevision {

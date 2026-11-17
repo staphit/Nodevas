@@ -1223,6 +1223,23 @@ CREATE TABLE IF NOT EXISTS account_preferences (
 ALTER TABLE copilot_entries ADD COLUMN IF NOT EXISTS data TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		// P6: a plan run the copilot started as a draft (runs.draft), and what
+		// its create_subgraph calls recorded instead of writing
+		// (run_plan_drafts.draft, runnerwire.PlanDraft JSON). Only a plain plan
+		// run may be a draft. One row per draft run, replaced on every call.
+		name: "0041_plan_run_drafts",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS draft BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_draft_shape;
+ALTER TABLE runs ADD CONSTRAINT runs_draft_shape CHECK (NOT draft OR (kind = 'plan' AND review = '' AND NOT is_global));
+CREATE TABLE IF NOT EXISTS run_plan_drafts (
+    run_id     TEXT COLLATE "C" PRIMARY KEY REFERENCES runs(id),
+    draft      TEXT NOT NULL DEFAULT '',
+    updated_at TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

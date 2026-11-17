@@ -116,7 +116,7 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			RetryOf: r.ID, PipelineID: r.PipelineID, Fallbacks: chain,
 			SteppedUpAt:      r.SteppedUpAt,
 			JobHandoffBranch: branch, JobHandoffNote: handoffNote, LimitWaits: r.LimitWaits,
-			Role: r.Role, JobRoles: r.JobRoles, Origin: origin,
+			Role: r.Role, JobRoles: r.JobRoles, Origin: origin, Draft: r.Draft,
 		})
 		if err != nil {
 			d.note(ctx, r, "not falling back: "+err.Error())

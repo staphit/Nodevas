@@ -9,6 +9,9 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"nodevas/internal/engine"
+	"nodevas/internal/runnerwire"
 )
 
 // Draft caps. Fixed in v1 (the owner's round-2 decision): a draft is read and
@@ -18,6 +21,9 @@ const (
 	// MaxDraftNodes is the most nodes one draft holds; the rest of a longer
 	// answer is cut and the draft says so (Capped).
 	MaxDraftNodes = 40
+	// MaxPlanDraftNodes is the most nodes a coding agent's plan draft holds
+	// (P6): what one plan run may record on the hub.
+	MaxPlanDraftNodes = runnerwire.MaxPlanDraftNodes
 	// draftMaxTokens bounds the drafting call's answer.
 	draftMaxTokens = 12000
 	// maxOutlineNodes is the most board nodes the prompt lists.
@@ -86,6 +92,9 @@ const (
 	IssueUnknownRef        = "unknown_ref"
 	IssueDuplicateExisting = "duplicate_existing"
 	IssueDuplicateInDraft  = "duplicate_in_draft"
+	// IssueBodyClipped (warning): a plan draft node's body was longer than
+	// the card keeps (maxDraftBodyRunes).
+	IssueBodyClipped = "body_clipped"
 )
 
 var draftKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
@@ -153,7 +162,7 @@ func normalizeDraft(draft *Draft, board draftBoard, defaultKind string) (capped 
 	for i := range draft.Nodes {
 		node := &draft.Nodes[i]
 		node.Title = clipRunes(flatLine(node.Title), maxDraftTitleRunes)
-		node.Body = clipRunes(strings.TrimSpace(node.Body), maxDraftBodyRunes)
+		node.Body = clipRunes(planDraftBody(node.Body), maxDraftBodyRunes)
 		node.Kind = strings.TrimSpace(node.Kind)
 		if node.Kind == "" {
 			node.Kind = defaultKind
@@ -404,6 +413,29 @@ func draftSchema(kinds []string) json.RawMessage {
 
 // draftSchemaName is the schema's name where a vendor asks for one.
 const draftSchemaName = "nodevas_draft"
+
+// planDraftBody is a draft node's body with no front matter: a body that
+// opens with a delimiter would set fields at Create that the card never
+// shows (assignee, requires, effects, priority, tags). Trimmed; a block is
+// replaced by what follows it, an unclosed or unreadable one loses its first
+// line, at most three rounds, after which a body still opening with a
+// delimiter is dropped. Done before the clip, so the clip cannot leave an
+// unclosed block behind.
+func planDraftBody(raw string) string {
+	body := strings.TrimSpace(raw)
+	for round := 0; round < 3 && engine.OpensFrontMatter(body); round++ {
+		if parsed, err := engine.ParseNodeFile([]byte(body)); err == nil && parsed.Body != body {
+			body = strings.TrimSpace(parsed.Body)
+			continue
+		}
+		_, rest, _ := strings.Cut(body, "\n")
+		body = strings.TrimSpace(rest)
+	}
+	if engine.OpensFrontMatter(body) {
+		return ""
+	}
+	return body
+}
 
 func flatLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
