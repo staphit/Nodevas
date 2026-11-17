@@ -74,6 +74,18 @@ type Request struct {
 	Messages  []Message
 	Tools     []Tool
 	MaxTokens int
+	// ResponseSchema, when set, asks for the answer as one JSON object
+	// matching it (structured output) instead of free text or tool calls.
+	// A vendor or local server may not enforce it, and an older runner
+	// drops it: callers validate the answer whatever was asked.
+	ResponseSchema *ResponseSchema
+}
+
+// ResponseSchema names a JSON Schema the answer must match. Name is a short
+// identifier ([a-zA-Z0-9_-], at most 64 bytes) some vendors require.
+type ResponseSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 // StopReason says why a model call ended.

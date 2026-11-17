@@ -389,3 +389,25 @@ Shared-file notes:
 - **Q7** Simple mode: link SimpleAgentBox to Make nodes (「先排成步驟？」), or keep them apart?
 - **Q8** Default intent: always Make nodes, or Ask when the board is empty of a project? (Proposal: always Make nodes.)
 - **Q9** Undo window: the toast lasts 10 s, but the batch undo endpoint has no time limit while nodes are unchanged. OK?
+
+---
+
+## 16. Round 2 (2026-11-17): verified against the code; these override the sections above
+
+A read of this order against master 21169dd6 found about 18 stale claims; the owner then decided:
+
+1. **Check and commit live under `/api/graph`.** `/api/copilot/` is account-level (`internal/server/members.go:63`, `:127`), so the project write gate never runs there, and `internal/httpapi/copilot` holds no store. Routes: `POST /api/graph/subgraph/check` (dry run, its own path and abuse class, allowed for read-only members), the existing `POST /api/graph/subgraph` as the commit (gains `positions` and `batch`), `POST /api/graph/batches/{id}/undo` and `/redo`. `POST /api/copilot/drafts` only produces a draft. All copilot streams are NDJSON (`internal/httpapi/copilot/api.go:288-318`), not SSE.
+2. **Caps are fixed constants in v1**: 40 nodes per draft, 12k output tokens, 150 outline nodes. No per-user setting, no server ceiling, no 7-day expiry sweeper.
+3. **P6 is deferred.** The `nodevas mcp` sidecar gets no draft flag (`internal/runner/jobs.go:981-1008`), and a draft would drop the planner's `link_nodes`, `goal:<id>` tags and acceptance.
+
+Other corrections the build follows:
+- Positions are integer grid cells (columns 0..499, rows 0..200; `web/src/components/canvas/useBoardColumns.ts:26-27`), not pixels. With none given, nothing is written (placement is client-side).
+- There is no node rev. A batch keeps, per node, a fingerprint of the node's own fields and its status at commit; undo refuses a node whose fingerprint or status changed, or that is claimed. Undo is allowed for the batch's actor or an admin.
+- Undo trashes; redo restores from the trash **and re-applies the batch's links into existing nodes**, which a plain restore loses (`internal/store/history.go:506-579`).
+- If the batch record cannot be written, the commit still succeeds and answers `undoable: false`; the toast then has no Undo.
+- `withoutInputs` strips nested `nodes.items.acceptance`, and the bridge also drops it from the arguments, since the MCP server validates against its own schema.
+- `normalizeCalls`' `{}` rewrite and a `max_tokens` stop are separate cases; both now tell the model.
+- No global i18n parity test exists; P4 adds one for its key families.
+- The canvas selection is mirrored into an app slice from `LaneView`, not lifted.
+- Package files widened: P0 also owns `servertools_test.go`, `copilot_test.go` and COPILOT.md's tool list; P4 also owns `web/src/api/copilot.ts`, `copilotStore.ts`, `state/undoSlice.ts`; P5 follows P4 in `Composer.tsx`.
+- macOS: run Go tests with a real `TMPDIR` (e.g. `/private/tmp/...`); `/var` is a symlink and two existing tests fail otherwise.
