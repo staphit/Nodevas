@@ -462,8 +462,13 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 			}
 			return toolError(text, err, run.ID)
 		}
-		note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
-			"to start the autopilot. Tell the person you will come back to them then; they need not ask."
+		if draft {
+			note += " When it ends, this conversation gets a follow-up by itself: the plan as a draft card for the " +
+				"person to create. Tell the person you will come back to them then; they need not ask."
+		} else {
+			note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
+				"to start the autopilot. Tell the person you will come back to them then; they need not ask."
+		}
 	}
 	result := map[string]any{
 		"goalNodeId": goal, "goalCreated": created, "runId": run.ID, "runStatus": run.Status,

@@ -358,11 +358,11 @@ func TestStartAutopilotImplementer(t *testing.T) {
 // The server tools are offered only where the copilot has the router, and
 // never as MCP tools: an agent cannot reach them.
 func TestServerToolsAreCopilotOnly(t *testing.T) {
-	_, without := collectTools(nil, nil, nil)
+	_, without := collectTools(nil, nil, nil, false)
 	if _, ok := without["start_breakdown"]; ok {
 		t.Fatal("server tools offered without a router")
 	}
-	tools, info := collectTools(nil, nil, serverToolNames())
+	tools, info := collectTools(nil, nil, serverToolNames(), false)
 	for _, name := range []string{"start_breakdown", "start_autopilot", "revise_goal"} {
 		ti, ok := info[name]
 		if !ok || !ti.server || !ti.alwaysAsk || ti.kind != toolbridge.KindRisky {

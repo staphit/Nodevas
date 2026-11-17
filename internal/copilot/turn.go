@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -150,8 +151,13 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if req.Intent != IntentDraft && (req.Previous != nil || req.RefineOf != "") {
 		return fmt.Errorf("%w: only a draft turn refines a draft", ErrInvalid)
 	}
-	if req.Previous != nil && len(req.Previous.Nodes) > MaxDraftNodes {
-		return fmt.Errorf("%w: the draft has more than %d nodes", ErrInvalid, MaxDraftNodes)
+	if req.Previous != nil {
+		previous := *req.Previous
+		previous.Nodes = slices.Clone(req.Previous.Nodes)
+		if err := boundDraft(&previous, MaxDraftNodes, maxDraftTitleRunes); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		req.Previous = &previous
 	}
 	if req.RefineOf != "" && !nodeIDPattern.MatchString(req.RefineOf) {
 		return fmt.Errorf("%w: bad refineOf", ErrInvalid)
@@ -287,7 +293,9 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if server != nil {
 		offered = s.serverToolsOffered()
 	}
-	tools, info := collectTools(bridge.Tools(), req.ClientTools, offered)
+	// An Ask turn may hand a description to the drafter (propose_nodes, C1);
+	// a draft turn has no tool loop at all.
+	tools, info := collectTools(bridge.Tools(), req.ClientTools, offered, req.Intent == IntentAsk)
 	if plan.host == ModelHostBrowser {
 		model = &browserProvider{
 			service: s, turn: turn, emit: emit, timeout: s.opts.BrowserModelTimeout,
@@ -310,7 +318,7 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		run := &turnRun{
 			service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
 			conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
-			tools: tools, info: info,
+			tools: tools, info: info, plan: plan, context: req.Context,
 			system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
 			history: appendMessage(history, userMessage),
 		}
@@ -350,11 +358,25 @@ type turnRun struct {
 	info         map[string]toolInfo
 	system       string
 	history      []provider.Message
+	// plan and context are the turn's model and what the person is looking
+	// at, for propose_nodes' drafter.
+	plan    modelPlan
+	context TurnContext
+	// drafted is the token count of propose_nodes' drafting calls.
+	drafted Usage
 }
 
 // loop alternates model calls and tool calls until the model stops asking for
-// tools, the turn is cancelled, or the per-turn tool budget runs out.
+// tools, the turn is cancelled, or the per-turn tool budget runs out. The
+// usage includes propose_nodes' drafting calls.
 func (r *turnRun) loop() (string, Usage, error) {
+	stop, usage, err := r.chat()
+	usage.InputTokens += r.drafted.InputTokens
+	usage.OutputTokens += r.drafted.OutputTokens
+	return stop, usage, err
+}
+
+func (r *turnRun) chat() (string, Usage, error) {
 	var usage Usage
 	executed := 0
 	retriedCutOff := false
@@ -490,7 +512,9 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 	}
 
 	var result toolbridge.Result
-	if info.client {
+	if info.propose {
+		result = r.proposeNodes(input)
+	} else if info.client {
 		result = r.callClient(call, input)
 	} else if info.server {
 		spec, ok := serverTools[call.ToolName]

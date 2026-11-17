@@ -140,13 +140,16 @@ func (p *browserProvider) Stream(ctx context.Context, req provider.Request, onDe
 }
 
 // maxBrowserStructuredMessageBytes bounds one message of a structured call
-// (a draft's board listing is most of it); the browser trims older ones to
-// its model's quota and never cuts the last.
+// (a draft's board listing is most of it). The drafter budgets its own
+// message to it (draftContext.MaxBytes), keeping the person's instruction
+// whole; here only the model's own earlier answer (a repair's) is cut. The
+// browser trims older messages to its model's quota and never cuts the last.
 const maxBrowserStructuredMessageBytes = 12 << 10
 
 // structured is one structured call (a draft): the request's own system
 // prompt and schema, the answer returned as text for the caller to parse and
-// repair. One attempt; the caller decides whether to ask again.
+// repair. One attempt; the caller decides whether to ask again. A person's
+// message is passed whole: cutting its end would drop their instruction.
 func (p *browserProvider) structured(ctx context.Context, req provider.Request) (provider.Response, error) {
 	payload := BrowserModelRequest{System: req.System, Schema: req.ResponseSchema.Schema, Attempt: 1}
 	for _, message := range req.Messages {
@@ -159,13 +162,11 @@ func (p *browserProvider) structured(ctx context.Context, req provider.Request) 
 		if len(parts) == 0 {
 			continue
 		}
-		role := "user"
+		role, content := "user", strings.Join(parts, "\n\n")
 		if message.Role == provider.RoleAssistant {
-			role = "assistant"
+			role, content = "assistant", truncateUTF8(content, maxBrowserStructuredMessageBytes)
 		}
-		payload.Messages = append(payload.Messages, BrowserMessage{
-			Role: role, Content: truncateUTF8(strings.Join(parts, "\n\n"), maxBrowserStructuredMessageBytes),
-		})
+		payload.Messages = append(payload.Messages, BrowserMessage{Role: role, Content: content})
 	}
 	if len(payload.Messages) == 0 || payload.Messages[len(payload.Messages)-1].Role != "user" {
 		return provider.Response{}, errors.New("nothing to send to the browser's model")
@@ -426,8 +427,9 @@ func browserSystemPrompt(actorName, project string, mode Mode, context TurnConte
 		fmt.Fprintf(&b, " (interface: %s)", clip(context.Language))
 	}
 	b.WriteString(".\nNode kinds: task, goal (big requirement), scene and event (story), gate (review), choice, " +
-		"note (reference). For several steps, make one create_subgraph call with dependsOn for real order; " +
-		"never duplicate an existing node.")
+		"note (reference). To add several steps the person described, call propose_nodes with their description: " +
+		"they preview and create the draft. Use one create_subgraph call (dependsOn for real order) only when they " +
+		"asked you to write directly; never duplicate an existing node.")
 	if slices.Contains(offered, "start_breakdown") {
 		b.WriteString("\nTo build something big, restate it and ask the person to confirm; only then call " +
 			"start_breakdown with their words.")

@@ -91,6 +91,8 @@ func TestLLMSessionRefuses(t *testing.T) {
 		{"schema not json", nil, func(r *runnerwire.LLMRequest) {
 			r.ResponseSchema = &runnerwire.LLMResponseSchema{Name: "plan", Schema: json.RawMessage(`{"a":`)}
 		}, "response schema"},
+		{"temperature below 0", nil, func(r *runnerwire.LLMRequest) { r.Temperature = ptrFloat(-0.1) }, "temperature"},
+		{"temperature above 2", nil, func(r *runnerwire.LLMRequest) { r.Temperature = ptrFloat(2.5) }, "temperature"},
 		{"schema too big", nil, func(r *runnerwire.LLMRequest) {
 			big := `{"description":"` + strings.Repeat("x", runnerwire.MaxLLMResponseSchemaBytes) + `"}`
 			r.ResponseSchema = &runnerwire.LLMResponseSchema{Name: "plan", Schema: json.RawMessage(big)}
@@ -200,6 +202,35 @@ func TestLLMSessionForwardsTheResponseSchema(t *testing.T) {
 	if asked.ResponseSchema == nil || asked.ResponseSchema.Name != "draft_plan-1" ||
 		strings.TrimSpace(string(asked.ResponseSchema.Schema)) != schema {
 		t.Fatalf("schema = %+v", asked.ResponseSchema)
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
+
+// C5: a request's temperature reaches the provider; none stays none.
+func TestLLMSessionForwardsTheTemperature(t *testing.T) {
+	var asked []provider.Request
+	c := &Client{Config: copilotConfig(), NewLLMProvider: func(provider.Config) (provider.Provider, error) {
+		return &llmFake{stream: func(_ context.Context, req provider.Request, _ func(provider.Delta)) (provider.Response, error) {
+			asked = append(asked, req)
+			return provider.Response{Message: provider.Message{Role: provider.RoleAssistant,
+				Blocks: []provider.Block{{Type: provider.BlockText, Text: "{}"}}}, Stop: provider.StopEndTurn}, nil
+		}}, nil
+	}}
+	s := c.newLLMSession(context.Background(), "u-ann")
+	defer s.stop()
+	req := llmRequest("llm-t")
+	req.Temperature = ptrFloat(0.2)
+	s.request(req)
+	if done := doneOf(t, s); done.Error != "" {
+		t.Fatalf("done = %+v", done)
+	}
+	s.request(llmRequest("llm-u"))
+	if done := doneOf(t, s); done.Error != "" {
+		t.Fatalf("done = %+v", done)
+	}
+	if len(asked) != 2 || asked[0].Temperature == nil || *asked[0].Temperature != 0.2 || asked[1].Temperature != nil {
+		t.Fatalf("requests = %+v", asked)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -231,6 +232,34 @@ func TestDraftTurnAndDraftState(t *testing.T) {
 	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `\"state\":\"committed\"`) {
 		t.Fatalf("commit = %d %s", r.Code, r.Body)
 	}
+	// C2: the person's final draft rides along and replaces the stored one.
+	r = call(t, router, "alice", http.MethodPut, target,
+		`{"state":"committed","batchId":"b1","ids":["x1"],"draft":{"summary":"mine","nodes":[{"key":"k1","title":"Edited","kind":"task"}]}}`)
+	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `\"title\":\"Edited\"`) ||
+		!strings.Contains(r.Body.String(), `\"edited\":true`) {
+		t.Fatalf("commit with the draft = %d %s", r.Code, r.Body)
+	}
+	var nodes []string
+	for i := 0; i <= copilot.MaxDraftNodes; i++ {
+		nodes = append(nodes, fmt.Sprintf(`{"key":"k%d","title":"t","kind":"task"}`, i))
+	}
+	tooMany := `{"state":"open","draft":{"summary":"","nodes":[` + strings.Join(nodes, ",") + `]}}`
+	if r := call(t, router, "alice", http.MethodPut, target, tooMany); r.Code != http.StatusBadRequest {
+		t.Fatalf("41 nodes = %d %s", r.Code, r.Body)
+	}
+	// A plan-sized draft fits the body limit.
+	big := `{"state":"open","draft":{"summary":"","nodes":[` + strings.Repeat(`{"key":"k","title":"t","kind":"task","body":"`+
+		strings.Repeat("長", 600)+`"},`, 39) + `{"key":"z","title":"t","kind":"task"}]}}`
+	if r := call(t, router, "alice", http.MethodPut, target, big); r.Code != http.StatusOK {
+		t.Fatalf("a 40-node draft with full bodies = %d %s", r.Code, truncate(r.Body.String()))
+	}
+}
+
+func truncate(s string) string {
+	if len(s) > 300 {
+		return s[:300]
+	}
+	return s
 }
 
 func TestTurnRefusedBeforeTheStreamIsPlainJSON(t *testing.T) {

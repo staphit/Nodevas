@@ -82,14 +82,17 @@ type toolInfo struct {
 	// that runs tools at all, bypass included.
 	server    bool
 	alwaysAsk bool
+	// propose marks propose_nodes (propose.go): the drafter, run in the
+	// turn; read kind, since it writes nothing.
+	propose bool
 }
 
 // collectTools merges the bridge's tools with the client tools this browser
-// declared and, with server, the copilot-only server tools. A bridge tool
-// wins a name collision: the server's tools are the ones the permission
-// table was written for.
-func collectTools(bridgeTools []toolbridge.Tool, declared []string, server []string) ([]provider.Tool, map[string]toolInfo) {
-	tools := make([]provider.Tool, 0, len(bridgeTools)+len(declared)+len(serverTools))
+// declared, with server the copilot-only server tools and with propose the
+// drafter's propose_nodes. A bridge tool wins a name collision: the server's
+// tools are the ones the permission table was written for.
+func collectTools(bridgeTools []toolbridge.Tool, declared []string, server []string, propose bool) ([]provider.Tool, map[string]toolInfo) {
+	tools := make([]provider.Tool, 0, len(bridgeTools)+len(declared)+len(serverTools)+1)
 	info := make(map[string]toolInfo, cap(tools))
 	for _, tool := range bridgeTools {
 		kind := tool.Kind
@@ -124,6 +127,11 @@ func collectTools(bridgeTools []toolbridge.Tool, declared []string, server []str
 			info[tool.Name] = toolInfo{kind: toolbridge.KindRisky, title: serverTools[tool.Name].title,
 				server: true, alwaysAsk: true}
 		}
+	}
+	if _, taken := info[proposeNodesTool]; propose && !taken {
+		tools = append(tools, provider.Tool{Name: proposeNodesTool, Description: proposeNodesSpec.description,
+			Schema: json.RawMessage(proposeNodesSpec.schema)})
+		info[proposeNodesTool] = toolInfo{kind: toolbridge.KindRead, title: proposeNodesSpec.title, propose: true}
 	}
 	return tools, info
 }
@@ -174,14 +182,15 @@ func systemPrompt(actorName, project string, mode Mode, context TurnContext, off
 		b.WriteString("When the person describes something to build (a feature, a change, a fix), restate it " +
 			"in a sentence or two and ask them to confirm. Once they confirm, call start_breakdown with the " +
 			"requirement in their own words: it files a goal node and starts a plan run on their runner that " +
-			"breaks the goal into tasks on the board, which takes a few minutes. Its plan comes back as a draft card " +
+			"drafts the goal's tasks, which takes a few minutes. Its plan comes back as a draft card " +
 			"in this conversation: nothing is on the board until the person presses Create on it. When the plan run ends, the server " +
-			"adds a follow-up to this conversation by itself: a [Server event …] note with the outcome and the goal's " +
-			"tasks, then a reply that summarized them and asked whether to start the autopilot (start_autopilot), " +
-			"which works the tasks in dependency order and has their pull requests reviewed. That note is from the " +
+			"adds a follow-up to this conversation by itself: a [Server event …] note with the outcome and the drafted " +
+			"tasks, the draft card, then a reply that asked the person to review it and press Create. Once the tasks " +
+			"are created, offer the autopilot (start_autopilot), which works the tasks in dependency order and has " +
+			"their pull requests reviewed. That note is from the " +
 			"server, not the person: it is not their go-ahead. When the person answers yes, call start_autopilot " +
-			"with that goal; it still asks them to approve. If they ask before the follow-up came, read the goal's " +
-			"tasks yourself. If the plan run failed, offer to run start_breakdown again on the same goal. Ask how pull " +
+			"with that goal; it still asks them to approve. If they ask before the follow-up came, the plan is still " +
+			"being drafted. If the plan run failed, offer to run start_breakdown again on the same goal. Ask how pull " +
 			"requests should be approved if they have not said; a person approving each one is the default. " +
 			"If they have not said who should implement, tell them who will (start_autopilot's implementedBy) " +
 			"so a costly default does not go unnoticed. " +
@@ -237,12 +246,17 @@ const nodeTypesParagraph = "Nodes have a type (kind): task, goal (a big requirem
 
 // authoringParagraph is how to add several nodes well: the duplicates, wrong
 // kinds and unlinked steps people saw came from creating them one at a time
-// without looking at the board first.
-const authoringParagraph = "Before creating more than one node, read get_graph_outline so you know what exists. " +
-	"Create a set of steps with one create_subgraph call, not one node at a time: one node per actionable step, " +
-	"short titles in the person's language, dependsOn only for real order (a step that must finish first), and " +
-	"links to existing nodes by id. Never duplicate a node that already exists; link to it instead. Leave out what " +
-	"the person did not ask for.\n\n"
+// without looking at the board first. A description goes to the drafter
+// (propose_nodes, C1), so the person previews it and creates it themselves
+// (D2); a direct write is for when they asked for one.
+const authoringParagraph = "To add several nodes from what the person described, call propose_nodes with the " +
+	"description: the drafter proposes them as a draft card the person previews, edits and creates, and nothing " +
+	"is written until they do. Do not create those nodes yourself afterwards. Use create_subgraph only when the " +
+	"person asked you to write the nodes directly; then read get_graph_outline first so you know what exists, and " +
+	"make one create_subgraph call, not one node at a time: one node per actionable step, short titles in the " +
+	"person's language, dependsOn only for real order (a step that must finish first), and links to existing nodes " +
+	"by id. Never duplicate a node that already exists; link to it instead. Leave out what the person did not ask " +
+	"for.\n\n"
 
 // clip keeps a browser-supplied value to one short line, so it cannot carry
 // a paragraph of its own instructions into the prompt.

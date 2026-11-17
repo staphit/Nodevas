@@ -134,3 +134,36 @@ func messageTextOf(resp Response) string {
 	}
 	return strings.Join(parts, "")
 }
+
+// C5: a request's temperature goes to an OpenAI-compatible model that takes
+// one (Ollama, LM Studio, gpt-4o), never to a reasoning model, and never
+// when unset; Anthropic ignores it (thinking is on, which refuses one).
+func TestTemperatureIsSentWhereTaken(t *testing.T) {
+	cool := 0.2
+	for model, want := range map[string]bool{"qwen3:8b": true, "gpt-4o": true, "gpt-5-mini": false, "o4-mini": false} {
+		srv, reqs := fakeSSE(t, openaiTextTurn)
+		if _, err := newTestOpenAI(t, srv.URL, model).Stream(context.Background(), Request{Temperature: &cool}, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, sent := decodeBody(t, reqs()[0].body)["temperature"]
+		if sent != want || (want && got != 0.2) {
+			t.Errorf("%s: temperature sent %v (%v), want %v", model, sent, got, want)
+		}
+	}
+	srv, reqs := fakeSSE(t, openaiTextTurn)
+	if _, err := newTestOpenAI(t, srv.URL, "qwen3:8b").Stream(context.Background(), Request{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := decodeBody(t, reqs()[0].body)["temperature"]; sent {
+		t.Error("temperature sent though the request set none")
+	}
+	srv2, reqs2 := fakeSSE(t, anthropicTextTurn)
+	if _, err := newTestAnthropic(t, srv2.URL).Stream(context.Background(), Request{
+		Messages: []Message{{Role: RoleUser, Blocks: []Block{{Type: BlockText, Text: "go"}}}}, Temperature: &cool,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := decodeBody(t, reqs2()[0].body)["temperature"]; sent {
+		t.Error("Anthropic was sent a temperature with thinking on")
+	}
+}

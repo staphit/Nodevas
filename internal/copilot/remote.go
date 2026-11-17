@@ -91,7 +91,7 @@ func (p *runnerProvider) Stream(ctx context.Context, req provider.Request, onDel
 		AccountID: p.accountID,
 		Provider:  p.info.Provider, Model: p.info.Model, BaseURL: p.info.BaseURL,
 		Effort: p.effort, System: req.System, Messages: messages, Tools: tools,
-		MaxTokens: req.MaxTokens,
+		MaxTokens: req.MaxTokens, Temperature: req.Temperature,
 	}
 	schemaBytes := 0
 	if rs := req.ResponseSchema; rs != nil {

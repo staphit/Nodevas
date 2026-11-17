@@ -56,3 +56,15 @@ func TestLLMRequestResponseSchemaWire(t *testing.T) {
 		t.Fatalf("an older decoder failed: %v %+v", err, old)
 	}
 }
+
+// C5: an llm_request carries an optional temperature; none is left out.
+func TestLLMRequestTemperatureWire(t *testing.T) {
+	cool := 0.2
+	with, _ := json.Marshal(LLMRequest{ID: "a", Temperature: &cool})
+	if !strings.Contains(string(with), `"temperature":0.2`) {
+		t.Fatalf("wire = %s", with)
+	}
+	if without, _ := json.Marshal(LLMRequest{ID: "a"}); strings.Contains(string(without), "temperature") {
+		t.Fatalf("an absent temperature is on the wire: %s", without)
+	}
+}

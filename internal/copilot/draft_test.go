@@ -240,13 +240,13 @@ func TestSetDraftState(t *testing.T) {
 	h.start(draftTurn(conversation)).finish()
 	entry, _ := draftEntry(t, h, conversation)
 	ctx := context.Background()
-	if _, err := h.service.SetDraftState(ctx, bob.ID, conversation.ID, entry.ID, DraftCommitted, "b1", nil); !errors.Is(err, ErrNotFound) {
+	if _, err := h.service.SetDraftState(ctx, bob.ID, conversation.ID, entry.ID, DraftCommitted, "b1", nil, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another account: %v", err)
 	}
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, "published", "", nil); !errors.Is(err, ErrInvalid) {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, "published", "", nil, nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad state: %v", err)
 	}
-	updated, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, DraftCommitted, "b-1", []string{"n-a", "n-b", "n-c"})
+	updated, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, DraftCommitted, "b-1", []string{"n-a", "n-b", "n-c"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestSetDraftState(t *testing.T) {
 	}
 	// A non-draft entry is not a draft.
 	_, entries, _ := h.service.Conversation(ctx, alice, conversation.ID)
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entries[0].ID, DraftDiscarded, "", nil); !errors.Is(err, ErrNotFound) {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entries[0].ID, DraftDiscarded, "", nil, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("user entry as draft: %v", err)
 	}
 }

@@ -53,6 +53,9 @@ type DraftData struct {
 	Model    string `json:"model"`
 	State    string `json:"state"`
 	RefineOf string `json:"refineOf,omitempty"`
+	// Edited is set once the person's own version replaced the drafted one
+	// (C2: the draft-state call carried it), so a reload shows what they had.
+	Edited bool `json:"edited,omitempty"`
 	// BatchID and CreatedIDs are set once the person created it.
 	BatchID    string   `json:"batchId,omitempty"`
 	CreatedIDs []string `json:"createdIds,omitempty"`
@@ -89,6 +92,10 @@ const (
 	smallOutlineNodes = 30
 	// maxDraftRepairs is how many times a broken answer is sent back.
 	maxDraftRepairs = 1
+	// maxNeighbourReads is how many of the selection's neighbours missing
+	// from the outline (closed ones, on a board read by open status) are
+	// read one by one.
+	maxNeighbourReads = 10
 )
 
 // draftRun is one draft turn's state.
@@ -108,20 +115,68 @@ type draftRun struct {
 // run drafts and stores the result. Like the chat loop, a failure after the
 // stream began is reported through an event, not returned.
 func (r *draftRun) run() (string, Usage, error) {
-	var usage Usage
-	r.emit(Event{Type: EventDraftStatus, Code: DraftStepReading})
-	small := r.plan.host == ModelHostBrowser
-	context, board, err := readBoard(r.ctx, r.bridge, r.request.Context.SelectedNodeIDs, small)
+	job := draftJob{
+		model: r.model, bridge: r.bridge, plan: r.plan,
+		text: r.request.Text, language: r.request.Context.Language,
+		selected: r.request.Context.SelectedNodeIDs, previous: r.request.Previous, refineOf: r.request.RefineOf,
+		step: func(step string) { r.emit(Event{Type: EventDraftStatus, Code: step}) },
+	}
+	data, usage, err := job.produce(r.ctx)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			return StopCancelled, usage, nil
 		}
-		return "", usage, &codedError{code: "draft_board", message: "Could not read the board: " + err.Error()}
+		return "", usage, err
 	}
-	context.Text = r.request.Text
-	context.Language = r.request.Context.Language
-	context.Previous = r.request.Previous
+	entry, err := r.service.store.AppendEntry(r.storeCtx, Entry{
+		ConversationID: r.conversationID, Kind: EntryDraft, Text: draftLine(data.Draft),
+		Message: mustJSON(textMessage(draftHistoryText(data.Draft))), Data: mustJSON(data),
+	})
+	if err != nil {
+		return "", usage, err
+	}
+	r.emit(Event{Type: EventEntry, Entry: &entry})
+	return string(provider.StopEndTurn), usage, nil
+}
+
+// draftJob is one draft to produce: from a draft turn, or from a chat
+// turn's propose_nodes (C1). It reads the board through the turn's bridge,
+// so the project's read rules apply, and writes nothing.
+type draftJob struct {
+	model    provider.Provider
+	bridge   toolbridge.Bridge
+	plan     modelPlan
+	text     string
+	language string
+	selected []string
+	previous *Draft
+	refineOf string
+	// step reports DraftStep* progress; nil reports nothing.
+	step func(string)
+}
+
+// produce reads the board, drafts, and returns the entry's data. A failure
+// is a codedError where the panel has its own words for it.
+func (j draftJob) produce(ctx context.Context) (DraftData, Usage, error) {
+	step := j.step
+	if step == nil {
+		step = func(string) {}
+	}
+	step(DraftStepReading)
+	small := j.plan.host == ModelHostBrowser
+	context, board, err := readBoard(ctx, j.bridge, j.selected, small)
+	if err != nil {
+		return DraftData{}, Usage{}, &codedError{code: "draft_board", message: "Could not read the board: " + err.Error()}
+	}
+	context.Text = j.text
+	context.Language = j.language
+	context.Previous = j.previous
 	context.Small = small
+	if small {
+		// The browser's model takes a few thousand tokens: the message is
+		// budgeted here, where the instruction can be kept whole.
+		context.MaxBytes = maxBrowserStructuredMessageBytes
+	}
 	if context.Previous != nil {
 		// A refined draft's own keys are known, and so are the board nodes
 		// it already links to: the person may have linked ones the listing
@@ -129,34 +184,33 @@ func (r *draftRun) run() (string, Usage, error) {
 		addPreviousTargets(&board, context.Previous)
 	}
 
-	outcome, err := draftWith(r.ctx, r.model, context, board, func(step string) {
-		r.emit(Event{Type: EventDraftStatus, Code: step})
-	})
-	usage = outcome.usage
+	outcome, err := draftWith(ctx, j.model, context, board, step)
 	if err != nil {
-		if r.ctx.Err() != nil {
-			return StopCancelled, usage, nil
-		}
-		return "", usage, err
+		return DraftData{}, outcome.usage, err
 	}
-	draft, issues, capped := outcome.draft, outcome.issues, outcome.capped
-	if issues == nil {
-		issues = []DraftIssue{}
+	if outcome.issues == nil {
+		outcome.issues = []DraftIssue{}
 	}
-	data := DraftData{
-		Draft: draft, Issues: issues, Capped: capped,
-		Provider: string(r.plan.provider), Model: r.plan.model,
-		State: DraftOpen, RefineOf: r.request.RefineOf,
-	}
-	entry, err := r.service.store.AppendEntry(r.storeCtx, Entry{
-		ConversationID: r.conversationID, Kind: EntryDraft, Text: draftLine(draft),
-		Message: mustJSON(textMessage(draftHistoryText(draft))), Data: mustJSON(data),
-	})
-	if err != nil {
-		return "", usage, err
-	}
-	r.emit(Event{Type: EventEntry, Entry: &entry})
-	return string(provider.StopEndTurn), usage, nil
+	return DraftData{
+		Draft: outcome.draft, Issues: outcome.issues, Capped: outcome.capped,
+		Provider: string(j.plan.provider), Model: j.plan.model,
+		State: DraftOpen, RefineOf: j.refineOf,
+	}, outcome.usage, nil
+}
+
+// mentionsCode reports whether the person's words name code: a repo path, a
+// file or a function, or a code span. The same check as the panel's
+// (web/src/copilot/draft/draftStore.ts mentionsCode), so the server marks a
+// draft that needs a repository even when the model did not.
+func mentionsCode(text string) bool {
+	return slices.ContainsFunc(codeMentionPatterns, func(pattern *regexp.Regexp) bool { return pattern.MatchString(text) })
+}
+
+var codeMentionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(^|[^\w/])[\w.-]+/[\w./-]+`),
+	regexp.MustCompile(`(?i)\b[\w-]+\.(ts|tsx|js|jsx|go|py|rs|java|kt|rb|cs|cpp|c|h|swift|php|vue|svelte|css|scss|sql|md|yaml|yml|json)\b`),
+	regexp.MustCompile(`\b[A-Za-z_]\w*\(\)`),
+	regexp.MustCompile("`[^`]+`"),
 }
 
 // draftOutcome is what one drafting attempt produced.
@@ -179,10 +233,12 @@ func draftWith(ctx context.Context, model provider.Provider, context draftContex
 	messages := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.Block{{
 		Type: provider.BlockText, Text: draftUserMessage(context),
 	}}}}
+	temperature := draftTemperature
 	request := provider.Request{
 		System:         draftSystemPrompt(context),
 		MaxTokens:      draftMaxTokens,
 		ResponseSchema: &provider.ResponseSchema{Name: draftSchemaName, Schema: draftSchema(board.allowedKinds())},
+		Temperature:    &temperature,
 	}
 
 	step(DraftStepDrafting)
@@ -237,6 +293,11 @@ func draftWith(ctx context.Context, model provider.Provider, context draftContex
 	}
 	if outcome.issues == nil {
 		outcome.issues = []DraftIssue{}
+	}
+	// Words that name code mark the draft whatever the model said: it is
+	// what offers the coding agent's deeper plan.
+	if mentionsCode(context.Text) {
+		outcome.draft.NeedsCodeKnowledge = true
 	}
 	return outcome, nil
 }
@@ -303,8 +364,9 @@ func draftHistoryText(draft Draft) string {
 }
 
 // readBoard lists the board for the prompt, through the bridge, so the
-// project's read rules apply: the selected nodes in full, then other nodes,
-// open ones first, up to the listing cap.
+// project's read rules apply: the selected nodes in full, then their
+// neighbours (what they wait for, then what waits for them), then other
+// nodes, open ones first, up to the listing cap minus the selection.
 func readBoard(ctx context.Context, bridge toolbridge.Bridge, selected []string, small bool) (draftContext, draftBoard, error) {
 	board := draftBoard{known: map[string]string{}}
 	var c draftContext
@@ -362,7 +424,45 @@ func readBoard(ctx context.Context, bridge toolbridge.Bridge, selected []string,
 		board.known[node.ID] = node.Title
 	}
 
-	// Open nodes first, then the rest, in the outline's order.
+	// The selection's neighbours first: what it waits for and what waits
+	// for it, which a request about the selection links to most. Then open
+	// nodes, then the rest, in the outline's order.
+	room := func() bool { return len(c.Listed) < limit-len(c.Selected) }
+	list := func(node boardNode) {
+		picked[node.ID] = true
+		c.Listed = append(c.Listed, boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status})
+		board.known[node.ID] = node.Title
+	}
+	inOutline := make(map[string]nodevasmcp.OutlineNode, len(nodes))
+	for _, node := range nodes {
+		inOutline[node.ID] = node
+	}
+	fetched := 0
+	for _, neighbour := range selectionNeighbours(c.Selected, edges) {
+		if !room() {
+			break
+		}
+		if picked[neighbour] {
+			continue
+		}
+		if node, ok := inOutline[neighbour]; ok {
+			list(boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status})
+			continue
+		}
+		// Not in the listing (a closed node on a board read by open
+		// status): read on its own, a bounded few.
+		if fetched >= maxNeighbourReads {
+			continue
+		}
+		fetched++
+		node, ok, err := callNode(ctx, bridge, neighbour)
+		if err != nil {
+			return c, board, err
+		}
+		if ok {
+			list(node)
+		}
+	}
 	open := func(status string) bool { return status != "done" && status != "skipped" && status != "deprecated" }
 	ordered := slices.Clone(nodes)
 	slices.SortStableFunc(ordered, func(a, b nodevasmcp.OutlineNode) int {
@@ -375,26 +475,75 @@ func readBoard(ctx context.Context, bridge toolbridge.Bridge, selected []string,
 		return 0
 	})
 	for _, node := range ordered {
-		if len(c.Listed) >= limit-len(c.Selected) {
+		if !room() {
 			break
 		}
 		if picked[node.ID] {
 			continue
 		}
-		picked[node.ID] = true
-		c.Listed = append(c.Listed, boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status})
-		board.known[node.ID] = node.Title
+		list(boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status})
+	}
+	seen := map[[2]string]bool{}
+	link := func(waiter, first string) {
+		if pair := [2]string{waiter, first}; picked[waiter] && picked[first] && !seen[pair] {
+			seen[pair] = true
+			c.Edges = append(c.Edges, pair)
+		}
 	}
 	for _, edge := range edges {
 		// From must finish first; To waits for it.
-		if edge.Relation != "deprecated" && picked[edge.From] && picked[edge.To] {
-			c.Edges = append(c.Edges, [2]string{edge.To, edge.From})
+		if edge.Relation != "deprecated" {
+			link(edge.To, edge.From)
+		}
+	}
+	// The selection's own links, which a paged outline may not carry.
+	for _, node := range c.Selected {
+		for _, up := range node.After {
+			link(node.ID, up)
+		}
+		for _, down := range node.Before {
+			link(down, node.ID)
 		}
 	}
 	if c.Total < len(c.Selected)+len(c.Listed) {
 		c.Total = len(c.Selected) + len(c.Listed)
 	}
 	return c, board, nil
+}
+
+// selectionNeighbours lists, per selected node, what it waits for and then
+// what waits for it, from the node itself and from the outline's edges;
+// each once, the selection left out.
+func selectionNeighbours(selected []boardNode, edges []nodevasmcp.OutlineEdge) []string {
+	isSelected := make(map[string]bool, len(selected))
+	for _, node := range selected {
+		isSelected[node.ID] = true
+	}
+	var out []string
+	add := func(id string) {
+		if id != "" && !isSelected[id] && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	for _, node := range selected {
+		for _, id := range node.After {
+			add(id)
+		}
+		for _, edge := range edges {
+			if edge.Relation != "deprecated" && edge.To == node.ID {
+				add(edge.From)
+			}
+		}
+		for _, id := range node.Before {
+			add(id)
+		}
+		for _, edge := range edges {
+			if edge.Relation != "deprecated" && edge.From == node.ID {
+				add(edge.To)
+			}
+		}
+	}
+	return out
 }
 
 func callOutline(ctx context.Context, bridge toolbridge.Bridge, filter nodevasmcp.OutlineFilter) (nodevasmcp.Outline, error) {
@@ -431,23 +580,28 @@ func callNode(ctx context.Context, bridge toolbridge.Bridge, id string) (boardNo
 		return boardNode{}, false, nil
 	}
 	var node struct {
-		ID       string   `json:"id"`
-		Title    string   `json:"title"`
-		Kind     string   `json:"kind"`
-		Status   string   `json:"status"`
-		Upstream []string `json:"upstream"`
+		ID         string   `json:"id"`
+		Title      string   `json:"title"`
+		Kind       string   `json:"kind"`
+		Status     string   `json:"status"`
+		Upstream   []string `json:"upstream"`
+		Downstream []string `json:"downstream"`
 	}
 	if err := json.Unmarshal([]byte(result.Output), &node); err != nil || node.ID == "" {
 		return boardNode{}, false, nil
 	}
-	return boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status, After: node.Upstream}, true, nil
+	return boardNode{ID: node.ID, Title: node.Title, Kind: node.Kind, Status: node.Status,
+		After: node.Upstream, Before: node.Downstream}, true, nil
 }
 
 // SetDraftState records what the person did with a draft: created it
 // (committed, with the batch and the node ids), discarded it, or undid a
 // creation (open again). Only the conversation's owner may, and only on a
-// draft entry.
-func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, entryID, state, batchID string, ids []string) (Entry, error) {
+// draft entry. draft, when set, is the person's own version of it (C2): it
+// replaces the stored one, bounded and normalized as a refine's previous
+// draft is, and marks the data edited.
+func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, entryID, state, batchID string,
+	ids []string, draft *Draft) (Entry, error) {
 	switch state {
 	case DraftOpen, DraftCommitted, DraftDiscarded:
 	default:
@@ -480,12 +634,23 @@ func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, 
 		return Entry{}, fmt.Errorf("copilot: draft %s: %w", entryID, err)
 	}
 	// A coding agent's plan holds up to 100 nodes; the copilot's own, 40.
-	limit := MaxDraftNodes
+	limit, titleLimit := MaxDraftNodes, maxDraftTitleRunes
 	if data.Origin != nil {
-		limit = MaxPlanDraftNodes
+		limit, titleLimit = MaxPlanDraftNodes, maxPlanDraftTitleRunes
 	}
 	if len(ids) > limit {
 		return Entry{}, fmt.Errorf("%w: too many node ids", ErrInvalid)
+	}
+	if draft != nil {
+		mine := *draft
+		mine.Nodes = slices.Clone(draft.Nodes)
+		if err := boundDraft(&mine, limit, titleLimit); err != nil {
+			return Entry{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		if mine.Nodes == nil {
+			mine.Nodes = []DraftNode{}
+		}
+		data.Draft, data.Edited = mine, true
 	}
 	data.State = state
 	if state == DraftCommitted {
