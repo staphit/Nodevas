@@ -1,6 +1,6 @@
 # Token usage
 
-Nodevas keeps what the coding agents and the voice copilot spent, so the owner can see where tokens go and judge whether a plan, a model or a harness is worth it.
+Nodevas keeps what the coding agents and the copilot spent, so the owner can see where tokens go and judge whether a plan, a model or a harness is worth it.
 
 In the app it is **Settings → Agents → Advanced → Usage details** (Overview, Sessions, Prices), or **Usage** in the command palette (Ctrl/⌘+K). Both appear once the agent workstation is shown: **Let agents work here** is on (opening Station turns it on too), or the workspace already has a runner, a run or a connected agent. Alone on one machine the built-in runner is always there, so it counts only once you have added a repository to it.
 
@@ -8,7 +8,7 @@ Three sources feed it:
 
 - **Runs.** A runner reports each run's usage with its result (`runs.usage`), including the model the CLI said it ran on when it said (`runnerwire.Usage.Model`). The agent session of an interactive run reports into that run's usage, not into a session of its own.
 - **Agent sessions.** An agent its owner runs in their own terminal reports its running totals per model through `nodevas hook`. Each report replaces the totals stored for that session and model; reports never add up. They are kept in `agent_session_usage`, one row per project, session and model.
-- **Copilot.** Each voice copilot turn that used tokens records its input and output tokens and its model, as agent `copilot`. The record stays when the conversation is deleted. Copilot turns count in the totals and per agent, model, role and day, but are not listed among the sessions.
+- **Copilot.** Each copilot turn that used tokens, typed or spoken, records its input and output tokens and its model, as agent `copilot`. The record stays when the conversation is deleted. Copilot turns count in the totals and per agent, model, role and day, but are not listed among the sessions.
 
 ## Cost
 
