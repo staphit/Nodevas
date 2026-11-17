@@ -16,9 +16,26 @@ export type DraftCheck =
   /** The board refused the draft; `message` is the server's, in the reader's language. */
   | { status: "error"; message: string };
 
+/** A node a batch undo kept on the board, and why (api BatchRefusal codes). */
+export interface KeptNode {
+  id: string;
+  title: string;
+  /** changed, status, claimed, busy or denied. */
+  code: string;
+}
+
 export type DraftToast =
-  | { kind: "created"; entryId: string; count: number; undoable: boolean; at: number }
-  | { kind: "undone"; count: number; refused: number; at: number }
+  | {
+      kind: "created";
+      entryId: string;
+      count: number;
+      undoable: boolean;
+      at: number;
+      /** What its Undo undoes, so it does not depend on the transcript on screen. */
+      batchId?: string;
+      conversationId?: string;
+    }
+  | { kind: "undone"; entryId: string; count: number; refused: KeptNode[]; at: number }
   | { kind: "error"; text: string; at: number };
 
 export interface DraftUiState {
@@ -31,12 +48,22 @@ export interface DraftUiState {
   /** Whether this person may write to the open project (null: not known yet). */
   canWrite: { project: string; value: boolean } | null;
   toast: DraftToast | null;
+  /**
+   * By draft entry id: the created nodes an undo kept, which its card lists
+   * (with "Delete anyway") while it stays created. Gone on a reload: the board
+   * still has them, the card just stops naming them.
+   */
+  kept: Record<string, KeptNode[]>;
 
   setGhost: (ghost: DraftUiState["ghost"]) => void;
   setCheck: (entryId: string, check: DraftCheck | null) => void;
   setBusy: (entryId: string, busy: "creating" | "discarding" | null) => void;
   setCanWrite: (project: string, value: boolean) => void;
   showToast: (toast: DraftToast | null) => void;
+  /** Sets (or with null or [], clears) a draft's kept nodes. */
+  setKept: (entryId: string, kept: KeptNode[] | null) => void;
+  /** One kept node is gone (deleted anyway): off the card and the toast. */
+  forgetKept: (nodeId: string) => void;
 }
 
 const sameCells = (a: Record<string, Cell>, b: Record<string, Cell>) => {
@@ -53,6 +80,7 @@ export const useDraftUi = create<DraftUiState>((set, get) => ({
   busy: {},
   canWrite: null,
   toast: null,
+  kept: {},
 
   setGhost: (ghost) => {
     const current = get().ghost;
@@ -77,6 +105,26 @@ export const useDraftUi = create<DraftUiState>((set, get) => ({
     }),
   setCanWrite: (project, value) => set({ canWrite: { project, value } }),
   showToast: (toast) => set({ toast }),
+  setKept: (entryId, kept) =>
+    set((state) => {
+      const next = { ...state.kept };
+      if (kept && kept.length) next[entryId] = kept;
+      else delete next[entryId];
+      return { kept: next };
+    }),
+  forgetKept: (nodeId) =>
+    set((state) => {
+      const kept: Record<string, KeptNode[]> = {};
+      for (const [entryId, list] of Object.entries(state.kept)) {
+        const left = list.filter((node) => node.id !== nodeId);
+        if (left.length) kept[entryId] = left;
+      }
+      const toast =
+        state.toast?.kind === "undone"
+          ? { ...state.toast, refused: state.toast.refused.filter((node) => node.id !== nodeId) }
+          : state.toast;
+      return { kept, toast };
+    }),
 }));
 
 /** The board's extent the ghosts need, so it grows to show them. */

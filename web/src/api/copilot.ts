@@ -183,6 +183,11 @@ export interface CopilotDraftData {
   origin?: CopilotDraftOrigin;
   /** By draft key: what the planner wrote that the card does not edit. */
   extras?: Record<string, CopilotDraftExtras>;
+  /**
+   * `draft` is the person's edited draft, not the proposal: a draft-state
+   * PUT carried it (on a Create, or when an undo reopened it).
+   */
+  edited?: boolean;
 }
 
 /** Steps of a draft turn, as `draft_status` events name them. */
@@ -548,13 +553,15 @@ export const copilotApi = {
 
   /**
    * Records what the person did with a draft: committed (with the batch and
-   * the ids it made), discarded, or open again after an undo. Answers the
-   * updated entry.
+   * the ids it made), discarded, or open again after an undo. `draft` is the
+   * person's edited draft (≤ 40 nodes, 100 for a plan draft): the server
+   * stores it in place of the proposal and marks the entry edited, so a
+   * reload shows what they had. Answers the updated entry.
    */
   putCopilotDraftState: (
     conversationId: string,
     entryId: string,
-    body: { state: CopilotDraftState; batchId?: string; ids?: string[] },
+    body: { state: CopilotDraftState; batchId?: string; ids?: string[]; draft?: CopilotDraft },
   ) =>
     req<CopilotEntry>(
       `${conversationPath(conversationId)}/entries/${encodeURIComponent(entryId)}/draft-state`,

@@ -10,6 +10,7 @@
 import {
   api,
   AuthError,
+  batchViaTaken,
   type CopilotDraft,
   type CopilotDraftData,
   type CopilotDraftIssue,
@@ -20,6 +21,7 @@ import { formatList, translate } from "../../i18n";
 import { nodeTypesForLayout } from "../../domain/graph/nodeTypes";
 import { canvasSelectionIds } from "../../state/documentSlice";
 import {
+  dropBatchUndo,
   notifyBatchRevert,
   observeBatchRevert,
   peekUndo,
@@ -28,7 +30,7 @@ import {
 } from "../../state/undo";
 import { useApp } from "../../store";
 import type { Graph } from "../../types";
-import { currentDraft, draftItemOf, useCopilot } from "../copilotStore";
+import { currentDraft, draftItemOf, isRefining, useCopilot } from "../copilotStore";
 import { sendTurn } from "../session";
 import { layoutDraft, type Cell } from "./draftLayout";
 import {
@@ -44,7 +46,7 @@ import {
   type ClientIssue,
   type ClientIssueCode,
 } from "./draftStore";
-import { useDraftUi } from "./draftUi";
+import { useDraftUi, type DraftToast, type KeptNode } from "./draftUi";
 
 /** At least this long after the last edit before the board is asked. */
 export const CHECK_DEBOUNCE_MS = 600;
@@ -96,6 +98,30 @@ export function specOf(
 }
 
 /**
+ * Who drafted it, for the batch's history note: "<provider> · <model>" for
+ * the copilot's own draft, "<agent> · <model>" for a coding agent's plan.
+ */
+export function batchLabel(
+  data: Pick<CopilotDraftData, "origin" | "provider" | "model"> | null | undefined,
+): string | undefined {
+  if (!data) return undefined;
+  const parts = data.origin ? [data.origin.agent, data.origin.model] : [data.provider, data.model];
+  return parts.filter(Boolean).join(" · ") || undefined;
+}
+
+/** Whether the person's draft differs from the proposal: edited here, or stored edited. */
+export function isEdited(entryId: string): boolean {
+  const copilot = useCopilot.getState();
+  return copilot.drafts[entryId] !== undefined || draftItemOf(copilot, entryId)?.data?.edited === true;
+}
+
+/** The person's edits, for a draft-state PUT to keep (C2); none when they made none here. */
+function editedDraftBody(entryId: string): { draft?: CopilotDraft } {
+  const draft = useCopilot.getState().drafts[entryId];
+  return draft ? { draft } : {};
+}
+
+/**
  * The server's issues that still describe the draft: its errors only while
  * the person has not edited it (the client checks take over after), its
  * warnings while the node they name is still there.
@@ -134,9 +160,14 @@ export function scheduleCheck(entryId: string): void {
   );
 }
 
+/** Whether the dry run's answer still describes the edits it was asked about. */
+const stillEdited = (entryId: string, mine: number) =>
+  sequence.get(entryId) === mine && useCopilot.getState().drafts[entryId] !== undefined;
+
 export async function checkNow(entryId: string): Promise<void> {
   const copilot = useCopilot.getState();
-  const draft = currentDraft(copilot, entryId);
+  // Only edits are dry-run: an unedited draft has the server's own check.
+  const draft = copilot.drafts[entryId];
   const data = draftItemOf(copilot, entryId)?.data;
   const ui = useDraftUi.getState();
   if (!draft) return;
@@ -150,9 +181,9 @@ export async function checkNow(entryId: string): Promise<void> {
   ui.setCheck(entryId, { status: "checking" });
   try {
     await api.checkSubgraph(specOf(draft, data));
-    if (sequence.get(entryId) === mine) useDraftUi.getState().setCheck(entryId, { status: "ok" });
+    if (stillEdited(entryId, mine)) useDraftUi.getState().setCheck(entryId, { status: "ok" });
   } catch (error) {
-    if (sequence.get(entryId) !== mine) return;
+    if (!stillEdited(entryId, mine)) return;
     // 403 is "no access to this board": nothing to say about the draft.
     if (error instanceof AuthError) {
       useDraftUi.getState().setCheck(entryId, null);
@@ -162,11 +193,36 @@ export async function checkNow(entryId: string): Promise<void> {
   }
 }
 
-/** Applies an edit to a draft and has the board check the result. */
+/**
+ * A dry run answers for the edits it checked. When those edits go (another
+ * conversation is shown, a follow-up replaced it), so does its answer: a
+ * stale refusal would keep Create disabled on the draft as proposed.
+ */
+function forgetChecksOfDroppedEdits(drafts: Record<string, CopilotDraft>): void {
+  const ui = useDraftUi.getState();
+  for (const entryId of Object.keys(ui.checks)) {
+    if (drafts[entryId] !== undefined) continue;
+    const pending = timers.get(entryId);
+    if (pending) clearTimeout(pending);
+    timers.delete(entryId);
+    ui.setCheck(entryId, null);
+  }
+}
+
+useCopilot.subscribe((state, previous) => {
+  if (state.drafts !== previous.drafts) forgetChecksOfDroppedEdits(state.drafts);
+});
+
+/**
+ * Applies an edit to a draft and has the board check the result. Not while a
+ * refine of it runs: the refine took the draft as it was when sent, and what
+ * lands replaces it, so a later edit (card or board) would be lost silently.
+ */
 export function editDraft(
   entryId: string,
   update: (draft: CopilotDraft) => CopilotDraft,
 ): void {
+  if (isRefining(useCopilot.getState(), entryId)) return;
   const before = useCopilot.getState().drafts[entryId];
   useCopilot.getState().editDraft(entryId, update);
   if (useCopilot.getState().drafts[entryId] !== before) scheduleCheck(entryId);
@@ -220,7 +276,13 @@ function createdIds(result: SubgraphResult): string[] {
 async function recordState(
   conversationId: string,
   entryId: string,
-  body: { state: "open" | "committed" | "discarded"; batchId?: string; ids?: string[] },
+  body: {
+    state: "open" | "committed" | "discarded";
+    batchId?: string;
+    ids?: string[];
+    /** The person's edited draft (C2), so a reload shows what they had. */
+    draft?: CopilotDraft;
+  },
 ): Promise<void> {
   try {
     const entry = await api.putCopilotDraftState(conversationId, entryId, body);
@@ -236,14 +298,16 @@ async function recordState(
 /**
  * Whether the draft can be created now: open, nothing the checks refuse
  * (client checks, the server's own while unedited, the newest dry run), this
- * person may write, and no Create or Discard is on its way. The card's
- * primary button and Enter in an empty composer both ask this.
+ * person may write, no Create or Discard is on its way, and no refine of it
+ * is running (the refined draft would land as a second, creatable copy). The
+ * card's primary button and Enter in an empty composer both ask this.
  */
 export function canCreate(entryId: string): boolean {
   const copilot = useCopilot.getState();
   const item = draftItemOf(copilot, entryId);
   const draft = currentDraft(copilot, entryId);
   if (!item?.data || item.data.state !== "open" || !draft) return false;
+  if (isRefining(copilot, entryId)) return false;
   const ui = useDraftUi.getState();
   const app = useApp.getState();
   if (ui.busy[entryId]) return false;
@@ -251,8 +315,26 @@ export function canCreate(entryId: string): boolean {
   if (ui.canWrite?.project === app.activeProject && !ui.canWrite.value) return false;
   if (ui.checks[entryId]?.status === "error") return false;
   if (checkLocally(draft, app.graph, maxNodesOf(item.data)).some(isBlocking)) return false;
-  const edited = copilot.drafts[entryId] !== undefined;
-  return !liveServerIssues(item.data.issues ?? [], draft, edited).some((issue) => issue.severity === "error");
+  return !liveServerIssues(item.data.issues ?? [], draft, isEdited(entryId)).some(
+    (issue) => issue.severity === "error",
+  );
+}
+
+/**
+ * The draft was created already (another tab's Create): the server refused
+ * a second commit with the same via and named the live batch. The card
+ * follows, with no Undo here: that batch's undo belongs to the tab that made
+ * it, and Ctrl+Z there.
+ */
+async function createdElsewhere(
+  conversationId: string,
+  entryId: string,
+  batchId: string,
+  count: number,
+): Promise<void> {
+  useCopilot.getState().setDraftData(entryId, { state: "committed", batchId });
+  useDraftUi.getState().showToast({ kind: "created", entryId, count, undoable: false, at: Date.now() });
+  await recordState(conversationId, entryId, { state: "committed", batchId });
 }
 
 /**
@@ -271,8 +353,17 @@ export async function createDraft(entryId: string): Promise<boolean> {
   try {
     const positions = createPositions(entryId, draft);
     const via = item.data.origin ? planVia(entryId) : draftVia(entryId);
-    result = await api.createSubgraph(specOf(draft, item.data, { positions, via }));
+    const spec = specOf(draft, item.data, { positions, via });
+    const label = batchLabel(item.data);
+    if (spec.batch && label) spec.batch = { ...spec.batch, label };
+    result = await api.createSubgraph(spec);
   } catch (error) {
+    const taken = batchViaTaken(error);
+    if (taken) {
+      useDraftUi.getState().setBusy(entryId, null);
+      await createdElsewhere(conversationId, entryId, taken, draft.nodes.length);
+      return true;
+    }
     const project = useApp.getState().activeProject;
     if (error instanceof AuthError && error.status === 403) {
       useDraftUi.getState().setCanWrite(project, false);
@@ -293,17 +384,27 @@ export async function createDraft(entryId: string): Promise<boolean> {
     batchId: result.batchId,
     createdIds: ids,
   });
+  useDraftUi.getState().setKept(entryId, null);
   if (undoable) {
     pushUndo({ kind: "batch", batchId: result.batchId!, ids, entryId, conversationId });
   }
   const app = useApp.getState();
   app.selectOnCanvas(ids);
   void app.loadAll().catch(() => undefined);
-  useDraftUi.getState().showToast({ kind: "created", entryId, count: ids.length, undoable, at: Date.now() });
+  useDraftUi.getState().showToast({
+    kind: "created",
+    entryId,
+    count: ids.length,
+    undoable,
+    at: Date.now(),
+    ...(result.batchId ? { batchId: result.batchId } : {}),
+    conversationId,
+  });
   await recordState(conversationId, entryId, {
     state: "committed",
     ...(result.batchId ? { batchId: result.batchId } : {}),
     ids,
+    ...editedDraftBody(entryId),
   });
   return true;
 }
@@ -312,6 +413,7 @@ export async function discardDraft(entryId: string): Promise<void> {
   const copilot = useCopilot.getState();
   const conversationId = copilot.activeId;
   if (!conversationId || useDraftUi.getState().busy[entryId]) return;
+  if (isRefining(copilot, entryId)) return;
   useDraftUi.getState().setBusy(entryId, "discarding");
   copilot.setDraftData(entryId, { state: "discarded" });
   try {
@@ -321,68 +423,124 @@ export async function discardDraft(entryId: string): Promise<void> {
   }
 }
 
+const undoNothing = () =>
+  useDraftUi.getState().showToast({ kind: "error", text: translate("draft.undoNothing"), at: Date.now() });
+
 /**
  * The toast's Undo. Through the undo stack while the Create is its newest
- * step, so Ctrl+Z and the button stay one history; directly otherwise.
+ * step, so Ctrl+Z and the button stay one history; directly otherwise, and
+ * then the Create's step leaves the stack (replaying it would undo nothing).
+ * The toast names its batch and conversation, so it works whatever the
+ * transcript shows now.
  */
-export async function undoDraftCreate(entryId: string): Promise<void> {
+export async function undoDraftCreate(toast: Extract<DraftToast, { kind: "created" }>): Promise<void> {
   useDraftUi.getState().showToast(null);
+  const { entryId } = toast;
+  const item = draftItemOf(useCopilot.getState(), entryId);
+  const batchId = toast.batchId ?? item?.data?.batchId;
   const top = peekUndo();
-  if (top?.kind === "batch" && top.entryId === entryId && !top.undone) {
+  if (top?.kind === "batch" && top.entryId === entryId && !top.undone && (!batchId || top.batchId === batchId)) {
     await useApp.getState().undoLast().catch(() => undefined);
     return;
   }
-  const item = draftItemOf(useCopilot.getState(), entryId);
-  const batchId = item?.data?.batchId;
-  if (!batchId) return;
+  if (!batchId) {
+    undoNothing();
+    return;
+  }
   try {
     const result = await api.undoBatch(batchId);
+    const trashed = result.trashed ?? [];
+    if (trashed.length > 0) dropBatchUndo(batchId);
     notifyBatchRevert({
       direction: "undo",
       entry: {
         kind: "batch",
         batchId,
-        ids: item.data?.createdIds ?? [],
+        ids: item?.data?.createdIds ?? [],
         entryId,
-        conversationId: useCopilot.getState().activeId ?? undefined,
+        conversationId: toast.conversationId ?? useCopilot.getState().activeId ?? undefined,
       },
-      trashed: result.trashed ?? [],
+      trashed,
       refused: result.refused ?? [],
     });
-    void useApp.getState().loadAll().catch(() => undefined);
+    if (trashed.length > 0) void useApp.getState().loadAll().catch(() => undefined);
   } catch (error) {
     useDraftUi.getState().showToast({ kind: "error", text: errorText(error), at: Date.now() });
   }
 }
 
-/** A Create undone or redone (Ctrl+Z, the toast): the draft follows. */
+/** A board node's title, else its id: kept nodes are named by what the board calls them. */
+function boardTitle(id: string): string {
+  return useApp.getState().graph?.nodes?.find((node) => node.id === id)?.title || id;
+}
+
+/**
+ * A Create undone or redone (Ctrl+Z, the toast): the draft follows. It opens
+ * again only when every created node went to the trash. When the server kept
+ * some (changed, claimed, busy…), the draft stays created, now naming just
+ * those, and the toast and card list them with "Delete anyway"; opening it would
+ * let a second Create copy them. When it kept them all, nothing moved.
+ */
 function followBatch(revert: BatchRevert): void {
   const { entry } = revert;
   if (!entry.entryId || !entry.conversationId) return;
+  const { entryId, conversationId } = entry;
   const copilot = useCopilot.getState();
+  const onScreen = copilot.activeId === conversationId;
+  const ui = useDraftUi.getState();
   if (revert.direction === "undo") {
-    if (copilot.activeId === entry.conversationId) {
-      copilot.setDraftData(entry.entryId, { state: "open", batchId: undefined, createdIds: undefined });
+    const kept: KeptNode[] = revert.refused.map((node) => ({ id: node.id, code: node.code, title: boardTitle(node.id) }));
+    if (revert.trashed.length === 0 && kept.length === 0) {
+      undoNothing();
+      return;
     }
-    useDraftUi.getState().showToast({
-      kind: "undone",
-      count: revert.trashed.length,
-      refused: revert.refused.length,
-      at: Date.now(),
-    });
-    void recordState(entry.conversationId, entry.entryId, { state: "open" });
-  } else {
-    if (copilot.activeId === entry.conversationId) {
-      copilot.setDraftData(entry.entryId, {
-        state: "committed",
-        batchId: entry.batchId,
-        createdIds: revert.restored,
-      });
+    ui.showToast({ kind: "undone", entryId, count: revert.trashed.length, refused: kept, at: Date.now() });
+    ui.setKept(entryId, kept);
+    if (revert.trashed.length === 0) return;
+    if (kept.length === 0) {
+      if (onScreen) copilot.setDraftData(entryId, { state: "open", batchId: undefined, createdIds: undefined });
+      void recordState(conversationId, entryId, { state: "open", ...editedDraftBody(entryId) });
+      return;
     }
-    void recordState(entry.conversationId, entry.entryId, {
+    const ids = kept.map((node) => node.id);
+    if (onScreen) copilot.setDraftData(entryId, { state: "committed", batchId: entry.batchId, createdIds: ids });
+    void recordState(conversationId, entryId, {
       state: "committed",
       batchId: entry.batchId,
-      ids: revert.restored,
+      ids,
+      ...editedDraftBody(entryId),
+    });
+    return;
+  }
+  // A redo that restored nothing changed nothing.
+  if (revert.restored.length === 0) return;
+  const data = draftItemOf(copilot, entryId)?.data;
+  const before =
+    data?.state === "committed" ? (data.createdIds ?? []) : (ui.kept[entryId] ?? []).map((node) => node.id);
+  const ids = [...new Set([...before, ...revert.restored])];
+  ui.setKept(entryId, null);
+  if (onScreen) copilot.setDraftData(entryId, { state: "committed", batchId: entry.batchId, createdIds: ids });
+  void recordState(conversationId, entryId, {
+    state: "committed",
+    batchId: entry.batchId,
+    ids,
+    ...editedDraftBody(entryId),
+  });
+}
+
+/**
+ * "Delete anyway" on a node an undo kept: the normal delete, with its usual
+ * checks (and its own undo step).
+ */
+export async function deleteKeptNode(nodeId: string): Promise<void> {
+  try {
+    await useApp.getState().deleteNode(nodeId);
+    useDraftUi.getState().forgetKept(nodeId);
+  } catch (error) {
+    useDraftUi.getState().showToast({
+      kind: "error",
+      text: translate("draft.kept.deleteFailed", undefined, { message: errorText(error) }),
+      at: Date.now(),
     });
   }
 }

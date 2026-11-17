@@ -12,12 +12,22 @@ export class ConflictError extends Error {
   serverMessage: string;
   /** The server's error `code` (e.g. "FAILED_PRECONDITION"), or "". */
   code: string;
-  constructor(diskRev: string, diskContent: string, serverMessage = "", code = "") {
+  /** The refusal's whole body, for a code that names more (the live batch
+   * of BATCH_VIA_TAKEN, say). */
+  details: Record<string, unknown>;
+  constructor(
+    diskRev: string,
+    diskContent: string,
+    serverMessage = "",
+    code = "",
+    details: Record<string, unknown> = {},
+  ) {
     super("conflict");
     this.diskRev = diskRev;
     this.diskContent = diskContent;
     this.serverMessage = serverMessage;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -301,6 +311,7 @@ async function readAnswer<T>(res: Response, url: string, verify?: Verifier<T>): 
       body.diskContent ?? "",
       typeof body.error === "string" ? body.error : "",
       typeof body.code === "string" ? body.code : "",
+      body && typeof body === "object" ? body : {},
     );
   }
   if (!res.ok) {

@@ -149,6 +149,13 @@ export interface CopilotState extends TurnState, CopilotPrefs {
    * transcript.
    */
   drafts: Record<string, CopilotDraft>;
+  /**
+   * The draft the newest turn refines (its entry id), null for any other
+   * turn. Read together with `running` (isRefining): while its refine runs,
+   * a draft's card is read-only, so nothing done to it is lost or created
+   * twice when the refined draft lands.
+   */
+  refining: string | null;
   /** Text for the box, as if typed; voice marks a spoken request to check before sending. */
   composerFill: { text: string; at: number; voice?: boolean } | null;
 
@@ -170,8 +177,8 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   setVoiceAutoSend: (send: boolean) => void;
   setNotice: (notice: string | null) => void;
   setDownload: (download: Partial<BrowserModelDownload>) => void;
-  /** Starts a turn: adds the optimistic user bubble. */
-  beginTurn: (text: string, source: CopilotSource) => void;
+  /** Starts a turn: adds the optimistic user bubble. `refineOf`: the draft it refines. */
+  beginTurn: (text: string, source: CopilotSource, refineOf?: string) => void;
   applyEvent: (event: CopilotTurnEvent) => void;
   /** Ends the turn on the client side (finished, aborted or failed). */
   endTurn: (error?: string) => void;
@@ -433,6 +440,11 @@ export function draftItemOf(state: { items: TranscriptItem[] }, entryId: string)
   return state.items.find((item): item is DraftItem => item.kind === "draft" && item.id === entryId);
 }
 
+/** Whether a running turn is refining this draft (its card is read-only meanwhile). */
+export function isRefining(state: { running: boolean; refining: string | null }, entryId: string): boolean {
+  return state.running && state.refining === entryId;
+}
+
 /** A draft as it stands now: the person's edits, else as proposed. */
 export function currentDraft(
   state: { items: TranscriptItem[]; drafts: Record<string, CopilotDraft> },
@@ -602,6 +614,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   notice: null,
   download: { active: false, progress: null, error: null },
   drafts: {},
+  refining: null,
   composerFill: null,
   draftStep: null,
   items: [],
@@ -626,13 +639,21 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     }),
   showFollowup: (conversation, entries) => {
     const reply = [...entries].reverse().find((entry) => entry.kind === "assistant");
+    // The same conversation, more of it: edits of a draft still in it stay
+    // (they live only here until a Create records them).
+    const state = get();
+    const sameConversation = state.activeId === conversation.id;
+    const ids = new Set(entries.map((entry) => entry.id));
+    const drafts = sameConversation
+      ? Object.fromEntries(Object.entries(state.drafts).filter(([id]) => ids.has(id)))
+      : {};
     set({
       activeId: conversation.id,
       mode: isMode(conversation.mode) ? conversation.mode : get().defaultMode,
       items: entries.map(entryToItem),
       pending: [],
       lastReply: reply?.text ? { turnId: `followup-${reply.id}`, text: reply.text } : null,
-      drafts: {},
+      drafts,
       draftStep: null,
     });
   },
@@ -660,9 +681,10 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   },
   setNotice: (notice) => set({ notice }),
   setDownload: (download) => set((state) => ({ download: { ...state.download, ...download } })),
-  beginTurn: (text, source) =>
+  beginTurn: (text, source, refineOf) =>
     set((state) => ({
       running: true,
+      refining: refineOf ?? null,
       turnId: null,
       draftStep: null,
       lastSource: source,
@@ -673,6 +695,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   endTurn: (error) =>
     set((state) => ({
       running: false,
+      refining: null,
       turnId: null,
       draftStep: null,
       pending: [],

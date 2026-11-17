@@ -68,7 +68,13 @@ const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
 
 /** What a batch undo or redo did, for whoever made the batch (the copilot). */
 export type BatchRevert =
-  | { direction: "undo"; entry: BatchUndoEntry; trashed: string[]; refused: { id: string; code: string }[] }
+  | {
+      direction: "undo";
+      entry: BatchUndoEntry;
+      trashed: string[];
+      /** Kept: changed, status, claimed, busy or denied (api BatchRefusal). */
+      refused: { id: string; code: string; reason?: string }[];
+    }
   | { direction: "redo"; entry: BatchUndoEntry; restored: string[] };
 
 const batchListeners = new Set<(revert: BatchRevert) => void>();
@@ -146,6 +152,18 @@ export function peekRedo(): UndoEntry | undefined {
 export function clearRedo(): void {
   if (redoStack.length === 0) return;
   redoStack = [];
+  onChange?.();
+}
+
+/**
+ * Takes a batch's step off the undo stack, wherever it sits: the batch was
+ * undone another way (the draft toast's Undo, while a later step was on top),
+ * so replaying it would undo nothing and still say it did.
+ */
+export function dropBatchUndo(batchId: string): void {
+  const kept = stack.filter((entry) => !(entry.kind === "batch" && entry.batchId === batchId));
+  if (kept.length === stack.length) return;
+  stack = kept;
   onChange?.();
 }
 

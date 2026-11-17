@@ -195,6 +195,12 @@ export function DraftList({
 
   const row = (node: CopilotDraftNode, index: number) => {
     const type = nodeTypeById(graph, node.kind);
+    // The checks compare the raw kind: "" is Task, anything else must be a type's id.
+    const selectedKind = !node.kind
+      ? type.id
+      : nodeTypes.some((option) => option.id === node.kind)
+        ? node.kind
+        : "";
     const nodeMarks = marks[node.key] ?? [];
     const mark = diff[node.key];
     const after = node.after ?? [];
@@ -228,13 +234,20 @@ export function DraftList({
             {!readOnly && (
               <select
                 className="draft-kind-select"
-                aria-label={t("draft.kind", { type: nodeTypeLabel(type, t) })}
-                value={type.id}
+                aria-label={t("draft.kind", { type: selectedKind ? nodeTypeLabel(type, t) : (node.kind ?? "") })}
+                value={selectedKind}
                 onChange={(event) => {
                   const kind = event.target.value;
-                  onEdit((current) => changeKind(current, node.key, kind));
+                  if (kind) onEdit((current) => changeKind(current, node.key, kind));
                 }}
               >
+                {/* A kind the board does not have shows as itself, so every
+                    real type (Task included) is a change that fixes it. */}
+                {selectedKind === "" && (
+                  <option value="" disabled>
+                    {t("draft.kindUnknown", { kind: node.kind ?? "" })}
+                  </option>
+                )}
                 {nodeTypes.map((option) => (
                   <option key={option.id} value={option.id}>
                     {nodeTypeLabel(option, t)}

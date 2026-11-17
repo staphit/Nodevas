@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type CopilotDraftData } from "../../api";
 import { readPreferences } from "../../preferences";
 import { clearUndo, peekUndo } from "../../state/undo";
+import { EditionProvider } from "../../runners/edition";
+import { useRunners } from "../../runners/runnerStore";
 import { useApp } from "../../store";
+import { canCreate } from "./draftApi";
 import { currentDraft, entryToItem, useCopilot, type DraftItem } from "../copilotStore";
 import { DraftCard } from "./DraftCard";
 import { DraftToast } from "./DraftToast";
@@ -21,9 +24,29 @@ vi.mock("../../api", async (importOriginal) => {
       getGraph: vi.fn(),
       getState: vi.fn(),
       getTrash: vi.fn(),
+      listRunners: vi.fn(),
     },
   };
 });
+
+/** An online runner with a repo and an agent: the coding agent can plan. */
+const capableRunner = {
+  id: "r1",
+  name: "laptop",
+  ownerId: "u1",
+  ownerName: "me",
+  createdAt: "",
+  lastSeenAt: "",
+  online: true,
+  info: {
+    version: "1",
+    hostname: "laptop",
+    os: "darwin",
+    arch: "arm64",
+    agents: [{ kind: "claude", installed: true, models: [] }],
+    repos: [{ id: "repo1", name: "web" }],
+  },
+};
 
 const base: CopilotDraftData = {
   draft: {
@@ -60,7 +83,9 @@ beforeEach(() => {
     graphUnreadable: null,
     canvasSelection: { project: "main", ids: [] },
   });
-  useCopilot.setState({ items: [], drafts: {}, activeId: "c1", running: false, composerFill: null });
+  useCopilot.setState({ items: [], drafts: {}, activeId: "c1", running: false, refining: null, composerFill: null });
+  useRunners.setState({ loaded: true, loading: false, runners: [capableRunner], error: null });
+  vi.mocked(api.listRunners).mockResolvedValue({ runners: [capableRunner] });
   useDraftUi.setState({ ghost: null, checks: {}, busy: {}, canWrite: { project: "main", value: true }, toast: null });
   vi.mocked(api.projectAccess).mockResolvedValue({ member: "editor", admin: false, canWrite: true, canManage: false } as never);
   vi.mocked(api.checkSubgraph).mockResolvedValue({ ok: true, ids: {}, created: [], rev: "r", issues: [], dependencies: 1, references: 0 });
@@ -147,6 +172,70 @@ describe("DraftCard", () => {
     expect(screen.getByRole("button", { name: /Plan with my coding agent/ })).toHaveClass("is-suggested");
   });
 
+  it("offers the coding agent only while a runner with a repo and an agent is online (finding 5)", () => {
+    useRunners.setState({ runners: [{ ...capableRunner, online: false }] });
+    const { unmount } = show(base, { prompt: "split web/src/App.tsx" });
+    expect(screen.queryByRole("button", { name: /Plan with my coding agent/ })).toBeNull();
+    unmount();
+    useRunners.setState({ runners: [{ ...capableRunner, info: { ...capableRunner.info, repos: [] } }] });
+    const second = show(base);
+    expect(screen.queryByRole("button", { name: /Plan with my coding agent/ })).toBeNull();
+    second.unmount();
+    useRunners.setState({ runners: [capableRunner] });
+    show(base);
+    expect(screen.getByRole("button", { name: /Plan with my coding agent/ })).toBeInTheDocument();
+  });
+
+  it("says on a team hub that the plan run may wait for a runner to accept it, not in the single-user edition", () => {
+    const draftItem = item(base);
+    useCopilot.setState({ items: [draftItem] });
+    const { unmount } = render(
+      <EditionProvider edition="team">
+        <DraftCard item={draftItem} active themed={false} />
+      </EditionProvider>,
+    );
+    expect(screen.getByText("On a team hub, the plan run may wait until a runner accepts it.")).toBeInTheDocument();
+    unmount();
+    render(
+      <EditionProvider edition="single">
+        <DraftCard item={draftItem} active themed={false} />
+      </EditionProvider>,
+    );
+    expect(screen.queryByText(/may wait until a runner accepts it/)).toBeNull();
+  });
+
+  it("is read-only while a refine of it is running: no Create, no Discard, no edits (finding 19)", () => {
+    useCopilot.setState({ running: true, refining: "d1" });
+    show();
+    expect(createButton()).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Remove Write docs" })).toBeNull();
+    expect(screen.getByText("Updating this draft…")).toBeInTheDocument();
+    expect(canCreate("d1")).toBe(false);
+  });
+
+  it("stays creatable while some other turn runs", () => {
+    useCopilot.setState({ running: true, refining: null });
+    show();
+    expect(createButton()).toBeEnabled();
+    expect(canCreate("d1")).toBe(true);
+  });
+
+  it("the kind picker fixes an unknown kind by choosing Task (finding 23)", () => {
+    const { container } = show({
+      ...base,
+      draft: { ...base.draft, nodes: [{ key: "docs", title: "Write docs", kind: "bug" }] },
+    });
+    const kind = within(container.querySelector('[data-draft-key="docs"]') as HTMLElement).getByRole("combobox", {
+      name: "Type: bug",
+    });
+    expect(kind).toHaveValue("");
+    expect(createButton()).toBeDisabled();
+    fireEvent.change(kind, { target: { value: "task" } });
+    expect(currentDraft(useCopilot.getState(), "d1")!.nodes[0].kind).toBe("task");
+    expect(createButton()).toBeEnabled();
+  });
+
   it("folds to a row of kind glyphs with a theme pack, and opens the list on demand", () => {
     const { container } = show(base, { themed: true });
     expect(container.querySelectorAll(".draft-glyph-row .draft-kind-glyph")).toHaveLength(2);
@@ -189,7 +278,7 @@ describe("DraftCard", () => {
         { key: "ship", title: "Ship", kind: "task", dependsOn: ["docs"] },
       ],
       positions: { docs: { col: 4, row: 0 }, ship: { col: 5, row: 0 } },
-      batch: { via: "copilot-draft:d1" },
+      batch: { via: "copilot-draft:d1", label: "anthropic · claude-x" },
     });
     expect(api.putCopilotDraftState).toHaveBeenCalledWith("c1", "d1", {
       state: "committed",
@@ -365,7 +454,7 @@ describe("DraftCard for a coding agent's plan", () => {
       ],
       edges: [{ from: "t2", to: "n-12" }],
       positions: { t1: { col: 4, row: 2 }, t2: { col: 5, row: 2 }, t3: { col: 4, row: 3 } },
-      batch: { via: "copilot-plan:d1" },
+      batch: { via: "copilot-plan:d1", label: "claude · sonnet" },
     });
     expect(api.putCopilotDraftState).toHaveBeenCalledWith("c1", "d1", {
       state: "committed",
