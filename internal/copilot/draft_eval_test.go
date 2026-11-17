@@ -370,14 +370,41 @@ func (p *opencodeProvider) Stream(ctx context.Context, req provider.Request, _ f
 		}
 	}
 	prompt.WriteString("\n\nAnswer with the JSON object only.")
-	cmd := exec.CommandContext(ctx, "opencode", "run", "--pure", "--format", "json", "-m", p.model, prompt.String())
+	// A provider error such as "Free usage limit reached" is only logged, and
+	// opencode keeps retrying, which looks like a stalled model. Errors are
+	// logged to stderr and watched, so such a call fails at once and says why.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "opencode", "run", "--pure", "--print-logs", "--log-level", "ERROR",
+		"--format", "json", "-m", p.model, prompt.String())
 	cmd.Dir = p.dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return provider.Response{}, fmt.Errorf("opencode run: %v: %s", err, truncateUTF8(stderr.String(), 400))
+		return provider.Response{}, err
 	}
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Start(); err != nil {
+		return provider.Response{}, fmt.Errorf("opencode run: %w", err)
+	}
+	var fatal string
+	logs := bufio.NewScanner(stderr)
+	logs.Buffer(make([]byte, 64<<10), 1<<20)
+	for logs.Scan() {
+		line := logs.Text()
+		if i := strings.Index(line, "Free usage limit reached"); i >= 0 && fatal == "" {
+			fatal = "OpenCode's free usage limit is reached (all free models share it); wait for it to reset or use another model"
+			cancel()
+		}
+	}
+	err = cmd.Wait()
+	if fatal != "" {
+		return provider.Response{}, errors.New(fatal)
+	}
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("opencode run: %v", err)
+	}
+	out := stdout.Bytes()
 	var text strings.Builder
 	var response provider.Response
 	scanner := bufio.NewScanner(bytes.NewReader(out))
