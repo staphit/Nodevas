@@ -1,7 +1,9 @@
 /**
  * A draft in the transcript: what the copilot proposes, editable until it is
  * created or discarded. The open, newest draft is the active one (its ghosts
- * are on the board); older, created and discarded drafts fold to a line.
+ * are on the board); older, created and discarded drafts fold to a line,
+ * except an open coding agent's plan, which stays live until it is created
+ * or discarded.
  *
  * Edits go to the copilot store's `drafts` map, never to the transcript's
  * items, so editing does not move the transcript.
@@ -109,7 +111,13 @@ export function DraftCard({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const open = data?.state === "open";
-  const live = open && active;
+  // A newer draft supersedes a copilot draft (it is refined into the next
+  // one), never a coding agent's plan: that is the only copy of its run's
+  // plan, and its goal stays waiting on it (the copilot refuses the
+  // autopilot, a revision or another breakdown there) until it is created or
+  // discarded. So an open plan draft keeps its buttons wherever it sits.
+  const superseded = open && !active && !data?.origin;
+  const live = open && !superseded;
 
   useEffect(() => {
     if (live && canWrite === null) void refreshCanWrite(project);
@@ -160,11 +168,7 @@ export function DraftCard({
     data.provider === "browser" &&
     language === "zh-TW" &&
     browserModelLanguages().every((code) => code.toLowerCase().startsWith("en"));
-  const stateLabel = !open
-    ? t(`draft.state.${data.state}`)
-    : !active
-      ? t("draft.state.superseded")
-      : "";
+  const stateLabel = !open ? t(`draft.state.${data.state}`) : superseded ? t("draft.state.superseded") : "";
 
   const header = (
     <div className="draft-head">

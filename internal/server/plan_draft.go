@@ -132,12 +132,19 @@ func (s *Server) capturePlanDraft(r *http.Request, st *store.Store, spec store.S
 }
 
 // planDraftNodes is the call's nodes as a draft keeps them: no assignee,
-// deadline or write access (the card neither shows nor edits them).
+// deadline or write access (the card neither shows nor edits them). The kind
+// is kept as the store reads it (engine.NormalizeNodeKind: lowercase, an
+// alias as its canonical id, empty as task), so the card and Create match it
+// against the board's type ids exactly.
 func planDraftNodes(nodes []store.SubgraphNode) []runnerwire.PlanDraftNode {
 	out := make([]runnerwire.PlanDraftNode, 0, len(nodes))
 	for _, n := range nodes {
+		kind := engine.NormalizeNodeKind(n.Kind)
+		if kind == "" {
+			kind = engine.NodeKindTask
+		}
 		out = append(out, runnerwire.PlanDraftNode{
-			Key: n.Key, Title: n.Title, Kind: n.Kind, Body: n.Body, Priority: n.Priority,
+			Key: n.Key, Title: n.Title, Kind: kind, Body: n.Body, Priority: n.Priority,
 			Tags: n.Tags, DependsOn: n.DependsOn, Refs: n.Refs, Acceptance: n.Acceptance,
 		})
 	}

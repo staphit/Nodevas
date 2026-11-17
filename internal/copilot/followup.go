@@ -433,9 +433,12 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 		goal = Goal{}
 	}
 	// A draft plan run (P6) wrote nothing on the board: its plan is the
-	// draft the hub recorded, delivered as a draft card.
+	// draft the hub recorded, delivered as a draft card. A run that failed
+	// or was cancelled after recording a plan delivers it too, marked as
+	// ended early: a plain run failing at that point leaves its tasks on the
+	// board, and the person may still want what was planned.
 	if current.Kind == followupBreakdown && run.Draft {
-		if run.Status == runnerwire.RunSucceeded && s.opts.PlanDraft != nil {
+		if run.Status != runnerwire.RunDeclined && s.opts.PlanDraft != nil {
 			capture, err := s.opts.PlanDraft(ctx, run.ID, current.AccountID)
 			if err != nil {
 				// Could not read it: it stays pending, like a LookupRun error.

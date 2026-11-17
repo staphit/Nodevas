@@ -150,6 +150,63 @@ func TestDraftPlanRunWithAnEmptyCaptureSaysNoTasks(t *testing.T) {
 	}
 }
 
+// A draft run that recorded its plan and then failed or was cancelled still
+// hands the plan over, as a draft marked as possibly incomplete; one that
+// recorded nothing keeps the failure reply.
+func TestDraftPlanRunEndedEarlyStillDeliversItsCapture(t *testing.T) {
+	for _, tc := range []struct{ status, lang, shown, reply string }{
+		{runnerwire.RunFailed, "en", "Plan ended early: 3 tasks (draft, may be incomplete)", "ended early, but it recorded a draft of 3 tasks"},
+		{runnerwire.RunCancelled, "en", "Plan ended early: 3 tasks (draft, may be incomplete)", "discard it and I can break the goal down again"},
+		{runnerwire.RunFailed, "zh-TW", "計畫提前結束：3 個任務（草稿，可能不完整）", "已經記下 3 個任務的草稿"},
+	} {
+		runs := newFakeRuns()
+		h := newHarness(t, withPlanDrafts(runs, threeTaskCapture(), nil, nil))
+		conversation := h.conversation(alice, ModeDefault)
+		addFollowup(t, h, conversation, tc.lang)
+		run := draftPlanRun(tc.status)
+		run.Error = "the agent timed out"
+		runs.set(run)
+		h.service.RunChanged(run)
+		h.service.background.Wait()
+
+		entries := entriesOf(t, h, conversation)
+		if len(entries) != 3 || entries[0].Kind != EntryEvent || entries[1].Kind != EntryDraft || entries[2].Kind != EntryAssistant {
+			t.Fatalf("%s: entries = %+v", tc.status, entries)
+		}
+		if entries[0].Text != tc.shown || !strings.Contains(entries[2].Text, tc.reply) {
+			t.Errorf("%s/%s: shown %q, reply %q", tc.status, tc.lang, entries[0].Text, entries[2].Text)
+		}
+		note := messageText(messageOf(t, entries[0]))
+		for _, want := range []string{"Error: the agent timed out", "ended early", "may be incomplete",
+			"never call start_autopilot before the person created the draft"} {
+			if !strings.Contains(note, want) {
+				t.Errorf("%s: note lacks %q:\n%s", tc.status, want, note)
+			}
+		}
+		var data DraftData
+		if err := json.Unmarshal([]byte(entries[1].Data), &data); err != nil || data.State != DraftOpen ||
+			len(data.Draft.Nodes) != 3 || data.Origin == nil {
+			t.Fatalf("%s: card = %+v (%v)", tc.status, data, err)
+		}
+		if left := pendingFollowups(t, h); len(left) != 0 {
+			t.Fatalf("%s: still pending: %+v", tc.status, left)
+		}
+	}
+
+	// Nothing recorded: the failure reply, as today.
+	runs := newFakeRuns()
+	h := newHarness(t, withPlanDrafts(runs, runnerwire.PlanDraft{}, nil, nil))
+	conversation := h.conversation(alice, ModeDefault)
+	addFollowup(t, h, conversation, "en")
+	runs.set(draftPlanRun(runnerwire.RunFailed))
+	h.service.RunChanged(draftPlanRun(runnerwire.RunFailed))
+	h.service.background.Wait()
+	if entries := entriesOf(t, h, conversation); len(entries) != 2 || entries[1].Kind != EntryAssistant ||
+		!strings.Contains(entries[1].Text, "failed") {
+		t.Fatalf("empty failed draft: %+v", entries)
+	}
+}
+
 func TestDraftPlanCaptureUnreadableStaysPending(t *testing.T) {
 	runs := newFakeRuns()
 	h := newHarness(t, withPlanDrafts(runs, runnerwire.PlanDraft{}, errors.New("database is down"), nil))
@@ -233,6 +290,23 @@ func TestPlanDraftDataStripsFrontMatter(t *testing.T) {
 		if strings.Contains(body, "---") {
 			t.Fatalf("a delimiter is left: %q", body)
 		}
+	}
+}
+
+// A capture recorded before the hub normalized kinds still reaches the card
+// with the board's ids: lowercase, aliases as their canonical id.
+func TestPlanDraftDataNormalizesKinds(t *testing.T) {
+	capture := runnerwire.PlanDraft{Nodes: []runnerwire.PlanDraftNode{
+		{Key: "a", Title: "A", Kind: "review"}, {Key: "b", Title: "B", Kind: " Task "},
+		{Key: "c", Title: "C", Kind: "Note"}, {Key: "d", Title: "D", Kind: "Decision"}, {Key: "e", Title: "E"},
+	}}
+	data := planDraftData(capture, draftPlanRun(runnerwire.RunSucceeded), "node-0042", "Login page")
+	var kinds []string
+	for _, node := range data.Draft.Nodes {
+		kinds = append(kinds, node.Kind)
+	}
+	if !slices.Equal(kinds, []string{"gate", "task", "note", "choice", "task"}) {
+		t.Fatalf("kinds = %q", kinds)
 	}
 }
 

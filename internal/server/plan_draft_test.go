@@ -249,28 +249,55 @@ func TestDraftPlanRunRefusesFrontMatter(t *testing.T) {
 	}
 }
 
+// Every write the runner proxy forwards, decided by hand: refused while a
+// draft plan run is active (a board write other than its create_subgraph),
+// or allowed. A write route added to runnerProxyRoutes fails this test until
+// it is listed here, so each one is a deliberate decision (D3).
+var planDraftWriteDecisions = map[string]bool{
+	"POST /api/nodes":                     true,
+	"PUT /api/nodes/*":                    true,
+	"POST /api/nodes/*/claim":             true,
+	"POST /api/nodes/*/release":           true,
+	"POST /api/nodes/*/status":            true,
+	"POST /api/nodes/*/acceptance":        true,
+	"POST /api/graph/ops":                 true,
+	"POST /api/graph/subgraph":            false, // recorded as the draft, not written
+	"POST /api/agents/heartbeat":          false,
+	"POST /api/agents/leave":              false,
+	"POST /api/agents/messages":           false,
+	"POST /api/agents/inbox":              false,
+	"POST /api/agents/asks":               false,
+	"POST /api/agents/sessions/*/changes": false, // file edits and snapshots, no nodes
+	"POST /api/agents/sessions/*/usage":   false,
+	"POST /api/verdicts":                  false,
+}
+
 func TestPlanDraftRefusesEveryGraphWriteOnTheProxyAllowlist(t *testing.T) {
+	seen := map[string]bool{}
 	for _, route := range runnerProxyRoutes {
 		target := strings.ReplaceAll(route.pattern, "*", "x")
-		boardWrite := route.method != http.MethodGet &&
-			(target == "/api/nodes" || strings.HasPrefix(target, "/api/nodes/") || strings.HasPrefix(target, "/api/graph/")) &&
-			!(route.method == http.MethodPost && target == "/api/graph/subgraph")
-		if got := planDraftRefuses(route.method, target); got != boardWrite {
-			t.Errorf("%s %s: refused %v, want %v", route.method, route.pattern, got, boardWrite)
+		got := planDraftRefuses(route.method, target)
+		if route.method == http.MethodGet {
+			if got {
+				t.Errorf("GET %s (a read) is refused", route.pattern)
+			}
+			continue
+		}
+		name := route.method + " " + route.pattern
+		seen[name] = true
+		want, decided := planDraftWriteDecisions[name]
+		if !decided {
+			t.Errorf("%s is on the proxy allowlist but not in planDraftWriteDecisions: decide whether a draft plan run may make it", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: refused %v, want %v", name, got, want)
 		}
 	}
-	// The ones that matter, by name.
-	for _, want := range [][2]string{
-		{http.MethodPost, "/api/nodes"}, {http.MethodPut, "/api/nodes/x"}, {http.MethodPost, "/api/graph/ops"},
-		{http.MethodPost, "/api/nodes/x/acceptance"}, {http.MethodPost, "/api/nodes/x/claim"},
-	} {
-		if !planDraftRefuses(want[0], want[1]) {
-			t.Errorf("%s %s is not refused", want[0], want[1])
+	for name := range planDraftWriteDecisions {
+		if !seen[name] {
+			t.Errorf("%s is decided but no longer on the proxy allowlist", name)
 		}
-	}
-	if planDraftRefuses(http.MethodPost, "/api/graph/subgraph") || planDraftRefuses(http.MethodPost, "/api/verdicts") ||
-		planDraftRefuses(http.MethodPost, "/api/agents/heartbeat") {
-		t.Error("a route a draft run needs is refused")
 	}
 }
 
@@ -340,5 +367,26 @@ func TestCreateRunDraftOnlyFromACopilotServerTool(t *testing.T) {
 	var run runnerwire.Run
 	if err := json.Unmarshal(response.Body.Bytes(), &run); err != nil || !run.Draft || run.Kind != runnerwire.JobPlan {
 		t.Fatalf("run = %+v (%v)", run, err)
+	}
+}
+
+// The hub records a draft node's kind as the store reads it (lowercase, an
+// alias as its canonical id), so the card and Create see the board's ids.
+func TestDraftPlanRunRecordsCanonicalKinds(t *testing.T) {
+	f := newRunsFixture(t)
+	run := f.planRun(t, true)
+	code, body := f.proxied(t, run.ID, http.MethodPost, "graph/subgraph", `{"nodes":[`+
+		`{"key":"r1","title":"Editorial pass","kind":"review"},`+
+		`{"key":"t1","title":"Write it","kind":" Task ",`+acceptanceJSON()+`},`+
+		`{"key":"t2","title":"Ship it",`+acceptanceJSON()+`}]}`, nil)
+	if code != http.StatusOK {
+		t.Fatalf("draft create_subgraph: %d %s", code, body)
+	}
+	var kinds []string
+	for _, n := range f.heldDraft(t, run.ID).Nodes {
+		kinds = append(kinds, n.Kind)
+	}
+	if !slices.Equal(kinds, []string{"gate", "task", "task"}) {
+		t.Fatalf("held kinds = %q", kinds)
 	}
 }

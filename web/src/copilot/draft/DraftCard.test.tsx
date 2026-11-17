@@ -393,6 +393,30 @@ describe("DraftCard for a coding agent's plan", () => {
     expect(spec.batch).toBeUndefined();
   });
 
+  it("stays live when a newer draft follows: a plan is never superseded, and its goal waits on it", async () => {
+    vi.mocked(api.putCopilotDraftState).mockResolvedValue(null as never);
+    const planItem = item(plan);
+    const newer = entryToItem({ id: "d2", seq: 2, kind: "draft", text: "B", data: JSON.stringify(plan), createdAt: 2 });
+    useCopilot.setState({ items: [planItem, newer] });
+    const { container } = render(<DraftCard item={planItem} active={false} themed={false} />);
+    expect(screen.queryByText("Replaced by a newer draft")).toBeNull();
+    expect(container.querySelector(".draft-card.is-folded")).toBeNull();
+    expect(createButton()).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() =>
+      expect(api.putCopilotDraftState).toHaveBeenCalledWith("c1", "d1", { state: "discarded" }),
+    );
+  });
+
+  it("a copilot draft a newer one follows still folds as superseded", () => {
+    const own = item(base);
+    useCopilot.setState({ items: [own] });
+    const { container } = render(<DraftCard item={own} active={false} themed={false} />);
+    expect(screen.getByText("Replaced by a newer draft")).toBeInTheDocument();
+    expect(container.querySelector(".draft-card.is-folded")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+  });
+
   it("allows up to 100 steps", () => {
     const nodes = Array.from({ length: 60 }, (_, index) => ({ key: `k${index}`, title: `Step ${index}`, kind: "task" }));
     show({ ...plan, draft: { summary: "", nodes }, extras: {} });
