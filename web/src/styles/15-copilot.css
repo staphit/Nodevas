@@ -730,8 +730,10 @@
   flex: 1;
   min-width: 0;
   min-height: 40px;
-  /* Grows with its text (Composer) to eight lines, then scrolls. */
-  max-height: calc(13px * var(--font-scale, 1) * 1.45 * 8 + 18px);
+  /* Grows with its text (Composer) to eight lines, then scrolls. In em, so the
+     limit follows the font size the phone rule below raises to 16px; 18px is
+     the padding and the border, top and bottom. */
+  max-height: calc(1em * 1.45 * 8 + 18px);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;

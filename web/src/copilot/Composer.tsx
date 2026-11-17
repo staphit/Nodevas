@@ -48,25 +48,47 @@ export const Composer = forwardRef<
   const draftId = useCopilot((state) => (state.intent === "make" ? activeDraftId(state) : null));
   const selected = useApp((state) => canvasSelectionIds(state).length);
   // Text handed over from elsewhere (a draft's question chip, an example, a
-  // spoken request) lands in the box, editable, and is not sent.
+  // spoken request) lands in the box, editable, and is not sent. Spoken text
+  // goes after what is already typed, so typing and talking make one request;
+  // a chip or an example replaces the box. Each fill is used once: the panel
+  // unmounts when it closes, and a fill left in the store would come back,
+  // already sent or deleted, on every reopen.
   const fill = useCopilot((state) => state.composerFill);
+  const appliedFill = useRef<typeof fill>(null);
   useEffect(() => {
-    if (!fill) return;
-    setText(fill.text);
-    setFromVoice(Boolean(fill.voice));
+    // The ref keeps a second run of the same effect (StrictMode) from adding
+    // the spoken text twice.
+    if (!fill || appliedFill.current === fill) return;
+    appliedFill.current = fill;
+    if (useCopilot.getState().composerFill === fill) useCopilot.setState({ composerFill: null });
+    const voice = Boolean(fill.voice);
+    setText((current) => {
+      const typed = current.trimEnd();
+      return voice && typed ? `${typed} ${fill.text}` : fill.text;
+    });
+    setFromVoice(voice);
     boxRef.current?.focus();
   }, [fill]);
 
-  // Grow with the text, up to COMPOSER_MAX_ROWS lines.
+  // Grow with the text, up to COMPOSER_MAX_ROWS lines. scrollHeight counts the
+  // padding but not the border, and the box is border-box, so the border is
+  // added back; without it every height from two lines up is 2px short and
+  // the box scrolls.
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (!box) return;
     const style = getComputedStyle(box);
     const line = parseFloat(style.lineHeight) || 20;
     const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const border =
+      style.boxSizing === "border-box"
+        ? (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0)
+        : 0;
     box.style.height = "auto";
     const wanted = box.scrollHeight;
-    if (wanted > 0) box.style.height = `${Math.min(wanted, line * COMPOSER_MAX_ROWS + padding)}px`;
+    if (wanted > 0) {
+      box.style.height = `${Math.min(wanted + border, line * COMPOSER_MAX_ROWS + padding + border)}px`;
+    }
   }, [text]);
 
   const send = () => {
@@ -139,7 +161,9 @@ export const Composer = forwardRef<
           ))}
         </div>
         {intent === "make" && selected > 0 && (
-          <span className="copilot-selection-chip">{t("copilot.selectionChip", { n: selected })}</span>
+          <span className="copilot-selection-chip">
+            {selected === 1 ? t("copilot.selectionChipOne") : t("copilot.selectionChip", { n: selected })}
+          </span>
         )}
         {fromVoice && text.trim() && <span className="copilot-voice-review">{t("copilot.voice.review")}</span>}
         {speech.supported && (

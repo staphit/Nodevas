@@ -71,4 +71,25 @@ describe("copilot and draft keys in both catalogs", () => {
     );
     expect(translate("draft.plan.origin", "zh-TW", { agent: "claude", goal: "Login" })).toBe("由 claude 為「Login」規劃");
   });
+
+  it("says the plan's tasks are not on the board yet, not that the board is empty", () => {
+    // A plan draft follows start_breakdown, which has already put the goal on
+    // the board; only the tasks are missing.
+    expect(translate("draft.plan.note", "en")).toBe(
+      "These tasks are not on the board yet. Create adds them and makes the goal wait for them.",
+    );
+    expect(translate("draft.plan.note", "zh-TW")).toBe("這些任務還沒放上看板。按「建立」會加入它們，並讓目標等它們完成。");
+  });
+
+  it("names one selected node in the singular", () => {
+    expect(translate("copilot.selectionChipOne", "en")).toBe("After 1 selected node");
+    expect(translate("copilot.selectionChip", "en", { n: 3 })).toBe("After 3 selected nodes");
+    expect(translate("copilot.selectionChipOne", "zh-TW")).toBe("接在 1 個選取節點之後");
+  });
+
+  it("says 雙擊 for double-click everywhere in zh-TW", () => {
+    const keys = catalogKeys("zh-TW").filter((key) => translate(key, "zh-TW").includes("按兩下"));
+    expect(keys).toEqual([]);
+    expect(translate("draft.rename", "zh-TW")).toBe("雙擊重新命名");
+  });
 });

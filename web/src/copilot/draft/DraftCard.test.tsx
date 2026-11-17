@@ -246,7 +246,7 @@ describe("DraftCard for a coding agent's plan", () => {
     expect(screen.getByText("claude · sonnet")).toBeInTheDocument();
     expect(screen.getByText("Planned by claude for “Login page”")).toBeInTheDocument();
     expect(
-      screen.getByText("Nothing is on the board yet. Create adds these tasks and makes the goal wait for them."),
+      screen.getByText("These tasks are not on the board yet. Create adds them and makes the goal wait for them."),
     ).toBeInTheDocument();
     expect(container.querySelector(".draft-origin")).not.toBeNull();
   });
