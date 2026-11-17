@@ -76,7 +76,7 @@
     {"name": "zh-after-existing", "language": "zh-TW", "board": "product", "text": "上線之後要做：收集回饋、寫週報",
      "expect": {"minNodes": 2, "maxNodes": 3, "keywords": [["回饋"], ["週報"]], "attachesTo": ["n-launch"]}},
     {"name": "zh-long-spec", "language": "zh-TW", "board": "empty", "text": "搬家計畫：先找房子、簽約，簽約後同時處理打包和叫搬家公司，搬完要辦地址變更跟網路移機",
-     "expect": {"minNodes": 5, "maxNodes": 8, "keywords": [["找房", "看房"], ["簽約"], ["打包"], ["搬家公司"], ["地址"], ["網路"]], "order": [[["簽約"], ["打包"]], [["簽約"], ["搬家公司"]]]}},
+     "expect": {"minNodes": 5, "maxNodes": 8, "keywords": [["找房", "看房", "租屋", "房子"], ["簽約", "租約"], ["打包"], ["搬家公司"], ["地址"], ["網路"]], "order": [[["簽約", "租約"], ["打包"]], [["簽約", "租約"], ["搬家公司"]]]}},
     {"name": "zh-mixed-terms", "language": "zh-TW", "board": "product", "text": "幫 login API 加 rate limit 跟 unit test",
      "expect": {"minNodes": 1, "maxNodes": 3, "keywords": [["rate", "限流", "速率"], ["test", "測試"]], "noDuplicateOf": ["n-api"]}},
 
