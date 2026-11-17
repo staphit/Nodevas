@@ -197,6 +197,8 @@ function browserLanguage(): "en" | "zh-TW" {
 /** The modes a Copilot conversation can start in (api/copilot.ts COPILOT_MODES;
  * listed here so the schema stays clear of the api module). */
 export const COPILOT_START_MODES = ["plan", "default", "acceptEdits", "bypassPermissions"] as const;
+/** Copilot intents: "make" drafts nodes, "ask" is the chat. */
+export const COPILOT_INTENTS = ["make", "ask"] as const;
 
 export const PREFERENCE_SCHEMA = {
   // appearance
@@ -507,6 +509,10 @@ export const PREFERENCE_SCHEMA = {
   copilotDefaultMode: account(
     enumPref("vised-copilot-mode", "agents", COPILOT_START_MODES, () => "default" as const),
   ),
+  /** What Copilot's text box does: propose nodes as a draft, or chat. */
+  copilotIntent: account(enumPref("vised-copilot-intent", "agents", COPILOT_INTENTS, () => "make" as const)),
+  /** Whether a spoken request is sent when the person stops talking, or left in the box to check. */
+  copilotVoiceAutoSend: account(boolPref("vised-copilot-voice-send", "agents", false)),
   /** How a run's changes are shown: side by side (where there is room) or one column. */
   diffLayout: account(
     enumPref("vised-diff-layout", "agents", ["split", "unified"] as const, () => "split" as const),

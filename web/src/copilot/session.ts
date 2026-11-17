@@ -377,6 +377,14 @@ export function sendDraft(raw: string, source: CopilotSource): Promise<void> {
   return runTurn(raw, source, { intent: "draft" });
 }
 
+/**
+ * What the text box sends: a draft in "Make nodes" (the default), a chat
+ * turn in "Ask". The switch decides, never a model guessing the intent.
+ */
+export function submitText(raw: string, source: CopilotSource): Promise<void> {
+  return useCopilot.getState().intent === "ask" ? sendTurn(raw, source) : sendDraft(raw, source);
+}
+
 /** Refines one draft: the drafter gets it with the person's edits, plus the instruction. */
 export function refineDraft(raw: string, source: CopilotSource, entryId: string): Promise<void> {
   const previous = currentDraft(useCopilot.getState(), entryId);

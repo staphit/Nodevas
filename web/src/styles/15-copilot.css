@@ -635,19 +635,103 @@
 
 /* ---- composer --------------------------------------------------------------- */
 
+/* The switch row and the box: typing first (Make nodes or Ask), then send. */
+.copilot-composer-wrap {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.copilot-composer-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 12px 0;
+}
+.copilot-intent {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.copilot-intent-option {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.copilot-intent-option.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+.copilot-intent-option:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 1px;
+}
+.copilot-selection-chip,
+.copilot-voice-review {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+}
+.copilot-selection-chip {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.copilot-voice-review {
+  background: var(--st-progress-bg, var(--surface-2));
+  color: var(--st-progress-fg, var(--text));
+}
+.copilot-autosend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.copilot-input.is-from-voice {
+  border-color: var(--st-progress-fg);
+}
+.copilot-examples {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+}
+.copilot-example {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12.5px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.copilot-example:hover {
+  background: var(--surface-2);
+}
 .copilot-composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 12px max(10px, env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  padding: 8px 12px max(10px, env(safe-area-inset-bottom, 0px));
 }
 .copilot-input {
   flex: 1;
   min-width: 0;
   min-height: 40px;
-  max-height: 160px;
+  /* Grows with its text (Composer) to eight lines, then scrolls. */
+  max-height: calc(13px * var(--font-scale, 1) * 1.45 * 8 + 18px);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;

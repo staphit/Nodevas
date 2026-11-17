@@ -172,6 +172,8 @@ export function Transcript({
   };
 
   const empty = items.length === 0 && pending.length === 0 && !interim;
+  const intent = useCopilot((state) => state.intent);
+  const fillComposer = useCopilot((state) => state.fillComposer);
 
   return (
     <div
@@ -184,7 +186,20 @@ export function Transcript({
       onScroll={onScroll}
       onClick={onClick}
     >
-      {empty && <p className="copilot-empty">{t("copilot.empty")}</p>}
+      {empty && intent === "ask" && <p className="copilot-empty">{t("copilot.empty")}</p>}
+      {empty && intent === "make" && (
+        <div className="copilot-empty">
+          <p>{t("copilot.empty.make")}</p>
+          {/* An example fills the box to edit; it is not sent. */}
+          <div className="copilot-examples">
+            {(["copilot.example.1", "copilot.example.2", "copilot.example.3"] as const).map((key) => (
+              <button key={key} type="button" className="copilot-example" onClick={() => fillComposer(t(key))}>
+                {t(key)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {items.map((item) => (
         <Item key={item.id} item={item} activeDraft={activeDraft} prompt={prompts.get(item.id) ?? ""} />
       ))}

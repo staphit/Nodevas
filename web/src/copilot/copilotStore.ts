@@ -117,10 +117,16 @@ export interface TurnState {
   draftStep: CopilotDraftStep | null;
 }
 
+/** What the text box does: draft nodes ("make", the default) or chat ("ask"). */
+export type CopilotIntent = "make" | "ask";
+
 export interface CopilotPrefs {
   speakReplies: boolean;
   /** Mode a new conversation starts in. */
   defaultMode: CopilotMode;
+  intent: CopilotIntent;
+  /** Send a spoken request when the person stops talking, instead of leaving it in the box. */
+  voiceAutoSend: boolean;
 }
 
 export interface CopilotState extends TurnState, CopilotPrefs {
@@ -141,8 +147,8 @@ export interface CopilotState extends TurnState, CopilotPrefs {
    * transcript.
    */
   drafts: Record<string, CopilotDraft>;
-  /** Text for the composer to take (a question chip); `at` tells two apart. */
-  composerFill: { text: string; at: number } | null;
+  /** Text for the box, as if typed; voice marks a spoken request to check before sending. */
+  composerFill: { text: string; at: number; voice?: boolean } | null;
 
   setStatus: (status: CopilotStatus | null) => void;
   setOpen: (open: boolean) => void;
@@ -158,6 +164,8 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   markRead: (id: string) => void;
   setMode: (mode: CopilotMode) => void;
   setSpeakReplies: (speak: boolean) => void;
+  setIntent: (intent: CopilotIntent) => void;
+  setVoiceAutoSend: (send: boolean) => void;
   setNotice: (notice: string | null) => void;
   setDownload: (download: Partial<BrowserModelDownload>) => void;
   /** Starts a turn: adds the optimistic user bubble. */
@@ -171,7 +179,7 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   /** The server's new word on a draft: its state, batch, created ids. */
   setDraftData: (entryId: string, patch: Partial<CopilotDraftData>) => void;
   /** Puts text into the composer, as if typed. */
-  fillComposer: (text: string) => void;
+  fillComposer: (text: string, voice?: boolean) => void;
 }
 
 /** The panel's choices: preferences that follow the account. */
@@ -179,6 +187,8 @@ export function readCopilotPrefs(): CopilotPrefs {
   return {
     speakReplies: readPreference("copilotSpeakReplies"),
     defaultMode: readPreference("copilotDefaultMode"),
+    intent: readPreference("copilotIntent"),
+    voiceAutoSend: readPreference("copilotVoiceAutoSend"),
   };
 }
 
@@ -530,6 +540,8 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   activeId: null,
   mode: initialPrefs.defaultMode,
   speakReplies: initialPrefs.speakReplies,
+  intent: initialPrefs.intent,
+  voiceAutoSend: initialPrefs.voiceAutoSend,
   defaultMode: initialPrefs.defaultMode,
   lastSource: "text",
   notice: null,
@@ -583,6 +595,14 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     writePreference("copilotSpeakReplies", speakReplies);
     set({ speakReplies });
   },
+  setIntent: (intent) => {
+    writePreference("copilotIntent", intent);
+    set({ intent });
+  },
+  setVoiceAutoSend: (voiceAutoSend) => {
+    writePreference("copilotVoiceAutoSend", voiceAutoSend);
+    set({ voiceAutoSend });
+  },
   setNotice: (notice) => set({ notice }),
   setDownload: (download) => set((state) => ({ download: { ...state.download, ...download } })),
   beginTurn: (text, source) =>
@@ -634,16 +654,28 @@ export const useCopilot = create<CopilotState>((set, get) => ({
           : item,
       ),
     })),
-  fillComposer: (text) => set({ composerFill: { text, at: Date.now() } }),
+  fillComposer: (text, voice = false) => set({ composerFill: { text, at: Date.now(), voice } }),
 }));
 
 // The choices follow the account: one made in another tab, browser or device
 // (preferences/sync.ts) shows here too. The open conversation keeps its mode.
 subscribePreferences((key) => {
-  if (key !== "copilotSpeakReplies" && key !== "copilotDefaultMode") return;
+  if (
+    key !== "copilotSpeakReplies" &&
+    key !== "copilotDefaultMode" &&
+    key !== "copilotIntent" &&
+    key !== "copilotVoiceAutoSend"
+  )
+    return;
   const prefs = readCopilotPrefs();
   const state = useCopilot.getState();
-  if (state.speakReplies === prefs.speakReplies && state.defaultMode === prefs.defaultMode) return;
+  if (
+    state.speakReplies === prefs.speakReplies &&
+    state.defaultMode === prefs.defaultMode &&
+    state.intent === prefs.intent &&
+    state.voiceAutoSend === prefs.voiceAutoSend
+  )
+    return;
   useCopilot.setState({
     ...prefs,
     ...(state.activeId === null && state.items.length === 0 ? { mode: prefs.defaultMode } : {}),

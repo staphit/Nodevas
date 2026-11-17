@@ -1,8 +1,9 @@
 /**
- * Mounted once by App: the floating mic button, the panel, the global
- * shortcuts (Ctrl+Shift+Space toggles the panel, hold Alt+Space to talk) and
- * the speech wiring shared by all of them. Renders nothing when the server has
- * no copilot.
+ * Mounted once by App: the floating Copilot button, the panel, the global
+ * shortcuts (Ctrl+Shift+Space toggles the panel, hold Alt+Space to dictate)
+ * and the speech wiring shared by all of them. Typing comes first: a spoken
+ * request lands in the text box to check, unless the person chose to send
+ * when they stop talking. Renders nothing when the server has no copilot.
  */
 
 import { Suspense, useCallback, useEffect, useRef } from "react";
@@ -12,9 +13,9 @@ import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
 import { DraftToast } from "./draft/DraftToast";
-import { IconMic } from "./icons";
+import { IconCopilot } from "./icons";
 import { OPEN_KEYS, RunnerHelp } from "./RunnerHelp";
-import { decide, openUnread, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
+import { decide, openUnread, projectChanged, refreshCopilotStatus, submitText } from "./session";
 import { cancelSpeech, useSpeechRecognition, useSpeechSynthesis } from "./speech";
 
 // The panel (and the markdown renderer it pulls in) loads on first open.
@@ -50,8 +51,9 @@ export function CopilotRoot() {
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const lang = languageLocale(language);
 
-  // A final transcript answers a pending permission request if there is one,
-  // and is a new turn otherwise.
+  // A final transcript answers a pending permission request if there is one.
+  // Otherwise it goes into the text box to check, or, when the person chose
+  // so, is sent as it is.
   const onFinal = useCallback(
     (text: string) => {
       const copilot = useCopilot.getState();
@@ -62,12 +64,16 @@ export function CopilotRoot() {
         else copilot.setNotice(t("copilot.permission.voiceUnclear", { text }));
         return;
       }
+      copilot.setOpen(true);
+      if (!copilot.voiceAutoSend) {
+        copilot.fillComposer(text, true);
+        return;
+      }
       if (copilot.running) {
         copilot.setNotice(t("copilot.busy"));
         return;
       }
-      copilot.setOpen(true);
-      void sendTurn(text, "voice");
+      void submitText(text, "voice");
     },
     [t],
   );
@@ -139,7 +145,8 @@ export function CopilotRoot() {
           return;
         }
         talking = true;
-        if (!current.listening) current.start();
+        // Held: keep listening through pauses, so a long request is one text.
+        if (!current.listening) current.start({ continuous: true });
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -178,11 +185,11 @@ export function CopilotRoot() {
         type="button"
         className="copilot-fab is-offline"
         onClick={() => setOpen(true)}
-        aria-label={`${t("copilot.fab.label")} · ${t(waitingKey)}`}
+        aria-label={`${t("copilot.fab")} · ${t(waitingKey)}`}
         title={t(waitingKey)}
       >
-        <IconMic size={20} />
-        <span className="copilot-fab-label">{t("copilot.fab.label")}</span>
+        <IconCopilot size={20} />
+        <span className="copilot-fab-label">{t("copilot.fab")}</span>
       </button>
     );
   }
@@ -196,7 +203,7 @@ export function CopilotRoot() {
           type="button"
           className={`copilot-fab${speech.listening ? " is-listening" : ""}${running ? " is-running" : ""}`}
           onClick={() => (unread ? void openUnread() : setOpen(true))}
-          aria-label={`${t("copilot.fab.label")} · ${
+          aria-label={`${t("copilot.fab")} · ${
             unread ? `${t("copilot.open")} · ${t("copilot.followup.unread")}` : t("copilot.open")
           }`}
           aria-expanded={false}
@@ -206,8 +213,8 @@ export function CopilotRoot() {
             t("common.withHint", { label: t("copilot.pushToTalk"), hint: "Alt+Space" }),
           ].join(" · ")}
         >
-          <IconMic size={20} />
-          <span className="copilot-fab-label">{t("copilot.fab.label")}</span>
+          <IconCopilot size={20} />
+          <span className="copilot-fab-label">{t("copilot.fab")}</span>
           {unread && <span className="copilot-fab-badge" aria-hidden data-testid="copilot-unread" />}
         </button>
       )}
