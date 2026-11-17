@@ -1398,6 +1398,61 @@
   background: var(--hover);
 }
 
+/* What an undo kept (KeptList): one line per node, title, why, and
+   "Delete anyway". In the toast it goes under the text, full width, with
+   the close button still on the first line. */
+.copilot-toast:has(> .draft-kept-list) {
+  flex-wrap: wrap;
+}
+.copilot-toast > .copilot-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.copilot-toast > .draft-kept-list {
+  order: 1;
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.draft-kept-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.draft-kept-title {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.draft-kept-reason {
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-kept-delete {
+  align-self: baseline;
+  margin-left: auto;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-kept-delete:disabled {
+  color: var(--text-2);
+  cursor: default;
+}
+.draft-kept-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* ---- A theme character presents the draft (DraftPresenter) ----------------
    A small visual-novel dialogue box: her picture, a name plate, her line.
    warroom.css is not loaded in the copilot panel, so the box is drawn here,

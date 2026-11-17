@@ -134,7 +134,7 @@ describe("undo of a draft's Create (findings 3, 17, 24)", () => {
     expect(api.putCopilotDraftState).toHaveBeenCalledWith("c1", "d1", { state: "committed", batchId: "b1", ids: ["n2"] });
     // The redo brings back what was trashed.
     expect(redoDepth()).toBe(1);
-    expect(screen.getByText("Removed 1 created nodes; kept 1:")).toBeInTheDocument();
+    expect(screen.getByText("Removed 1 created node; kept 1:")).toBeInTheDocument();
     expect(screen.getByText("Ship")).toBeInTheDocument();
     expect(screen.getByText("changed since")).toBeInTheDocument();
 

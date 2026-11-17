@@ -28,12 +28,14 @@ export function DraftToast() {
 
   if (!toast) return null;
   let text: string;
-  if (toast.kind === "created") text = t("draft.created", { n: toast.count });
-  else if (toast.kind === "undone") {
-    text =
-      toast.refused.length > 0
-        ? t("draft.undoKept", { n: toast.count, k: toast.refused.length })
-        : t("draft.undone", { n: toast.count });
+  if (toast.kind === "created") {
+    text = toast.count === 1 ? t("draft.createdOne") : t("draft.created", { n: toast.count });
+  } else if (toast.kind === "undone") {
+    const kept = toast.refused.length;
+    if (kept > 0) {
+      text =
+        toast.count === 1 ? t("draft.undoKeptOne", { k: kept }) : t("draft.undoKept", { n: toast.count, k: kept });
+    } else text = toast.count === 1 ? t("draft.undoneOne") : t("draft.undone", { n: toast.count });
   } else text = toast.text;
 
   return (

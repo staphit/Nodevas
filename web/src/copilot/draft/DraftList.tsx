@@ -21,6 +21,7 @@ import {
   linkInsteadOfDuplicate,
   removeAfter,
   MAX_DRAFT_NODES,
+  MAX_TITLE_CHARS,
   removeNode,
   renameNode,
   takesAcceptance,
@@ -56,10 +57,12 @@ export function KindGlyph({ type, large }: { type: NodeType; large?: boolean }) 
 function TitleEditor({
   title,
   readOnly,
+  maxLength,
   onRename,
 }: {
   title: string;
   readOnly: boolean;
+  maxLength: number;
   onRename: (title: string) => void;
 }) {
   const { t } = useI18n();
@@ -88,7 +91,7 @@ function TitleEditor({
         className="draft-title-input"
         aria-label={t("draft.renameLabel")}
         value={value}
-        maxLength={60}
+        maxLength={maxLength}
         autoFocus
         onChange={(event) => setValue(event.target.value)}
         onBlur={commit}
@@ -166,6 +169,7 @@ export function DraftList({
   extras,
   goalTag,
   maxNodes = MAX_DRAFT_NODES,
+  maxTitle = MAX_TITLE_CHARS,
 }: {
   draft: Draft;
   graph: Graph | null;
@@ -182,6 +186,8 @@ export function DraftList({
   goalTag?: string;
   /** The draft's node cap, for the issue texts. */
   maxNodes?: number;
+  /** How long a title may be (a coding agent's plan keeps longer ones). */
+  maxTitle?: number;
 }) {
   const { t } = useI18n();
   const boardNodes = graph?.nodes ?? [];
@@ -260,7 +266,8 @@ export function DraftList({
             key={node.title}
             title={node.title}
             readOnly={readOnly}
-            onRename={(title) => onEdit((current) => renameNode(current, node.key, title))}
+            maxLength={maxTitle}
+            onRename={(title) => onEdit((current) => renameNode(current, node.key, title, maxTitle))}
           />
           {mark && (
             <span className={`draft-diff draft-diff-${mark}`}>
@@ -395,6 +402,7 @@ const KNOWN_ISSUES = new Set([
   "duplicate_existing",
   "duplicate_in_draft",
   "body_clipped",
+  "title_clipped",
 ]);
 
 /** An issue in the reader's language, by its code (`max`: the draft's node cap). */

@@ -34,7 +34,16 @@ import {
 import { DraftList, issueText, KindGlyph, type NodeMark } from "./DraftList";
 import { KeptList } from "./KeptList";
 import { DraftPresenter } from "./DraftPresenter";
-import { countLinks, diffDrafts, goalTagOf, maxNodesOf, mentionsCode, mergeMany, type DiffMark } from "./draftStore";
+import {
+  countLinks,
+  diffDrafts,
+  goalTagOf,
+  maxNodesOf,
+  maxTitleOf,
+  mentionsCode,
+  mergeMany,
+  type DiffMark,
+} from "./draftStore";
 import { useDraftUi } from "./draftUi";
 
 /** More nodes than this, and the coding agent's plan is the suggestion. */
@@ -205,7 +214,12 @@ export function DraftCard({
 
   const header = (
     <div className="draft-head">
-      <span className="draft-heading">{t("draft.title", { n: count, e: links })}</span>
+      <span className="draft-heading">
+        {t("draft.title", {
+          nodeText: count === 1 ? t("draft.glyphCountOne") : t("draft.glyphCount", { n: count }),
+          linkText: links === 1 ? t("draft.linkCountOne") : t("draft.linkCount", { n: links }),
+        })}
+      </span>
       {model && (
         <span className="draft-model" title={t("draft.byModel", { model })}>
           {model}
@@ -242,6 +256,7 @@ export function DraftCard({
             extras={planExtras}
             goalTag={goalTag}
             maxNodes={maxNodes}
+            maxTitle={maxTitleOf(data)}
           />
         )}
         {data.state === "committed" && kept && kept.length > 0 && (
@@ -303,7 +318,7 @@ export function DraftCard({
               <KindGlyph key={node.key} type={nodeTypeById(graph, node.kind)} large />
             ))}
           </span>
-          <span className="draft-glyph-count">{t("draft.glyphCount", { n: count })}</span>
+          <span className="draft-glyph-count">{count === 1 ? t("draft.glyphCountOne") : t("draft.glyphCount", { n: count })}</span>
           <button
             type="button"
             className="draft-text-btn"
@@ -328,6 +343,7 @@ export function DraftCard({
           extras={planExtras}
           goalTag={goalTag}
           maxNodes={maxNodes}
+          maxTitle={maxTitleOf(data)}
         />
       )}
       {diff.removed.length > 0 && (
@@ -372,7 +388,11 @@ export function DraftCard({
           disabled={createDisabled}
           onClick={() => void createDraft(item.id)}
         >
-          {busy === "creating" ? t("draft.creating") : t("draft.create", { n: count })}
+          {busy === "creating"
+            ? t("draft.creating")
+            : count === 1
+              ? t("draft.createOne")
+              : t("draft.create", { n: count })}
         </button>
         <button
           type="button"

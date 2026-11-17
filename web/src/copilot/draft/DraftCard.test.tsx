@@ -94,12 +94,12 @@ beforeEach(() => {
   vi.mocked(api.getTrash).mockResolvedValue({ items: [] });
 });
 
-const createButton = () => screen.getByRole("button", { name: /^Create \d+ nodes$/ });
+const createButton = () => screen.getByRole("button", { name: /^Create (\d+ nodes|1 node)$/ });
 
 describe("DraftCard", () => {
   it("lists the nodes with the header, the model and what each waits for", () => {
     show();
-    expect(screen.getByText("Draft: 2 nodes, 1 links")).toBeInTheDocument();
+    expect(screen.getByText("Draft: 2 nodes, 1 link")).toBeInTheDocument();
     expect(screen.getByText("claude-x")).toBeInTheDocument();
     expect(screen.getByText("Write docs")).toBeInTheDocument();
     expect(screen.getByText("After Write docs")).toBeInTheDocument();
@@ -126,6 +126,20 @@ describe("DraftCard", () => {
     const draft = currentDraft(useCopilot.getState(), "d1")!;
     expect(draft.nodes.map((node) => node.key)).toEqual(["ship"]);
     expect(draft.nodes[0].after).toEqual(["existing:node-1"]);
+  });
+
+  it("counts one node and one link in the singular (finding 30)", () => {
+    show({ ...base, draft: { summary: "", nodes: [{ key: "docs", title: "Write docs", kind: "task" }] } });
+    expect(screen.getByText("Draft: 1 node, 0 links")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create 1 node" })).toBeInTheDocument();
+  });
+
+  it("shows the singular toasts for one created node (finding 30)", () => {
+    render(<DraftToast />);
+    act(() => useDraftUi.getState().showToast({ kind: "created", count: 1, undoable: false } as never));
+    expect(screen.getByText("Created 1 node")).toBeInTheDocument();
+    act(() => useDraftUi.getState().showToast({ kind: "undone", count: 1, refused: [] } as never));
+    expect(screen.getByText("Removed the created node")).toBeInTheDocument();
   });
 
   it("disables Create on an error, and again once an edit makes a cycle", () => {
@@ -504,6 +518,30 @@ describe("DraftCard for a coding agent's plan", () => {
     expect(screen.getByText("Replaced by a newer draft")).toBeInTheDocument();
     expect(container.querySelector(".draft-card.is-folded")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+  });
+
+  it("keeps a planner's long title when the person edits it: a plan step holds 200 characters, not 60", () => {
+    const long = "Move the session store to Postgres and keep the old Redis keys readable until every runner has upgraded";
+    const { container } = show({
+      ...plan,
+      draft: { summary: "", nodes: [{ key: "t1", title: long, kind: "task" }] },
+      extras: {},
+    });
+    fireEvent.doubleClick(within(row(container, "t1")).getByText(long));
+    const input = screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement;
+    expect(input.maxLength).toBe(200);
+    fireEvent.change(input, { target: { value: `${long} (then drop Redis)` } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(currentDraft(useCopilot.getState(), "d1")!.nodes[0].title).toBe(`${long} (then drop Redis)`);
+  });
+
+  it("words a planner title the server cut (title_clipped)", () => {
+    show({
+      ...plan,
+      issues: [{ key: "t1", field: "title", severity: "warning", code: "title_clipped", message: "MODEL-ONLY TEXT" }],
+    });
+    expect(screen.getAllByText("The plan's title was cut to 200 characters.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("The board would not take this step.")).toBeNull();
   });
 
   it("allows up to 100 steps", () => {

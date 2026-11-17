@@ -25,7 +25,7 @@ import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import { useI18n } from "../../i18n";
 import { canvasSelectionIds } from "../../state/documentSlice";
 import { useApp } from "../../store";
-import { activeDraftId, currentDraft, useCopilot } from "../../copilot/copilotStore";
+import { activeDraftId, currentDraft, isPlanDraft, useCopilot } from "../../copilot/copilotStore";
 import { editDraft } from "../../copilot/draft/draftApi";
 import { useThemeActive } from "../../copilot/draft/DraftCard";
 import { KindGlyph } from "../../copilot/draft/DraftList";
@@ -35,6 +35,8 @@ import {
   existingIdOf,
   existingRef,
   isExistingRef,
+  MAX_PLAN_TITLE_CHARS,
+  MAX_TITLE_CHARS,
   renameNode,
 } from "../../copilot/draft/draftStore";
 import { useDraftUi } from "../../copilot/draft/draftUi";
@@ -54,10 +56,12 @@ interface GhostBox {
 function GhostRename({
   title,
   label,
+  maxLength,
   onDone,
 }: {
   title: string;
   label: string;
+  maxLength: number;
   onDone: (title: string | null) => void;
 }) {
   const [value, setValue] = useState(title);
@@ -85,7 +89,7 @@ function GhostRename({
       className="draft-ghost-input"
       aria-label={label}
       value={value}
-      maxLength={60}
+      maxLength={maxLength}
       autoFocus
       onChange={(event) => setValue(event.target.value)}
       onBlur={() => finish(value)}
@@ -151,6 +155,8 @@ export function DraftOverlay({
   const { t } = useI18n();
   const entryId = useCopilot((state) => activeDraftId(state));
   const draft = useCopilot((state) => (entryId ? currentDraft(state, entryId) : null));
+  // A coding agent's plan keeps longer titles than the copilot's own draft.
+  const maxTitle = useCopilot((state) => (isPlanDraft(state, entryId) ? MAX_PLAN_TITLE_CHARS : MAX_TITLE_CHARS));
   const selection = useApp(canvasSelectionIds);
   const graph = useApp((state) => state.graph);
   const themed = useThemeActive();
@@ -255,7 +261,7 @@ export function DraftOverlay({
     setRenaming(null);
     const next = title?.trim();
     if (next && next !== ghostByKey.get(key)?.title) {
-      editDraft(entryId, (current) => renameNode(current, key, next));
+      editDraft(entryId, (current) => renameNode(current, key, next, maxTitle));
     }
   };
 
@@ -376,6 +382,7 @@ export function DraftOverlay({
               <GhostRename
                 title={ghost.title}
                 label={t("draft.ghostRename", { title: ghost.title })}
+                maxLength={maxTitle}
                 onDone={(title) => finishRename(ghost.key, title)}
               />
             ) : (

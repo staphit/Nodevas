@@ -40,7 +40,12 @@ describe("copilot and draft keys in both catalogs", () => {
   });
 
   it("reads the draft keys in Chinese, with 節點 for node", () => {
-    expect(translate("draft.title", "zh-TW", { n: 8, e: 7 })).toBe("草稿：8 個節點、7 條依賴");
+    expect(
+      translate("draft.title", "zh-TW", {
+        nodeText: translate("draft.glyphCount", "zh-TW", { n: 8 }),
+        linkText: translate("draft.linkCount", "zh-TW", { n: 7 }),
+      }),
+    ).toBe("草稿：8 個節點、7 條依賴");
     expect(translate("draft.create", "zh-TW", { n: 8 })).toBe("建立 8 個節點");
     expect(translate("draft.created", "zh-TW", { n: 8 })).toBe("已建立 8 個節點");
     const zh = catalogKeys("zh-TW").filter((key) => key.startsWith("draft.") || key.startsWith("copilot."));

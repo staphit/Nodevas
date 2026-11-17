@@ -21,6 +21,8 @@ export const MAX_DRAFT_NODES = 40;
 /** A coding agent's plan (internal/copilot/draft_schema.go MaxPlanDraftNodes). */
 export const MAX_PLAN_DRAFT_NODES = 100;
 export const MAX_TITLE_CHARS = 60;
+/** A coding agent's plan step (internal/copilot/draft_schema.go maxPlanDraftTitleRunes). */
+export const MAX_PLAN_TITLE_CHARS = 200;
 export const MAX_BODY_CHARS = 600;
 
 export const EXISTING_PREFIX = "existing:";
@@ -59,8 +61,8 @@ function repoint(node: DraftNode, from: string, to: string[]): DraftNode {
   return { ...node, after, refs };
 }
 
-export function renameNode(draft: Draft, key: string, title: string): Draft {
-  const next = title.trim().slice(0, MAX_TITLE_CHARS);
+export function renameNode(draft: Draft, key: string, title: string, max: number = MAX_TITLE_CHARS): Draft {
+  const next = title.trim().slice(0, max);
   return mapNodes(draft, (node) => (node.key === key ? { ...node, title: next } : node));
 }
 
@@ -357,6 +359,11 @@ export function draftVia(entryId: string): string {
 /** How many nodes a draft may hold: a coding agent's plan takes more. */
 export function maxNodesOf(data: Pick<CopilotDraftData, "origin">): number {
   return data.origin ? MAX_PLAN_DRAFT_NODES : MAX_DRAFT_NODES;
+}
+
+/** How long a step's title may be: a coding agent's plan keeps longer ones. */
+export function maxTitleOf(data: Pick<CopilotDraftData, "origin"> | null | undefined): number {
+  return data?.origin ? MAX_PLAN_TITLE_CHARS : MAX_TITLE_CHARS;
 }
 
 /** The batch tag a plan draft's Create carries. */
