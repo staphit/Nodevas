@@ -8,6 +8,7 @@
 import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
+import { useSimpleMode } from "../../simple/simpleMode";
 import type { ControlRow } from "../../station/control";
 import { StationMenu } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
@@ -93,6 +94,7 @@ export function Lounge({
   labelOf: LabelOf;
 }) {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const style = building.current?.style ?? "default";
   const spots = building.lounge.filter((spot) => {
     if (spot.visitor) return true;
@@ -102,7 +104,7 @@ export function Lounge({
 
   const faceOf = (actor: Actor): AgentFace => ({
     actor,
-    label: actorLabel(t, actor, placeOf(t, actor)),
+    label: actorLabel(t, actor, placeOf(t, actor, simple)),
     row: actor.runId ? rowOf(actor.runId) : undefined,
     titleOf,
   });

@@ -378,6 +378,10 @@ type CreateRunRequest struct {
 	// without the prefix) this dispatch followed, so the pick is linked to
 	// its run. Another owner's or a used pick is ignored.
 	RoutePick string `json:"routePick,omitempty"`
+	// Simple (easy start) adds the hub's fixed instruction for a person who
+	// is not a programmer (runs.SimpleInstruction) to an implement run's
+	// extra instructions. It lifts no gate.
+	Simple bool `json:"simple,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

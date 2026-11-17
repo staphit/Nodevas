@@ -5,7 +5,9 @@
 // workspace panel's own confirmations). A run with a pull request merges
 // through it, from its workspace. A run the app's own runner asks about
 // (single-user edition) carries its "Start this run?" card under its row; in
-// that edition there is one machine, so no Runner column.
+// that edition there is one machine, so no Runner column, and a finished
+// result on it is looked at and applied with the plain result buttons in
+// place of Merge locally.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,18 +17,21 @@ import { useViewer } from "../components/SignIn";
 import { agentWho } from "../game/labels";
 import { IconCheck, IconCopy } from "../icons";
 import { useI18n } from "../i18n";
-import { useEdition } from "../runners/edition";
+import { useEdition, useLocalRunner } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
-import { confirmDiscard, confirmMergeLocal } from "../runs/confirmWorkspace";
+import { confirmApply, confirmDiscard, confirmMergeLocal } from "../runs/confirmWorkspace";
 import { RunStatusBadge, WorkspaceChip } from "../runs/NodeRuns";
 import { OfferAskCard, runAsks } from "../runs/OfferAskCard";
 import { declineText } from "../runs/offerReasons";
 import { openRunWorkspace } from "../runs/openWorkspace";
+import { ResultActions } from "../runs/ResultActions";
+import { resultState } from "../runs/resultState";
 import { CIBadge, PRChip } from "../runs/RunChanges";
 import { formatCompact, formatCost, safeExternalUrl, totalTokens } from "../runs/runFormat";
 import { useRuns } from "../runs/runStore";
 import { useWorkspace } from "../runs/workspaceStore";
+import { useSimpleMode } from "../simple/simpleMode";
 import { elapsedMs, formatElapsed } from "./control";
 import { useGlobalAgents } from "./globalAgentsStore";
 
@@ -91,6 +96,9 @@ export function GlobalAgentList() {
   const runners = useRunners((s) => s.runners);
   const viewer = useViewer();
   const single = useEdition() === "single";
+  // Simple: no branch or pull request words, in the columns or the row.
+  const simple = useSimpleMode();
+  const localRunnerId = useLocalRunner()?.id;
   const now = useNow();
 
   // The run store's copy is the fresher one: a cancel or a workspace action
@@ -138,11 +146,11 @@ export function GlobalAgentList() {
           <th scope="col">{t("globalAgents.col.status")}</th>
           <th scope="col">{t("globalAgents.col.agent")}</th>
           <th scope="col">{t("globalAgents.col.task")}</th>
-          <th scope="col">{t("globalAgents.col.branch")}</th>
+          {!simple && <th scope="col">{t("globalAgents.col.branch")}</th>}
           {!single && <th scope="col">{t("globalAgents.col.runner")}</th>}
           <th scope="col">{t("globalAgents.col.elapsed")}</th>
           <th scope="col">{t("globalAgents.col.usage")}</th>
-          <th scope="col">{t("globalAgents.col.pr")}</th>
+          {!simple && <th scope="col">{t("globalAgents.col.pr")}</th>}
           <th scope="col">
             <span className="visually-hidden">{t("globalAgents.col.actions")}</span>
           </th>
@@ -157,6 +165,8 @@ export function GlobalAgentList() {
             focused={run.id === focus}
             own={own(run.runnerId)}
             single={single}
+            simple={simple}
+            plain={resultState(run, localRunnerId) !== "none"}
           />
         ))}
       </tbody>
@@ -250,8 +260,9 @@ function BranchCell({ run }: { run: Run }) {
   );
 }
 
-function usageText(t: Translate, run: Run): string {
-  const tokens = totalTokens(run.usage);
+/** What a run used: its tokens and cost; in Simple only what it cost. */
+function usageText(t: Translate, run: Run, simple = false): string {
+  const tokens = simple ? 0 : totalTokens(run.usage);
   const cost = formatCost(run.usage?.costUsd ?? run.costUsd);
   return [tokens > 0 ? t("station.control.tokens", { tokens: formatCompact(tokens) }) : "", cost]
     .filter(Boolean)
@@ -264,6 +275,8 @@ function GlobalAgentRow({
   focused,
   own,
   single,
+  simple,
+  plain,
 }: {
   run: Run;
   now: number;
@@ -271,6 +284,11 @@ function GlobalAgentRow({
   own: boolean;
   /** Single-user edition: no Runner column, this computer's words. */
   single: boolean;
+  /** Simple mode: no Branch or Pull request column, plain stop words. */
+  simple: boolean;
+  /** A result on this computer's own runner (resultState): the plain
+   * result buttons stand in for Merge locally and say its refusals. */
+  plain: boolean;
 }) {
   const { t } = useI18n();
   const cancelling = useRuns((s) => Boolean(s.cancelling[run.id]));
@@ -278,19 +296,25 @@ function GlobalAgentRow({
   const cancelError = useRuns((s) => s.cancelErrors[run.id]);
   const acting = useWorkspace((s) => s.acting[run.id]);
   const actionError = useWorkspace((s) => s.actionErrors[run.id]);
+  // A refused apply is the result buttons' to say; a refused discard is the
+  // row's own, as on any other row.
+  const applyRefused = useWorkspace((s) => s.actionKinds[run.id] === "merge");
   const who = agentWho(run.agent, run.model);
   const runner = runnerDisplayName(t, run.runnerName) || run.runnerId;
   const interactive = runInteractive(run);
   const final = runFinal(run.status);
   const local = localActions(run, own);
-  const usage = usageText(t, run);
-  const noPRChip = run.noPR && final && !run.workspace && !run.prUrl;
+  const merge = local.merge && !plain;
+  const usage = usageText(t, run, simple);
+  const noPRChip = !simple && run.noPR && final && !run.workspace && !run.prUrl;
   const declined = run.status === "declined" ? declineText(t, run, single) : "";
 
   const onStop = async () => {
     const ok = await confirmAction({
       title: t("globalAgents.action.stopTitle", { agent: who }),
-      description: t("globalAgents.action.stopBody", { runner, branch: run.branch || run.base }),
+      description: simple
+        ? t("globalAgents.simple.stopBody")
+        : t("globalAgents.action.stopBody", { runner, branch: run.branch || run.base }),
       confirmLabel: t("globalAgents.action.stop"),
       cancelLabel: t("runs.keep"),
       tone: "danger",
@@ -298,7 +322,9 @@ function GlobalAgentRow({
     if (ok) await useGlobalAgents.getState().cancel(run.id);
   };
   const onMerge = async () => {
-    if (await confirmMergeLocal(t, run, null)) await useWorkspace.getState().mergeLocal(run);
+    // Simple: the same merge, asked in the result buttons' words.
+    const ok = simple ? await confirmApply(t, run.repoName) : await confirmMergeLocal(t, run, null);
+    if (ok) await useWorkspace.getState().mergeLocal(run);
   };
   const onDiscard = async () => {
     if (await confirmDiscard(t, run, null)) await useWorkspace.getState().discard(run);
@@ -334,9 +360,11 @@ function GlobalAgentRow({
         <td data-label={t("globalAgents.col.task")} className="global-agent-task">
           {run.title || run.id}
         </td>
-        <td data-label={t("globalAgents.col.branch")}>
-          <BranchCell run={run} />
-        </td>
+        {!simple && (
+          <td data-label={t("globalAgents.col.branch")}>
+            <BranchCell run={run} />
+          </td>
+        )}
         {!single && <td data-label={t("globalAgents.col.runner")}>{runner}</td>}
         <td data-label={t("globalAgents.col.elapsed")} className="global-agent-num">
           {formatElapsed(elapsedMs(run, now))}
@@ -344,16 +372,19 @@ function GlobalAgentRow({
         <td data-label={t("globalAgents.col.usage")} className="global-agent-num">
           {usage || "—"}
         </td>
-        <td data-label={t("globalAgents.col.pr")}>
-          <span className="global-agent-chips">
-            <PRChip run={run} />
-            {run.prUrl && <CIBadge status={run.ciStatus} />}
-          </span>
-        </td>
+        {!simple && (
+          <td data-label={t("globalAgents.col.pr")}>
+            <span className="global-agent-chips">
+              <PRChip run={run} />
+              {run.prUrl && <CIBadge status={run.ciStatus} />}
+            </span>
+          </td>
+        )}
         <td className="global-agent-actions">
+          {plain && <ResultActions run={run} compact />}
           <span className="global-agent-buttons">
             <button type="button" className="ap-btn" onClick={() => openRunWorkspace(run.id)}>
-              {t("globalAgents.action.workspace")}
+              {t(simple ? "globalAgents.simple.open" : "globalAgents.action.workspace")}
             </button>
             {stopping ? (
               <button type="button" className="ap-btn" disabled>
@@ -371,9 +402,9 @@ function GlobalAgentRow({
                 </button>
               )
             )}
-            {local.merge && (
+            {merge && (
               <button type="button" className="ap-btn" disabled={Boolean(acting)} onClick={() => void onMerge()}>
-                {t("globalAgents.action.merge")}
+                {t(simple ? "result.apply" : "globalAgents.action.merge")}
               </button>
             )}
             {local.discard && (
@@ -387,7 +418,7 @@ function GlobalAgentRow({
               </button>
             )}
           </span>
-          {(cancelError || actionError) && (
+          {(cancelError || (actionError && !(plain && applyRefused))) && (
             <span className="global-agent-error" role="alert">
               {cancelError || actionError}
             </span>
@@ -396,7 +427,7 @@ function GlobalAgentRow({
       </tr>
       {runAsks(run) && (
         <tr className="global-agent-ask-row">
-          <td colSpan={single ? 8 : 9}>
+          <td colSpan={(single ? 8 : 9) - (simple ? 2 : 0)}>
             <OfferAskCard run={run} />
           </td>
         </tr>

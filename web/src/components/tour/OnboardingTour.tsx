@@ -16,7 +16,9 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { firstRunHolding as firstRunHoldingNow, useFirstRunHolding } from "../../firstRun/gate";
 import { useI18n } from "../../i18n";
+import { useEdition } from "../../runners/edition";
 import { useApp, usePreference } from "../../store";
 import { TOUR_CHAPTERS, type TourChapter, type TourStep } from "./chapters";
 import { useStartScreenVisible } from "../StartScreen";
@@ -106,6 +108,13 @@ export function OnboardingTour() {
   // A new workspace opens on the start screen; the invitation waits for it,
   // so a first launch shows one dialog at a time.
   const startScreenVisible = useStartScreenVisible();
+  // So do the first-run questions (both editions; a team hub never asks).
+  // In the single-user edition the questions may land someone in Station,
+  // and the tour's targets are on the board, so it waits for the board too.
+  const firstRunHolding = useFirstRunHolding();
+  const single = useEdition() === "single";
+  const projectMode = usePreference("projectMode");
+  const offBoard = single && projectMode !== "info";
 
   // Before the schema entry lands (or on a fresh profile) the store may hand
   // back undefined; treat that as "nothing done yet".
@@ -194,12 +203,12 @@ export function OnboardingTour() {
       promptedRef.current = true;
       return;
     }
-    if (startScreenVisible) return;
+    if (startScreenVisible || firstRunHolding || offBoard) return;
     // Another dialog opened meanwhile (Ctrl+K within the delay): ask again
     // shortly, once it has closed, rather than stacking a second modal on it.
     let timer = 0;
     const invite = () => {
-      if (otherModalOpen()) {
+      if (otherModalOpen() || firstRunHoldingNow()) {
         timer = window.setTimeout(invite, WELCOME_RECHECK);
         return;
       }
@@ -208,7 +217,7 @@ export function OnboardingTour() {
     };
     timer = window.setTimeout(invite, WELCOME_DELAY);
     return () => window.clearTimeout(timer);
-  }, [tourPrompt, startScreenVisible]);
+  }, [tourPrompt, startScreenVisible, firstRunHolding, offBoard]);
 
   const acceptTour = useCallback(() => {
     updateUIPreference("tourPrompt", "accepted");

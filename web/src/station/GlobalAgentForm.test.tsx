@@ -13,7 +13,9 @@ import {
   type RunnerLoad,
 } from "../api";
 import { translate } from "../i18n";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
@@ -474,6 +476,59 @@ describe("GlobalAgentForm", () => {
     unmount();
     render(<GlobalAgentForm />);
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+  });
+});
+
+// Simple mode (single-user edition): finished work stays on this computer,
+// so there is no pull request to ask for, and the hub adds its plain-words
+// instruction to the task.
+describe("GlobalAgentForm in Simple mode", () => {
+  const PR = "Open a pull request when done";
+
+  function simpleForm(experience: "simple" | "full") {
+    viewer.current = null;
+    useApp.setState((state) => ({ preferences: { ...state.preferences, experience } }));
+    seedRunners([localRunner()]);
+    return render(
+      <EditionProvider edition="single">
+        <GlobalAgentForm />
+      </EditionProvider>,
+    );
+  }
+
+  it("sends simple and no pull request, with no pull request box", async () => {
+    const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(started({ runnerId: "local1" }));
+    simpleForm("simple");
+    expect(screen.queryByRole("checkbox", { name: PR })).not.toBeInTheDocument();
+    fireEvent.change(taskBox(), { target: { value: "Make a page for my bakery" } });
+    fireEvent.click(startButton());
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledWith({
+      runnerId: "local1",
+      repoId: "repo1",
+      agent: "claude",
+      model: "sonnet",
+      task: "Make a page for my bakery",
+      openPR: false,
+      simple: true,
+    });
+  });
+
+  it("is unchanged with Everything", async () => {
+    const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(started({ runnerId: "local1" }));
+    simpleForm("full");
+    fireEvent.click(screen.getByRole("checkbox", { name: PR }));
+    fireEvent.change(taskBox(), { target: { value: "Fix it" } });
+    fireEvent.click(startButton());
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledWith({
+      runnerId: "local1",
+      repoId: "repo1",
+      agent: "claude",
+      model: "sonnet",
+      task: "Fix it",
+      openPR: true,
+    });
   });
 });
 

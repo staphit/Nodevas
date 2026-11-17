@@ -14,7 +14,7 @@ import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } fro
 
 import { useI18n } from "../../i18n";
 import type { PreferenceValue } from "../../preferences";
-import { runnerDisplayName } from "../../runners/runnerName";
+import { useSimpleMode } from "../../simple/simpleMode";
 import type { ControlRow } from "../../station/control";
 import { StationMenu, type StationMenuItem } from "../../station/StationMenu";
 import { useApp, usePreference } from "../../store";
@@ -27,6 +27,8 @@ import {
   compactSummary,
   itemLabel,
   rackLabel,
+  rackName,
+  runnersActionLabel,
   type LabelOf,
   type TitleOf,
   type Translate,
@@ -157,7 +159,9 @@ function CardArt({ group }: { group: StoryGroup }) {
 function RackCard({ rack }: { rack: Rack }) {
   const { t } = useI18n();
   const { dispatch } = useGameActions();
-  const label = rackLabel(t, rack);
+  // Simple: the built-in runner is this computer, opening its settings.
+  const simple = useSimpleMode();
+  const label = rackLabel(t, rack, simple);
   const slots = Math.min(rack.slots ?? 0, MAX_SLOTS);
   return (
     <button
@@ -167,7 +171,7 @@ function RackCard({ rack }: { rack: Rack }) {
       title={label}
       onClick={() => dispatch(rack.target)}
     >
-      <span className="px-story-rack-name">{runnerDisplayName(t, rack.name) || t("game.room.unnamed")}</span>
+      <span className="px-story-rack-name">{rackName(t, rack, simple)}</span>
       <span className="px-story-slots" aria-hidden="true">
         {Array.from({ length: slots }, (_, i) => (
           <span key={i} className={i < rack.busy ? "is-busy" : undefined} />
@@ -216,6 +220,8 @@ export function StoryRoom({
   const { t, language } = useI18n();
   const { dispatch } = useGameActions();
   const { say } = useStoryWords();
+  // Simple: the runners' place is this computer, in plain words.
+  const simple = useSimpleMode();
   const places = useMemo(
     () => storyPlaces(building, actorsById, cast.figureOf),
     [building, actorsById, cast.figureOf],
@@ -259,7 +265,7 @@ export function StoryRoom({
   const builtIn = (id: ThemePlaceId) => t(BUILT_IN[id]);
   const nameOf = (id: ThemePlaceId) => cast.placeName(id, language) || builtIn(id);
   const countOf = (spot: StoryPlace) => {
-    if (spot.id === "runners") return say("runnerCount", { count: spot.count });
+    if (spot.id === "runners") return simple ? t("simple.rack.count") : say("runnerCount", { count: spot.count });
     return spot.count ? say("count", { count: spot.count }) : say("nobody");
   };
   const name = nameOf(place);
@@ -271,9 +277,10 @@ export function StoryRoom({
   let narratorChoices: StationMenuItem[] | undefined;
   if (place === "runners") {
     const busy = racks.reduce((sum, rack) => sum + rack.busy, 0);
-    narration = racks.length ? say("runnersLine", { count: racks.length, busy }) : t("game.serverRoom.none");
+    if (simple) narration = racks.length ? t("simple.rack.line", { busy }) : t("simple.rack.none");
+    else narration = racks.length ? say("runnersLine", { count: racks.length, busy }) : t("game.serverRoom.none");
     narratorChoices = [
-      { id: "runners", label: t("game.action.runners"), onSelect: () => dispatch({ kind: "runners" }) },
+      { id: "runners", label: runnersActionLabel(t, simple), onSelect: () => dispatch({ kind: "runners" }) },
     ];
   } else if (notices.length) {
     narration = say("noticesLine", { count: notices.length });
@@ -545,7 +552,7 @@ export function StoryRoom({
                         <button
                           type="button"
                           className="px-story-rack is-more"
-                          aria-label={`${t("game.rack.more", { count: racks.length - MAX_RACKS })}. ${t("game.action.runners")}`}
+                          aria-label={`${t(simple ? "simple.rack.more" : "game.rack.more", { count: racks.length - MAX_RACKS })}. ${runnersActionLabel(t, simple)}`}
                           onClick={() => dispatch({ kind: "runners" })}
                         >
                           +{racks.length - MAX_RACKS}

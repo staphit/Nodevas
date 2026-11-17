@@ -3,6 +3,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 
 // The built-in runner's settings in the app ("This computer", 這台電腦;
 // runnerwire/settings.go): what each agent may do, whether every run is
-// asked about, which full-access agents' automatic runs start unasked, and
-// the pull request options. Only the built-in runner takes them from the
+// asked about, which full-access agents' automatic runs start unasked, the
+// pull request options, whether an agent's commands are asked about
+// (permissionRelay), and an agent program added by hand (agentpath.go). Only the built-in runner takes them from the
 // hub; any other runner refuses them (runnerwire.SettingsErrLocalOnly), since
 // a team member changes their PC's settings on that PC.
 //
@@ -121,6 +123,7 @@ func localSettings(cfg *Config, path string) *runnerwire.LocalSettings {
 		AutoPR:             cfg.AutoPROn(),
 		PRDraft:            cfg.PRDraft,
 		ConfigPath:         path,
+		AgentPaths:         maps.Clone(cfg.AgentPaths),
 	}
 	for _, kind := range Kinds {
 		local.Permission[kind], local.PermissionDetail[kind] = PermissionLevel(cfg, kind)
@@ -129,12 +132,20 @@ func localSettings(cfg *Config, path string) *runnerwire.LocalSettings {
 }
 
 // builtInCaps are the capabilities only the built-in runner has: it takes
-// the app's answers to its asks, and repo admin.
+// the app's answers to its asks, and repo admin. CapRunPreview is one too,
+// offered only while runPreview is on.
 var builtInCaps = []string{runnerwire.CapAppAccept, runnerwire.CapRepoAdmin}
 
+// builtInOnly reports a capability no runner but the built-in one may say it
+// has, whatever the hello it starts from says.
+func builtInOnly(cp string) bool {
+	return slices.Contains(builtInCaps, cp) || cp == runnerwire.CapRunPreview
+}
+
 // refreshInfo is info, a hello, with what the runner's settings say now:
-// its repos, run limit, auto-accept policy and, for the built-in runner, its
-// capabilities and Info.Local. It runs no agent CLI, so it is quick enough
+// its repos, run limit, auto-accept policy, whether it relays permission
+// prompts and, for the built-in runner, its capabilities and Info.Local. It
+// runs no agent CLI, so it is quick enough
 // for a hello sent while the hub waits for an answer.
 func (c *Client) refreshInfo(info runnerwire.Info) runnerwire.Info {
 	cfg := c.cfg()
@@ -146,10 +157,14 @@ func (c *Client) refreshInfo(info runnerwire.Info) runnerwire.Info {
 	if cfg.RemoteSettingsOn() {
 		info.MaxConcurrentCeiling = cfg.MaxConcurrentCeilingOrDefault()
 	}
-	caps := slices.DeleteFunc(slices.Clone(info.Capabilities), func(cp string) bool { return slices.Contains(builtInCaps, cp) })
+	info.PermissionRelay = cfg.PermissionRelay
+	caps := slices.DeleteFunc(slices.Clone(info.Capabilities), builtInOnly)
 	info.Local = nil
 	if c.BuiltIn() {
 		caps = append(caps, builtInCaps...)
+		if cfg.RunPreviewOn() {
+			caps = append(caps, runnerwire.CapRunPreview)
+		}
 		info.Local = localSettings(cfg, c.ConfigPath)
 	}
 	info.Capabilities = caps
@@ -195,7 +210,7 @@ var errNotSaved = errors.New("applied until the runner stops; not saved")
 // localRequest reports whether req sets anything but maxConcurrent.
 func localRequest(req runnerwire.SettingsRequest) bool {
 	return req.Permission != nil || req.AskEveryRun != nil || req.ShellWithoutAsking != nil ||
-		req.AutoPR != nil || req.PRDraft != nil || req.Redetect
+		req.AutoPR != nil || req.PRDraft != nil || req.AgentPath != nil || req.PermissionRelay != nil || req.Redetect
 }
 
 // checkLocalRequest vets req's local fields before anything applies.
@@ -213,10 +228,20 @@ func checkLocalRequest(req runnerwire.SettingsRequest) error {
 			return fmt.Errorf("unknown agent kind %q", kind)
 		}
 	}
+	if len(req.AgentPath) > 1 {
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid, "agentPath: one agent at a time"}
+	}
+	for kind := range req.AgentPath {
+		if !slices.Contains(Kinds, kind) {
+			return &agentPathError{runnerwire.AgentPathRefusedInvalid, fmt.Sprintf("agentPath: unknown agent kind %q", kind)}
+		}
+	}
 	return nil
 }
 
-// editLocal is the change req's local fields make.
+// editLocal is the change req's local fields make, the same on any config
+// however often it runs. An agent path in req is the one applySettings
+// checked and resolved; "" clears it.
 func editLocal(req runnerwire.SettingsRequest) func(*Config) error {
 	return func(cfg *Config) error {
 		for _, kind := range sortedKeys(req.Permission) {
@@ -236,6 +261,22 @@ func editLocal(req runnerwire.SettingsRequest) func(*Config) error {
 		}
 		if req.PRDraft != nil {
 			cfg.PRDraft = *req.PRDraft
+		}
+		if req.PermissionRelay != nil {
+			cfg.PermissionRelay = *req.PermissionRelay
+		}
+		for _, kind := range sortedKeys(req.AgentPath) {
+			if path := req.AgentPath[kind]; path != "" {
+				if cfg.AgentPaths == nil {
+					cfg.AgentPaths = map[string]string{}
+				}
+				cfg.AgentPaths[kind] = path
+			} else {
+				delete(cfg.AgentPaths, kind)
+			}
+		}
+		if len(cfg.AgentPaths) == 0 {
+			cfg.AgentPaths = nil
 		}
 		return nil
 	}

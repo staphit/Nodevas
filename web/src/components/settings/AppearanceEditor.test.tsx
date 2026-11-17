@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { OPEN_FIRST_RUN_EVENT } from "../../firstRun/gate";
 import { readPreferences } from "../../preferences";
+import { EditionProvider } from "../../runners/edition";
 import { useApp } from "../../store";
 import { AppearanceEditor, LayoutEditor } from "./AppearanceEditor";
 
@@ -34,6 +36,27 @@ describe("AppearanceEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Help and shortcuts" }));
     expect(opened).toHaveBeenCalledWith({ view: "help" });
     window.removeEventListener("nodevas-command-palette", listener);
+  });
+
+  it("asks the starting questions again in the single-user edition", () => {
+    const opened = vi.fn();
+    window.addEventListener(OPEN_FIRST_RUN_EVENT, opened);
+    render(
+      <EditionProvider edition="single">
+        <AppearanceEditor />
+      </EditionProvider>,
+    );
+
+    expect(screen.getByText("Starting questions")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Answer them again" }));
+    expect(opened).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_FIRST_RUN_EVENT, opened);
+  });
+
+  it("has no starting questions on a team hub", () => {
+    render(<AppearanceEditor />);
+    expect(screen.queryByText("Starting questions")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Answer them again" })).not.toBeInTheDocument();
   });
 
   it("edits the same editor preferences the drawer uses", () => {

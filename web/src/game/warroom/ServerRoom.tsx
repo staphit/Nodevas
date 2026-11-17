@@ -6,9 +6,9 @@
 import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
-import { runnerDisplayName } from "../../runners/runnerName";
+import { useSimpleMode } from "../../simple/simpleMode";
 import { useGameActions } from "../GameActions";
-import { rackLabel } from "../labels";
+import { rackLabel, rackName, runnersActionLabel } from "../labels";
 import { PixelSprite } from "../pixel/PixelSprite";
 import { RACK } from "../pixel/sprites";
 import type { Rack } from "../world";
@@ -21,7 +21,9 @@ const RackButton = memo(function RackButton({ rack }: { rack: Rack }) {
   const { t } = useI18n();
   const { dispatch } = useGameActions();
   const parts = useMemo(() => rackScene(rack.online, rack.busy, rack.slots), [rack.online, rack.busy, rack.slots]);
-  const label = rackLabel(t, rack);
+  // Simple: the built-in runner is this computer, opening its settings.
+  const simple = useSimpleMode();
+  const label = rackLabel(t, rack, simple);
   return (
     <button
       type="button"
@@ -33,7 +35,7 @@ const RackButton = memo(function RackButton({ rack }: { rack: Rack }) {
       <span className="px-art">
         <PixelSprite parts={parts} width={RACK.w} height={RACK.h} />
       </span>
-      <span className="px-rack-name">{runnerDisplayName(t, rack.name) || t("game.room.unnamed")}</span>
+      <span className="px-rack-name">{rackName(t, rack, simple)}</span>
       <span className="px-rack-load">{rack.slots ? `${rack.busy}/${rack.slots}` : `▶ ${rack.busy}`}</span>
     </button>
   );
@@ -42,6 +44,7 @@ const RackButton = memo(function RackButton({ rack }: { rack: Rack }) {
 export function ServerRoom({ racks }: { racks: Rack[] }) {
   const { t } = useI18n();
   const { dispatch } = useGameActions();
+  const simple = useSimpleMode();
   const shown = racks.slice(0, MAX_RACKS);
   const more = racks.length - shown.length;
   return (
@@ -55,14 +58,16 @@ export function ServerRoom({ racks }: { racks: Rack[] }) {
           <button
             type="button"
             className="px-rack-more"
-            aria-label={`${t("game.rack.more", { count: more })}. ${t("game.action.runners")}`}
+            aria-label={`${t(simple ? "simple.rack.more" : "game.rack.more", { count: more })}. ${runnersActionLabel(t, simple)}`}
             onClick={() => dispatch({ kind: "runners" })}
           >
             +{more}
           </button>
         )}
       </div>
-      {racks.length === 0 && <p className="px-room-note">{t("game.serverRoom.none")}</p>}
+      {racks.length === 0 && (
+        <p className="px-room-note">{t(simple ? "simple.rack.none" : "game.serverRoom.none")}</p>
+      )}
     </section>
   );
 }

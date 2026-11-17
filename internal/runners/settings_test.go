@@ -180,6 +180,43 @@ func TestSettingsRelayRunnerGone(t *testing.T) {
 	}
 }
 
+// An agent path and the permission relay are the built-in runner's own
+// settings: a classic runner is never even sent them.
+func TestSettingsRelayAgentPathAndRelayAreLocal(t *testing.T) {
+	on := false
+	for name, req := range map[string]runnerwire.SettingsRequest{
+		"agentPath":       {AccountID: ann.ID, AgentPath: map[string]string{"claude": "/opt/claude"}},
+		"agentPath clear": {AccountID: ann.ID, AgentPath: map[string]string{"claude": ""}},
+		"agentPath empty": {AccountID: ann.ID, AgentPath: map[string]string{}},
+		"permissionRelay": {AccountID: ann.ID, PermissionRelay: &on},
+	} {
+		if !LocalOnly(req) {
+			t.Errorf("%s: not local", name)
+		}
+	}
+	if LocalOnly(settingsReq(ann.ID, 2)) {
+		t.Error("maxConcurrent alone is local")
+	}
+
+	reg, _ := newRegistry(t)
+	relay := NewSettingsRelay(reg)
+	relay.Timeout = 2 * time.Second
+	ctx := context.Background()
+	conn := newLLMConn()
+	classic := online(t, reg, "ann", settingsInfo(runnerwire.CapGlobalRuns, runnerwire.CapRemoteSettings), conn)
+	for name, req := range map[string]runnerwire.SettingsRequest{
+		"agentPath":       {AccountID: ann.ID, AgentPath: map[string]string{"claude": "/opt/claude"}},
+		"permissionRelay": {AccountID: ann.ID, PermissionRelay: &on},
+	} {
+		if _, err := relay.Request(ctx, classic.ID, req); !errors.Is(err, ErrSettingsLocalOnly) {
+			t.Errorf("%s on a classic runner: %v, want ErrSettingsLocalOnly", name, err)
+		}
+	}
+	if len(conn.got) != 0 {
+		t.Fatalf("a classic runner was sent %d requests", len(conn.got))
+	}
+}
+
 func TestSettable(t *testing.T) {
 	ceiling := settingsInfo(runnerwire.CapGlobalRuns, runnerwire.CapRemoteSettings)
 	noCeiling := ceiling

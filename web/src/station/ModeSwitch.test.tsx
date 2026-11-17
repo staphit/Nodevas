@@ -1,12 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
-import type { AgentAsk, Run, RunBudgetStatus } from "../api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api, type AgentAsk, type Run, type RunBudgetStatus } from "../api";
 import { useAgents } from "../agents/agentStore";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { useAutopilot, type WaitingTask } from "../autopilot/autopilotStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
+import { useGlobalAgents } from "./globalAgentsStore";
 import { ModeSwitch } from "./ModeSwitch";
 import { useStation } from "./stationStore";
 
@@ -36,8 +40,12 @@ beforeEach(() => {
   useStation.setState({ runs: [], project: "", loaded: false });
   useBudget.setState({ status: null });
   useAutopilot.setState({ waiting: [] });
-  useRuns.setState({ activeRuns: [] });
+  useRuns.setState({ activeRuns: [], globalById: {} });
+  useRunners.setState({ runners: [], loaded: false });
+  useGlobalAgents.setState({ runs: [], loaded: true });
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("ModeSwitch", () => {
   it("switches between Board and Station, and Station turns the workstation on", () => {
@@ -113,5 +121,69 @@ describe("ModeSwitch", () => {
     });
     render(<ModeSwitch />);
     expect(screen.getByRole("button", { name: "Station, 2 waiting on you" })).toBeTruthy();
+  });
+
+  // Single-user edition: a result on this computer waits to be applied, from
+  // the project's runs and the global agents alike, each counted once.
+  it("counts the results waiting to be applied, in the single-user edition only", () => {
+    const result = (over: Partial<Run>) =>
+      ({
+        id: "x",
+        nodeId: "n1",
+        runnerId: "local1",
+        status: "succeeded",
+        commit: "abc",
+        workspace: "",
+        createdAt: new Date(Date.now() - 120_000).toISOString(),
+        finishedAt: new Date(Date.now() - 60_000).toISOString(),
+        ...over,
+      }) as Run;
+    const global = result({ id: "g1", nodeId: "", global: true });
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    useStation.setState({ runs: [result({ id: "p1" })], project: "p", loaded: true });
+    useGlobalAgents.setState({ runs: [global] });
+    useRuns.setState({ globalById: { g1: global } });
+    const { unmount } = render(
+      <EditionProvider edition="single">
+        <ModeSwitch />
+      </EditionProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Station, 2 waiting on you" })).toBeTruthy();
+    unmount();
+    render(<ModeSwitch />);
+    expect(screen.getByRole("button", { name: "Station" }).querySelector(".mode-switch-badge")).toBeNull();
+  });
+
+  // Reopened on the board, Station never mounted: the global runs are loaded
+  // once for the badge, so a result that finished meanwhile is counted.
+  it("loads the global runs once in the single-user edition, for a result waiting since the last visit", async () => {
+    const finished = {
+      id: "g1",
+      nodeId: "",
+      global: true,
+      runnerId: "local1",
+      status: "succeeded",
+      commit: "abc",
+      workspace: "",
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+      finishedAt: new Date(Date.now() - 60_000).toISOString(),
+    } as Run;
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    useGlobalAgents.setState({ runs: [], loaded: false });
+    const list = vi.spyOn(api, "listGlobalRuns").mockResolvedValue({ runs: [finished], runners: [], more: false });
+    render(
+      <EditionProvider edition="single">
+        <ModeSwitch />
+      </EditionProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Station, 1 waiting on you" })).toBeTruthy();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads no global runs on a team hub", () => {
+    useGlobalAgents.setState({ runs: [], loaded: false });
+    const list = vi.spyOn(api, "listGlobalRuns");
+    render(<ModeSwitch />);
+    expect(list).not.toHaveBeenCalled();
   });
 });

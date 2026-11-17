@@ -15,6 +15,7 @@ import { useApp } from "../store";
 import { ThemePacksRow } from "../theme-pack/ThemePacksPanel";
 import { isBuiltinKind } from "../domain/graph/nodeTypes";
 import { defaultOfficeStyle } from "../game/officeStyle";
+import { ExperienceSetting } from "./ExperienceSetting";
 import type { SettingsPage, SettingsRow } from "./openSettings";
 import { listValue, SettingsDisclosure } from "./SettingsDisclosure";
 
@@ -34,6 +35,8 @@ export function GeneralSection({ row, toggleRow, leave }: SectionProps) {
   return (
     <section className="settings-page-pane settings-card" aria-label={t("settingsPage.page.general")}>
       <h2>{t("settingsPage.page.general")}</h2>
+      {/* Single-user edition only; renders nothing on a team hub. */}
+      <ExperienceSetting />
       <section className="settings-subsection" aria-label={t("settingsPage.part.appearance")}>
         <h3>{t("settingsPage.part.appearance")}</h3>
         <ProjectSettings tab="appearance" />

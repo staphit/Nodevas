@@ -7,8 +7,9 @@
 import type { RunnerLoad } from "../api";
 import { useI18n } from "../i18n";
 import { useEdition } from "../runners/edition";
-import { runnerDisplayName } from "../runners/runnerName";
+import { plainRunnerName } from "../runners/runnerName";
 import { formatCompact, formatCost } from "../runs/runFormat";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useGlobalAgents } from "./globalAgentsStore";
 
 const SETTABLE_BLOCKS = new Set(["offline", "outdated", "settings_off"]);
@@ -42,28 +43,36 @@ export function RunnerCapacity() {
 
 function CapacityRow({ load }: { load: RunnerLoad }) {
   const { t } = useI18n();
+  // Simple: this computer by name, what it cost without token counts, and
+  // no setting's name for the most it takes.
+  const simple = useSimpleMode();
   const saving = useGlobalAgents((s) => Boolean(s.saving[load.runnerId]));
   const note = useGlobalAgents((s) => s.settingNotes[load.runnerId]);
-  const runner = runnerDisplayName(t, load.name) || load.runnerId;
+  const runner = plainRunnerName(t, load.name, simple, true) || load.runnerId;
+  const label = plainRunnerName(t, load.name, simple) || load.runnerId;
   const max = Math.max(1, load.maxConcurrent || 1);
   const block = capacityBlock(load);
   const blockText = block ? t(`globalAgents.capacity.${block}`, { runner }) : "";
-  const ceilingText = load.ceiling > 0 ? t("globalAgents.capacity.ceiling", { max: load.ceiling, runner }) : "";
+  const ceilingText =
+    load.ceiling > 0 && !simple ? t("globalAgents.capacity.ceiling", { max: load.ceiling, runner }) : "";
   const locked = Boolean(block) || saving;
   const set = (value: number) => void useGlobalAgents.getState().setMaxConcurrent(load.runnerId, value);
-  const line = t("globalAgents.capacity.line", {
-    busy: load.busy,
-    max,
-    queued: load.queued,
-    cost: formatCost(load.today?.costUsd) || "$0",
-    tokens: formatCompact(load.today?.tokens ?? 0),
-  });
+  const cost = formatCost(load.today?.costUsd) || "$0";
+  const line = simple
+    ? t("simple.capacity.line", { busy: load.busy, max, queued: load.queued, cost })
+    : t("globalAgents.capacity.line", {
+        busy: load.busy,
+        max,
+        queued: load.queued,
+        cost,
+        tokens: formatCompact(load.today?.tokens ?? 0),
+      });
 
   return (
     <li className="global-capacity-row">
       <span className="global-capacity-who">
         <span className={`station-dot ${load.online ? "status-running" : "is-off"}`} aria-hidden="true" />
-        <span className="global-capacity-name">{runner}</span>
+        <span className="global-capacity-name">{label}</span>
       </span>
       <span className="global-capacity-line station-panel-meta">{line}</span>
       <span

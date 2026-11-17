@@ -1,3 +1,4 @@
+import { OPEN_FIRST_RUN_EVENT } from "../../firstRun/gate";
 import { useApp, usePreference } from "../../store";
 import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../../i18n";
 import { EDITOR_FONT_SIZE, EDITOR_MODES, TEXT_SCALE } from "../../preferences/schema";
@@ -7,7 +8,8 @@ import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
 
 /** Personal preferences — nothing here reaches the project files. The
- * theme, the language, the tour and help; the rest of the local preferences
+ * theme, the language, the tour, the starting questions (single-user
+ * edition) and help; the rest of the local preferences
  * are LayoutEditor's, a row of their own in Settings. Choices follow the
  * account (preferences/sync.ts); panel sizes stay on this device. */
 export function AppearanceEditor() {
@@ -75,6 +77,15 @@ export function AppearanceEditor() {
           {t("appearance.replayTour")}
         </button>
       </div>
+      {single && (
+        <div className="settings-row">
+          <span>{t("firstRun.settings.label")}</span>
+          {/* The questions open over whatever is on screen and move nobody. */}
+          <button type="button" onClick={() => window.dispatchEvent(new Event(OPEN_FIRST_RUN_EVENT))}>
+            {t("firstRun.settings.again")}
+          </button>
+        </div>
+      )}
       <div className="settings-row">
         <span>{t("appearance.help")}</span>
         <button type="button" onClick={openShortcutsHelp}>

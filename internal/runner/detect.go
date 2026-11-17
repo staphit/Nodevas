@@ -87,7 +87,8 @@ func (SystemCommands) Run(ctx context.Context, name string, args ...string) (str
 }
 
 // Kinds are the agent CLIs the runner looks for, in the order it reports them.
-// Each is looked up on PATH as adapter.Binary(kind).
+// Each is looked up on PATH as adapter.Binary(kind), unless its owner added
+// the program by hand (agentBinary).
 var Kinds = []string{"claude", "codex", "gemini", "opencode", "antigravity"}
 
 // versionTimeout bounds one `<cli> --version`. Some CLIs check for updates on
@@ -378,6 +379,9 @@ type sighting struct {
 // usable for runs. Every kind is asked at once, so a CLI that hangs on
 // --version costs its own timeout and hides no other agent.
 func (p *prober) versions(ctx context.Context, cfg *Config) []sighting {
+	// The added programs' folders on PATH first, as their runs will have
+	// them (agentpath.go).
+	syncAgentPathDirs(cfg)
 	seen := make([]sighting, len(Kinds))
 	var wg sync.WaitGroup
 	for i, kind := range Kinds {
@@ -389,13 +393,22 @@ func (p *prober) versions(ctx context.Context, cfg *Config) []sighting {
 
 func (p *prober) version(ctx context.Context, cfg *Config, kind string) sighting {
 	s := sighting{agent: runnerwire.Agent{Kind: kind, Models: ModelsFor(kind, cfg)}}
-	bin, err := p.cmds.LookPath(adapter.Binary(kind))
+	bin, err := agentBinary(p.cmds, cfg, kind)
+	if errors.Is(err, errAgentPathGone) {
+		s.agent.Error = agentPathGoneError(kind)
+		return s
+	}
 	if err != nil {
 		return s
 	}
 	s.version = p.ask(ctx, p.versionTimeout, kind, bin, "--version")
 	if s.version.err != nil {
-		s.agent.Error = helloText(s.version.row(), maxHelloField)
+		row := s.version.row()
+		if bin == agentPathFor(cfg, kind) {
+			// The added program's path stays on this computer.
+			row = strings.ReplaceAll(row, bin, adapter.Binary(kind))
+		}
+		s.agent.Error = helloText(row, maxHelloField)
 		return s
 	}
 	s.agent.Version = helloText(firstLine(s.version.out), 200)

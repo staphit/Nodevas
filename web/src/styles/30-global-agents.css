@@ -373,6 +373,104 @@
   font-style: italic;
 }
 
+/* ---- The describe box (SimpleAgentBox): StartScreen and Station ---- */
+.simple-agent-box {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+.simple-agent-title {
+  margin: 0;
+  font-weight: 600;
+}
+.simple-agent-form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.simple-agent-form textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.5;
+  resize: vertical;
+}
+.simple-agent-form textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.simple-agent-foot {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.simple-agent-using {
+  min-width: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.simple-agent-started {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.simple-agent-started.is-failed {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+/* Who does it: the ready agents, right in the box. */
+.simple-agent-who {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+}
+.simple-agent-who select {
+  min-height: 30px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.simple-agent-change {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+.simple-agent-change .run-field {
+  min-width: 160px;
+  flex: 1 1 160px;
+}
+.simple-agent-change-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.simple-agent-need {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 @media (max-width: 720px) {
   .station-head:has(.station-tabs) {
     flex-wrap: wrap;

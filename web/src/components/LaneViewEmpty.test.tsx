@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Actor } from "../api";
 import { translate } from "../i18n";
 import { readPreferences } from "../preferences";
+import { EditionProvider, type Edition } from "../runners/edition";
+import { useStation } from "../station/stationStore";
 import { useApp } from "../store";
 import { LaneView } from "./LaneView";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
@@ -86,5 +88,41 @@ describe("the empty board", () => {
     render(<LaneView variant="graph" {...paneProps} />);
     expect(screen.queryByRole("button", { name: example() })).toBeNull();
     expect(screen.getByRole("button", { name: translate("nodeCreate.create", "en") })).toBeInTheDocument();
+  });
+});
+
+// Single-user edition: someone who uses agents can hand the work to one
+// straight from the empty board. A plain planner (no workstation) and a team
+// hub see the board as before.
+describe("the empty board's Ask an agent", () => {
+  const ask = () => translate("lane.emptyAskAgent", "en");
+
+  function board(edition: Edition, workstation: boolean) {
+    useApp.setState((state) => ({
+      preferences: { ...state.preferences, agentWorkstation: workstation, projectMode: "info" },
+    }));
+    return render(
+      <EditionProvider edition={edition}>
+        <LaneView variant="graph" {...paneProps} />
+      </EditionProvider>,
+    );
+  }
+
+  it("opens Station's global tab when the workstation is shown", async () => {
+    const user = userEvent.setup();
+    board("single", true);
+    await user.click(screen.getByRole("button", { name: ask() }));
+    expect(useApp.getState().preferences.projectMode).toBe("station");
+    expect(useStation.getState().tab).toBe("global");
+  });
+
+  it("is not offered to a plain planner", () => {
+    board("single", false);
+    expect(screen.queryByRole("button", { name: ask() })).toBeNull();
+  });
+
+  it("is not offered on a team hub", () => {
+    board("team", true);
+    expect(screen.queryByRole("button", { name: ask() })).toBeNull();
   });
 });

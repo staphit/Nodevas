@@ -35,9 +35,11 @@ var (
 
 // LocalOnly reports whether req asks for more than maxConcurrent: settings
 // only the built-in runner takes from the app (runnerwire.SettingsRequest).
+// An agent path is code its runner will run, so any agentPath at all, even
+// an empty one, counts.
 func LocalOnly(req runnerwire.SettingsRequest) bool {
 	return len(req.Permission) > 0 || req.AskEveryRun != nil || len(req.ShellWithoutAsking) > 0 ||
-		req.AutoPR != nil || req.PRDraft != nil || req.Redetect
+		req.AutoPR != nil || req.PRDraft != nil || req.AgentPath != nil || req.PermissionRelay != nil || req.Redetect
 }
 
 // DefaultSettingsTimeout bounds one settings change, and

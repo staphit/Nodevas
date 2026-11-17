@@ -11,10 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,6 +53,11 @@ type Config struct {
 	repoTests map[string]repoTest
 	// Models replaces the built-in model list for an agent kind.
 	Models map[string][]runnerwire.Model `json:"models,omitempty"`
+	// AgentPaths is agent kind → the absolute path of the program the owner
+	// added for it ("I already have it"), as resolved when it was checked.
+	// It is used before PATH while the file is still there, and never goes
+	// into the hello's agents.
+	AgentPaths map[string]string `json:"agentPaths,omitempty"`
 
 	// Run settings, from W1 on; zero values mean the defaults below. They live
 	// here and not in the job because how freely an agent may act on this
@@ -111,6 +118,11 @@ type Config struct {
 	// Explorer (repobrowse.go): nil means the default, on; false refuses it
 	// and leaves runnerwire.CapRepoBrowse out of the hello.
 	RepoBrowse *bool `json:"repoBrowse,omitempty"`
+	// RunPreview lets the built-in runner serve a finished run's web page on
+	// its own loopback preview listener (preview.go): nil means the default,
+	// on; false refuses run_preview and leaves runnerwire.CapRunPreview out
+	// of the hello. No other runner ever offers it.
+	RunPreview *bool `json:"runPreview,omitempty"`
 
 	// Pull requests, from W3 on.
 
@@ -255,6 +267,9 @@ func (c *Config) MergeMethodOrDefault() string {
 
 // InteractiveOn is Interactive with its default (on) applied.
 func (c *Config) InteractiveOn() bool { return c.Interactive == nil || *c.Interactive }
+
+// RunPreviewOn is RunPreview with its default (on) applied.
+func (c *Config) RunPreviewOn() bool { return c == nil || c.RunPreview == nil || *c.RunPreview }
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
@@ -419,7 +434,7 @@ func (c *Config) RelaysPermissions(kind string) bool {
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"permissionRelay", "autoAccept", "interactive", "repoBrowse", "httpLoopbackHub",
+	"permissionRelay", "agentPath", "autoAccept", "interactive", "repoBrowse", "runPreview", "httpLoopbackHub",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"workspaceActions", "globalRuns", "remoteSettings", "maxConcurrentCeiling",
 	"askEveryRun", "shellWithoutAsking",
@@ -430,7 +445,10 @@ var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutM
 // any of them. allowedTools takes one tool per value, or one value split at
 // top-level commas ("Edit,Bash(git diff, git log)" is two tools); "none"
 // clears it. prLabels takes labels one per value or comma-separated; "none"
-// means no labels.
+// means no labels. agentPath takes an agent kind and a path ([kind, path]);
+// [kind] or [kind, "default"] goes back to finding it on PATH. Set checks
+// only the path's shape (checkAgentPathShape); the file itself is checked
+// where it is set (checkAgentPath).
 func (c *Config) Set(key string, values []string) error {
 	canonical := ""
 	for _, k := range SettingKeys {
@@ -443,6 +461,9 @@ func (c *Config) Set(key string, values []string) error {
 	}
 	if len(values) == 0 {
 		return fmt.Errorf("%s needs a value", canonical)
+	}
+	if canonical == "agentPath" {
+		return c.setAgentPath(values)
 	}
 	if canonical != "allowedTools" && canonical != "prLabels" && canonical != "shellWithoutAsking" && len(values) != 1 {
 		return fmt.Errorf("%s takes one value", canonical)
@@ -642,6 +663,16 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("repoBrowse must be on or off")
 		}
 		c.RepoBrowse = &on
+	case "runPreview":
+		if reset {
+			c.RunPreview = nil
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("runPreview must be on or off")
+		}
+		c.RunPreview = &on
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil
@@ -797,6 +828,105 @@ func (c *Config) Set(key string, values []string) error {
 	return nil
 }
 
+// setAgentPath is Set("agentPath", [kind, path]) and its clearing forms,
+// [kind] and [kind, "default"]. A refusal changes nothing.
+func (c *Config) setAgentPath(values []string) error {
+	if len(values) > 2 {
+		return errors.New(`agentPath takes an agent kind and a path, or the kind alone (or with "default") to clear it`)
+	}
+	// "default" alone resets the setting, as it does every other: every
+	// agent goes back to PATH.
+	if len(values) == 1 && strings.EqualFold(strings.TrimSpace(values[0]), "default") {
+		c.AgentPaths = nil
+		return nil
+	}
+	kind, err := oneOf("agentPath's agent kind", strings.TrimSpace(values[0]), Kinds)
+	if err != nil {
+		return err
+	}
+	path := ""
+	if len(values) == 2 {
+		path = strings.TrimSpace(values[1])
+	}
+	if path == "" || strings.EqualFold(path, "default") {
+		delete(c.AgentPaths, kind)
+		if len(c.AgentPaths) == 0 {
+			c.AgentPaths = nil
+		}
+		return nil
+	}
+	if err := checkAgentPathShape(kind, path); err != nil {
+		return err
+	}
+	if c.AgentPaths == nil {
+		c.AgentPaths = map[string]string{}
+	}
+	c.AgentPaths[kind] = path
+	return nil
+}
+
+// agentPathError is an agent path refusal: refused is the
+// runnerwire.AgentPathRefused* code the app shows.
+type agentPathError struct {
+	refused string
+	msg     string
+}
+
+func (e *agentPathError) Error() string { return e.msg }
+
+// agentPathRefusal is err's runnerwire.AgentPathRefused* code, or
+// AgentPathRefusedInvalid for an error that carries none.
+func agentPathRefusal(err error) string {
+	var refusal *agentPathError
+	if errors.As(err, &refusal) && refusal.refused != "" {
+		return refusal.refused
+	}
+	return runnerwire.AgentPathRefusedInvalid
+}
+
+// agentPathExts are the endings an agent's program may have besides none.
+var agentPathExts = []string{".exe", ".cmd", ".bat"}
+
+// checkAgentPathShape checks an agent path without touching the disk: a
+// known agent kind, an absolute path of at most MaxAgentPathBytes with no
+// NUL, and a file named like the kind's program (adapter.Binary), bare or
+// with .exe, .cmd or .bat; ignoring case on Windows and macOS, whose file
+// systems do. Whether the file is there, where it is and whether it runs
+// is checkAgentPath's.
+func checkAgentPathShape(kind, path string) error {
+	if !slices.Contains(Kinds, kind) {
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid,
+			fmt.Sprintf("agentPath: %q is not an agent kind; kinds are %s", kind, strings.Join(Kinds, ", "))}
+	}
+	switch {
+	case path == "":
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid, "agentPath: no path given"}
+	case strings.ContainsRune(path, 0):
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid, "agentPath: the path contains a NUL"}
+	case len(path) > runnerwire.MaxAgentPathBytes:
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid,
+			fmt.Sprintf("agentPath: the path is over %d bytes", runnerwire.MaxAgentPathBytes)}
+	case !filepath.IsAbs(path):
+		return &agentPathError{runnerwire.AgentPathRefusedInvalid, "agentPath: the path must be absolute"}
+	}
+	foldCase := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	same := func(a, b string) bool {
+		if foldCase {
+			return strings.EqualFold(a, b)
+		}
+		return a == b
+	}
+	name := filepath.Base(path)
+	if ext := filepath.Ext(name); slices.ContainsFunc(agentPathExts, func(e string) bool { return same(ext, e) }) {
+		name = strings.TrimSuffix(name, ext)
+	}
+	if want := adapter.Binary(kind); !same(name, want) {
+		return &agentPathError{runnerwire.AgentPathRefusedName,
+			fmt.Sprintf("agentPath: %s's program is named %s, not %s", kind, want, filepath.Base(path))}
+	}
+	return nil
+}
+
 // oneOf matches value to one of choices, ignoring case, and returns the
 // choice as the CLI spells it.
 func oneOf(key, value string, choices []string) (string, error) {
@@ -886,6 +1016,7 @@ func (c *Config) Clone() *Config {
 			out.Models[kind] = slices.Clone(models)
 		}
 	}
+	out.AgentPaths = maps.Clone(c.AgentPaths)
 	out.AllowedTools = slices.Clone(c.AllowedTools)
 	out.ShellWithoutAsking = slices.Clone(c.ShellWithoutAsking)
 	if c.AutoAccept != nil {
@@ -896,7 +1027,7 @@ func (c *Config) Clone() *Config {
 		labels := slices.Clone(*c.PRLabels)
 		out.PRLabels = &labels
 	}
-	for _, p := range []**bool{&out.Interactive, &out.RepoBrowse, &out.AutoPR, &out.RemoteMerge,
+	for _, p := range []**bool{&out.Interactive, &out.RepoBrowse, &out.RunPreview, &out.AutoPR, &out.RemoteMerge,
 		&out.WorkspaceActions, &out.GlobalRuns, &out.RemoteSettings} {
 		if *p != nil {
 			v := **p

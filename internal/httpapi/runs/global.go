@@ -57,6 +57,7 @@ func (a *API) registerGlobal(api *gin.RouterGroup) {
 	g.GET("/:id/workspace/git/status", a.workspaceStatus)
 	g.POST("/:id/workspace/merge", a.workspaceMerge)
 	g.POST("/:id/workspace/discard", a.workspaceDiscard)
+	g.POST("/:id/workspace/preview", a.workspacePreview)
 }
 
 // personOnly refuses agents on every global agents route: an agent starting,

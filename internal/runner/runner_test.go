@@ -38,6 +38,8 @@ type fakeCommands struct {
 	waiting map[string]int
 	// gh answers RunIn (gh's calls); nil fails every one.
 	gh func(dir, stdin string, args []string) (string, error)
+	// onRun, if set, sees every Run's command as it starts.
+	onRun func(key string)
 }
 
 // hang makes every later Run of that command wait, as a CLI that never
@@ -108,7 +110,12 @@ func (f *fakeCommands) Run(ctx context.Context, name string, args ...string) (st
 	key := strings.Join(append([]string{name}, args...), " ")
 	f.mu.Lock()
 	f.calls = append(f.calls, key)
-	gate := f.hung[key]
+	gate, onRun := f.hung[key], f.onRun
+	f.mu.Unlock()
+	if onRun != nil {
+		onRun(key)
+	}
+	f.mu.Lock()
 	if gate != nil {
 		if f.waiting == nil {
 			f.waiting = map[string]int{}

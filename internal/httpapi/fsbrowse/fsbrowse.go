@@ -11,6 +11,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -133,15 +134,39 @@ func (a *API) postFSMkdir(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "path": target})
 }
 
-// getFSDirs powers the folder picker for "import from disk". It lists only
-// directories; an empty path returns the drive list on Windows (or / on
-// Unix). On a loopback server the caller already has full disk access, so
-// this exposes nothing new; on a networked one it is refused.
+// fileStem is what files= may name: an agent's program name (adapter.Binary),
+// nothing that could be a path or a pattern.
+var fileStem = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+
+// maxListedFiles caps the files one listing returns.
+const maxListedFiles = 50
+
+// getFSDirs powers the folder picker for "import from disk". It lists
+// directories, dot folders only with hidden=1; an empty path returns the
+// drive list on Windows (or / on Unix). home is the user's home folder ("" if
+// unknown), for a "my folder" shortcut. files=<stem> also lists the regular
+// files named stem with at most one ending (claude, claude.exe, claude.cmd),
+// up to maxListedFiles, for the add-agent picker: never other files, never a
+// file's contents. On a loopback server the caller already has full disk
+// access, so this exposes nothing new; on a networked one it is refused.
 func (a *API) getFSDirs(c *gin.Context) {
 	if a.refuseHostFilesystem(c) {
 		return
 	}
-	raw := strings.TrimSpace(c.Request.URL.Query().Get("path"))
+	query := c.Request.URL.Query()
+	stem, wantFiles := "", query.Has("files")
+	if wantFiles {
+		if stem = query.Get("files"); !fileStem.MatchString(stem) {
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("files must be a program name such as claude", "files 必須是程式名稱，例如 claude"))
+			return
+		}
+	}
+	hidden := query.Get("hidden") == "1"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	raw := strings.TrimSpace(query.Get("path"))
 	if raw == "" {
 		if runtime.GOOS == "windows" {
 			var drives []fsDirEntry
@@ -151,9 +176,11 @@ func (a *API) getFSDirs(c *gin.Context) {
 					drives = append(drives, fsDirEntry{Name: string(letter) + ":", Path: root})
 				}
 			}
-			c.JSON(http.StatusOK, map[string]any{
-				"path": "", "parent": "", "dirs": drives,
-			})
+			out := map[string]any{"path": "", "parent": "", "home": home, "dirs": drives}
+			if wantFiles {
+				out["files"] = []fsDirEntry{}
+			}
+			c.JSON(http.StatusOK, out)
 			return
 		}
 		raw = "/"
@@ -169,25 +196,50 @@ func (a *API) getFSDirs(c *gin.Context) {
 		return
 	}
 	dirs := make([]fsDirEntry, 0, len(entries))
+	files := []fsDirEntry{}
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		name := entry.Name()
+		if entry.IsDir() {
+			if hidden || !strings.HasPrefix(name, ".") {
+				dirs = append(dirs, fsDirEntry{Name: name, Path: filepath.Join(abs, name)})
+			}
 			continue
 		}
-		dirs = append(dirs, fsDirEntry{
-			Name: entry.Name(),
-			Path: filepath.Join(abs, entry.Name()),
+		if wantFiles && namedLike(name, stem) {
+			// Stat, not the entry's own type: npm puts a link to the program
+			// on PATH, and a link to a regular file counts as one.
+			full := filepath.Join(abs, name)
+			if info, err := os.Stat(full); err == nil && info.Mode().IsRegular() {
+				files = append(files, fsDirEntry{Name: name, Path: full})
+			}
+		}
+	}
+	byName := func(list []fsDirEntry) {
+		sort.Slice(list, func(i, j int) bool {
+			return strings.ToLower(list[i].Name) < strings.ToLower(list[j].Name)
 		})
 	}
-	sort.Slice(dirs, func(i, j int) bool {
-		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
-	})
+	byName(dirs)
 	parent := filepath.Dir(abs)
 	if parent == abs {
 		parent = "" // drive root: go back to the drive list
 	}
-	c.JSON(http.StatusOK, map[string]any{
-		"path": abs, "parent": parent, "dirs": dirs,
-	})
+	out := map[string]any{"path": abs, "parent": parent, "home": home, "dirs": dirs}
+	if wantFiles {
+		byName(files)
+		if len(files) > maxListedFiles {
+			files = files[:maxListedFiles]
+		}
+		out["files"] = files
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// namedLike reports whether a file name, less one ending, is stem, ignoring
+// case: claude, claude.exe and Claude.CMD for claude, not claude-old or
+// claude.tar.gz.
+func namedLike(name, stem string) bool {
+	return strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), stem)
 }
 
 // refuseHostFilesystem blocks the endpoints that hand out the server

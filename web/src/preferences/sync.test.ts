@@ -11,6 +11,7 @@ import {
 import {
   ACCOUNT_MARKER_KEY,
   COLD_START_WAIT_MS,
+  firstPreferenceLoad,
   flushPreferences,
   PENDING_KEY,
   REFETCH_GAP_MS,
@@ -476,6 +477,72 @@ describe("across origins", () => {
     await startPreferenceSync({ transport: fakeServerFor(server) });
     expect(readPreference("themePack")).toBe("magic");
     expect(readPreference("theme")).toBe("light");
+  });
+});
+
+describe("firstPreferenceLoad", () => {
+  /** What the promise settled to, read after the timers ran. */
+  function track(promise: Promise<boolean>): { value: boolean | undefined } {
+    const seen: { value: boolean | undefined } = { value: undefined };
+    void promise.then((value) => {
+      seen.value = value;
+    });
+    return seen;
+  }
+
+  it("is true once the account's copy is in", async () => {
+    configurePreferenceStorage(fakeStorage({ [ACCOUNT_MARKER_KEY]: "local" }));
+    const { server, transport } = fakeServer({ [THEME]: "light" });
+    let release!: () => void;
+    server.hold = new Promise((resolve) => {
+      release = resolve;
+    });
+    await startPreferenceSync({ transport, account: "local" });
+    const seen = track(firstPreferenceLoad());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.value).toBeUndefined();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.value).toBe(true);
+    expect(readPreference("theme")).toBe("light");
+    // Asked again later, the answer is the same.
+    expect(await firstPreferenceLoad()).toBe(true);
+  });
+
+  it("is true through the unclaimed path: loaded first, the account named after", async () => {
+    configurePreferenceStorage(fakeStorage());
+    const { transport } = fakeServer({ [THEME]: "light" });
+    await startPreferenceSync({ transport });
+    const seen = track(firstPreferenceLoad());
+    await vi.advanceTimersByTimeAsync(0);
+    // The values are in, but whose they are is not known yet.
+    expect(seen.value).toBeUndefined();
+    setPreferenceAccount("local");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.value).toBe(true);
+  });
+
+  it("is false when the load fails", async () => {
+    configurePreferenceStorage(fakeStorage({ [ACCOUNT_MARKER_KEY]: "local" }));
+    const { server, transport } = fakeServer();
+    server.failures.push(new Failure("retry"));
+    await startPreferenceSync({ transport, account: "local" });
+    const seen = track(firstPreferenceLoad());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.value).toBe(false);
+  });
+
+  it("is false when the server keeps no preferences for this page", async () => {
+    configurePreferenceStorage(fakeStorage({ [ACCOUNT_MARKER_KEY]: "local" }));
+    const { server, transport } = fakeServer();
+    server.failures.push(new Failure("unsupported"));
+    await startPreferenceSync({ transport, account: "local" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await firstPreferenceLoad()).toBe(false);
+  });
+
+  it("is false with no sync running", async () => {
+    expect(await firstPreferenceLoad()).toBe(false);
   });
 });
 

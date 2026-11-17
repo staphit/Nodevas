@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, GlobalRunError, type Runner } from "../api";
@@ -52,7 +52,8 @@ describe("ThisComputerPanel", () => {
     const { container } = renderPanel();
     expect(screen.getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
     expect(screen.getByText("Claude")).toBeInTheDocument();
-    expect(screen.getByText("Not installed. Install Gemini, then click Check again.")).toBeInTheDocument();
+    expect(screen.getByText("Gemini", { selector: "strong" }).closest("li")).toHaveTextContent("Not on this computer yet");
+    expect(screen.getByRole("button", { name: "How to get Gemini" })).toBeInTheDocument();
     expect(screen.getByText("my-app")).toBeInTheDocument();
     expect(screen.getByText("D:\\code\\my-app")).toBeInTheDocument();
     expect(screen.getByLabelText("2 at a time")).toHaveTextContent("2");
@@ -274,6 +275,64 @@ describe("ThisComputerPanel", () => {
     expect(await screen.findByText(UNAVAILABLE)).toBeInTheDocument();
   });
 
+  it("asks each time an agent wants to run a command, when switched on", async () => {
+    const base = localRunner();
+    const save = answerWith((runner) => ({ ...runner, info: { ...runner.info!, permissionRelay: true } }));
+    renderPanel();
+    const relay = screen.getByRole("checkbox", { name: "Ask me each time an agent wants to run a command" });
+    expect(relay).not.toBeChecked();
+    expect(screen.getByText(/no answer means no/)).toBeInTheDocument();
+    fireEvent.click(relay);
+    await waitFor(() => expect(save).toHaveBeenCalledWith("local1", { permissionRelay: true }));
+    await waitFor(() => expect(relay).toBeChecked());
+
+    act(() => hold([{ ...base, info: { ...base.info!, permissionRelay: false } }]));
+    expect(relay).not.toBeChecked();
+  });
+
+  it("hides the online review toggles in Simple, and keeps them otherwise", () => {
+    renderPanel();
+    expect(screen.getByRole("checkbox", { name: t("local.autoPR") })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: t("local.prDraft") })).toBeInTheDocument();
+    cleanup();
+
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    renderPanel();
+    expect(screen.queryByRole("checkbox", { name: t("local.autoPR") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: t("local.prDraft") })).not.toBeInTheDocument();
+    // What stays in Simple: the agents and the relay switch.
+    expect(screen.getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Ask me each time an agent wants to run a command" })).toBeInTheDocument();
+  });
+
+  // Simple: folders, not repos, and no test command to type.
+  it("says folder and asks for no test command in Simple", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    const { container } = renderPanel();
+    expect(screen.getByRole("heading", { name: "Folders" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add a folder" })).toBeInTheDocument();
+    expect(screen.getByText("my-app")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Test command")).not.toBeInTheDocument();
+    expect(visibleText(container)).not.toMatch(/\brepos?\b|test command/i);
+  });
+
+  it("says no folder yet in Simple", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    const base = localRunner();
+    hold([{ ...base, info: { ...base.info!, repos: [] } }]);
+    const { container } = renderPanel();
+    expect(screen.getByText("No folder yet. Add the folder you want agents to work in.")).toBeInTheDocument();
+    expect(visibleText(container)).not.toMatch(/\brepos?\b/i);
+  });
+
+  it("keeps repos and the test command in full mode", () => {
+    renderPanel();
+    expect(screen.getByRole("heading", { name: "Repos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add repo" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Test command")).toBeInTheDocument();
+  });
+
   it("shows nothing of this computer on a team hub", () => {
     renderPanel("team");
     expect(screen.queryByText("Agents found")).not.toBeInTheDocument();
@@ -293,6 +352,16 @@ describe("ThisComputerCard", () => {
     fireEvent.click(button);
     expect(screen.getByRole("heading", { name: "Agents found" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("says folders, not repos, in Simple", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    render(
+      <EditionProvider edition="single">
+        <ThisComputerCard />
+      </EditionProvider>,
+    );
+    expect(screen.getByText("Claude, Codex · 1 folder · 2 at a time")).toBeInTheDocument();
   });
 
   it("says it is starting, not that it is not running, until its runner connects", () => {

@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -279,6 +281,107 @@ func TestSettingsCapabilitiesFollowConfig(t *testing.T) {
 			slices.Contains(caps, runnerwire.CapRemoteSettings) != c.remote || info.MaxConcurrentCeiling != c.ceiling {
 			t.Errorf("%+v: caps %q, ceiling %d", c.cfg, caps, info.MaxConcurrentCeiling)
 		}
+	}
+}
+
+// An agent path from the app: the built-in runner's owner only; the file is
+// checked and must answer --version before it is kept, as the file it names,
+// live and on disk; "" goes back to PATH.
+func TestApplySettingsAgentPath(t *testing.T) {
+	noAgentTempDir(t)
+	t.Setenv("PATH", os.Getenv("PATH")) // whatever syncAgentPathDirs does is undone
+	path := filepath.Join(t.TempDir(), "runner.json")
+	start := &Config{Hub: "http://127.0.0.1:1", Token: testToken, MaxConcurrent: 2}
+	if err := SaveConfig(path, start); err != nil {
+		t.Fatal(err)
+	}
+	added := writeAgentFile(t, filepath.Join(t.TempDir(), "bin"), "claude")
+	real := added // the path picked is what is kept and run
+	var pathAtVersion []string
+	cmds := &fakeCommands{paths: map[string]string{}, outputs: map[string]string{real + " --version": "2.1.0 (Claude Code)\n"},
+		errs: map[string]error{}, onRun: func(key string) {
+			if key == real+" --version" {
+				pathAtVersion = filepath.SplitList(os.Getenv("PATH"))
+			}
+		}}
+	c := &Client{Config: start, ConfigPath: path, Commands: cmds, Log: &bytes.Buffer{}}
+	on := true
+	set := func(kind, p string) runnerwire.SettingsRequest {
+		return runnerwire.SettingsRequest{ID: "a", AccountID: wsOwner, AgentPath: map[string]string{kind: p}}
+	}
+
+	// A classic runner takes neither from the hub.
+	for name, req := range map[string]runnerwire.SettingsRequest{
+		"agentPath":       set("claude", added),
+		"permissionRelay": {ID: "r", AccountID: wsOwner, PermissionRelay: &on},
+	} {
+		if done := c.applySettings(wsOwner, req); done.Code != runnerwire.SettingsErrLocalOnly || c.cfg() != start {
+			t.Fatalf("classic %s: %+v", name, done)
+		}
+	}
+	c.builtIn.Store(true)
+	if done := c.applySettings("u-other", set("claude", added)); done.Code != runnerwire.SettingsErrRefused || c.cfg() != start {
+		t.Fatalf("someone else: %+v", done)
+	}
+	two := runnerwire.SettingsRequest{ID: "b", AccountID: wsOwner, AgentPath: map[string]string{"claude": added, "codex": added}}
+	if done := c.applySettings(wsOwner, two); done.Code != runnerwire.SettingsErrInvalid || done.Refused != runnerwire.AgentPathRefusedInvalid {
+		t.Fatalf("two at once: %+v", done)
+	}
+	if done := c.applySettings(wsOwner, set("nope", added)); done.Code != runnerwire.SettingsErrInvalid || done.Refused != runnerwire.AgentPathRefusedInvalid {
+		t.Fatalf("unknown kind: %+v", done)
+	}
+	if done := c.applySettings(wsOwner, set("codex", added)); done.Code != runnerwire.SettingsErrInvalid || done.Refused != runnerwire.AgentPathRefusedName {
+		t.Fatalf("claude's file as codex: %+v", done)
+	}
+	cmds.mu.Lock()
+	cmds.errs[real+" --version"] = errors.New("exit status 1")
+	cmds.mu.Unlock()
+	done := c.applySettings(wsOwner, set("claude", added))
+	if done.Code != runnerwire.SettingsErrInvalid || done.Refused != runnerwire.AgentPathRefusedNoAnswer || c.cfg().AgentPaths != nil {
+		t.Fatalf("no answer: %+v, %v", done, c.cfg().AgentPaths)
+	}
+	if strings.Contains(done.Error, filepath.Dir(real)) {
+		t.Fatalf("the refusal names the folder: %q", done.Error)
+	}
+	// --version ran with the program's folder on PATH (node beside an npm
+	// CLI, from a desktop launch), and a refused program's folder is taken
+	// off again.
+	if !slices.Contains(pathAtVersion, filepath.Dir(real)) {
+		t.Fatalf("--version ran without the program's folder on PATH: %q", pathAtVersion)
+	}
+	if slices.Contains(filepath.SplitList(os.Getenv("PATH")), filepath.Dir(real)) {
+		t.Fatalf("a refused program's folder stayed on PATH: %q", os.Getenv("PATH"))
+	}
+	cmds.mu.Lock()
+	delete(cmds.errs, real+" --version")
+	cmds.mu.Unlock()
+
+	done = c.applySettings(wsOwner, set("claude", added))
+	if done.Code != "" || done.Refused != "" || !done.Persisted || c.cfg().AgentPaths["claude"] != real {
+		t.Fatalf("added: %+v, %v", done, c.cfg().AgentPaths)
+	}
+	saved, err := LoadConfig(path)
+	if err != nil || saved.AgentPaths["claude"] != real || saved.Token != testToken || saved.MaxConcurrent != 2 {
+		t.Fatalf("saved %+v, %v", saved, err)
+	}
+	if local := localSettings(c.cfg(), path); local.AgentPaths["claude"] != real {
+		t.Fatalf("local %+v", local.AgentPaths)
+	}
+	if !slices.Contains(filepath.SplitList(os.Getenv("PATH")), filepath.Dir(real)) {
+		t.Fatalf("the added program's folder is not on PATH: %q", os.Getenv("PATH"))
+	}
+	if start.AgentPaths != nil {
+		t.Fatal("the starting config changed")
+	}
+
+	if done := c.applySettings(wsOwner, set("claude", "")); done.Code != "" || c.cfg().AgentPaths != nil {
+		t.Fatalf("cleared: %+v, %v", done, c.cfg().AgentPaths)
+	}
+	if saved, err := LoadConfig(path); err != nil || saved.AgentPaths != nil {
+		t.Fatalf("cleared on disk: %+v, %v", saved.AgentPaths, err)
+	}
+	if slices.Contains(filepath.SplitList(os.Getenv("PATH")), filepath.Dir(real)) {
+		t.Fatalf("the folder stayed on PATH: %q", os.Getenv("PATH"))
 	}
 }
 

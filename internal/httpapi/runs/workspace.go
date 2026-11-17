@@ -3,10 +3,15 @@ package runs
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -286,6 +291,179 @@ func (a *API) workspaceAct(c *gin.Context, r runs.Record, actor identity.Actor, 
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(status, a.forReader(c, updated.Run))
+}
+
+// previewAnswer is POST …/workspace/preview's answer: the page's address on
+// the built-in runner's own preview listener, or, with no page, only the
+// folder to open.
+type previewAnswer struct {
+	Web       bool       `json:"web"`
+	URL       string     `json:"url,omitempty"`
+	Folder    string     `json:"folder,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+}
+
+// Preview refusals with no workspace gate text of their own.
+var (
+	errPreviewOff = locale.Errorf("previews are off here: they need this computer's own runner, opened on this computer",
+		"這裡無法預覽：需要這台電腦自己的 runner，並在這台電腦上開啟")
+	errPreviewNoWorktree = locale.Errorf("the run's folder is gone", "這次執行的資料夾已經不在了")
+	errPreviewBadAnswer  = locale.Errorf("the runner's preview answer is not usable", "runner 的預覽回應無法使用")
+)
+
+// previewBlocked answers a preview the run or its runner does not allow now:
+// 409 with the code in "blocked".
+func previewBlocked(c *gin.Context, code string) {
+	var err error
+	switch code {
+	case runnerwire.RepoErrPreviewOff:
+		err = errPreviewOff
+	case runnerwire.RepoErrNoWorktree:
+		err = errPreviewNoWorktree
+	default:
+		err = &runs.WorkspaceBlocked{Code: code}
+	}
+	httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, map[string]any{"blocked": code})
+}
+
+// previewHost is the loopback name the preview's address uses: the other
+// one than the browser used for this app (127.0.0.1 for localhost,
+// localhost for a loopback address), so the page never shares the app's
+// cookies. ok is false for a request that did not come to a loopback name
+// on this machine: the preview is only ever this computer's.
+func previewHost(r *http.Request) (string, bool) {
+	if !auth.ForwardedForThisMachine(r) {
+		return "", false
+	}
+	seen := r.Host
+	if forwarded := r.Header.Values("X-Forwarded-Host"); len(forwarded) > 0 {
+		seen, _, _ = strings.Cut(forwarded[0], ",")
+	}
+	name := strings.TrimSpace(seen)
+	if host, _, err := net.SplitHostPort(name); err == nil {
+		name = host
+	}
+	name = strings.Trim(name, "[]")
+	if strings.EqualFold(name, "localhost") {
+		return "127.0.0.1", true
+	}
+	if addr, err := netip.ParseAddr(name); err == nil && addr.Unmap().IsLoopback() {
+		return "localhost", true
+	}
+	return "", false
+}
+
+// previewURL is the page's address on the preview listener, or "" when the
+// runner's answer is not one the hub hands on: a port, a 128-bit hex token
+// and a plain relative path inside the run's folder.
+func previewURL(host string, p runnerwire.RunPreview) string {
+	if p.Port <= 0 || p.Port > 65535 || len(p.Token) != 32 || strings.Trim(p.Token, "0123456789abcdef") != "" {
+		return ""
+	}
+	if p.Entry == "" || len(p.Entry) > runnerwire.MaxRepoPathBytes || !utf8.ValidString(p.Entry) ||
+		strings.ContainsAny(p.Entry, "\x00\\:") {
+		return ""
+	}
+	segs := strings.Split(p.Entry, "/")
+	for i, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." {
+			return ""
+		}
+		segs[i] = url.PathEscape(seg)
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(p.Port)) + "/p/" + p.Token + "/" + strings.Join(segs, "/")
+}
+
+// workspacePreview is POST /api/runs/:id/workspace/preview: a token for the
+// finished run's page on its built-in runner's own loopback listener
+// (runner/preview.go), so it opens in a browser tab on this computer without
+// reaching this origin. The token goes to its owner's browser only: it is
+// never logged or audited.
+func (a *API) workspacePreview(c *gin.Context) {
+	r, actor, ok := a.ownerOnly(c)
+	if !ok {
+		return
+	}
+	if c.Request.ContentLength != 0 {
+		var body struct{}
+		if !httpx.DecodeJSONLimit(c, &body, maxWorkspaceBody) {
+			return
+		}
+	}
+	switch {
+	case !runnerwire.RunFinal(r.Status):
+		previewBlocked(c, runnerwire.WorkspaceGateRunning)
+		return
+	case r.Workspace == runnerwire.RunWorkspaceMergedLocal:
+		previewBlocked(c, runnerwire.WorkspaceGateMergedLocal)
+		return
+	case r.Workspace == runnerwire.RunWorkspaceDiscarded:
+		previewBlocked(c, runnerwire.WorkspaceGateDiscarded)
+		return
+	}
+	host, local := previewHost(c.Request)
+	if !local || a.repo == nil {
+		previewBlocked(c, runnerwire.RepoErrPreviewOff)
+		return
+	}
+	done, err := a.repo.BrowseRun(c.Request.Context(), actor.ID, r.RunnerID, runRepoRequest(r, runnerwire.RepoOpRunPreview, ""))
+	switch {
+	case errors.Is(err, runners.ErrRepoNotFound):
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("runner or repo not found", "找不到 runner 或 repo"), nil)
+		return
+	case errors.Is(err, runners.ErrRunPreviewOff), errors.Is(err, runners.ErrRepoBrowseOff):
+		previewBlocked(c, runnerwire.RepoErrPreviewOff)
+		return
+	case errors.Is(err, runners.ErrRunnerOffline), errors.Is(err, runners.ErrRepoRunnerGone):
+		previewBlocked(c, runnerwire.WorkspaceGateOffline)
+		return
+	case errors.Is(err, runners.ErrRunnerOutdated):
+		previewBlocked(c, runnerwire.WorkspaceGateOutdated)
+		return
+	case errors.Is(err, runners.ErrRepoTimeout):
+		httpx.Coded(c, http.StatusGatewayTimeout, "TIMEOUT", err, nil)
+		return
+	case err != nil:
+		httpx.Err(c, http.StatusInternalServerError, err)
+		return
+	}
+	switch done.Code {
+	case "":
+	case runnerwire.RepoErrNoWorktree:
+		previewBlocked(c, runnerwire.RepoErrNoWorktree)
+		return
+	case runnerwire.RepoErrPreviewOff, runnerwire.RepoErrOff:
+		previewBlocked(c, runnerwire.RepoErrPreviewOff)
+		return
+	case runnerwire.RepoErrBusy:
+		c.Header("Retry-After", "2")
+		httpx.Coded(c, http.StatusTooManyRequests, "BUSY", locale.Errorf("the runner is busy; try again shortly", "runner 忙碌中，請稍後再試"), nil)
+		return
+	case runnerwire.RepoErrNotFound, runnerwire.RepoErrRefused:
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("runner or repo not found", "找不到 runner 或 repo"), nil)
+		return
+	default:
+		httpx.Coded(c, http.StatusBadGateway, "RUNNER_ERROR", errPreviewBadAnswer, nil)
+		return
+	}
+	if done.Preview == nil {
+		httpx.Coded(c, http.StatusBadGateway, "RUNNER_ERROR", errPreviewBadAnswer, nil)
+		return
+	}
+	answer := previewAnswer{Web: done.Preview.Web, Folder: done.Preview.Path}
+	if answer.Web {
+		answer.URL = previewURL(host, *done.Preview)
+		if answer.URL == "" {
+			httpx.Coded(c, http.StatusBadGateway, "RUNNER_ERROR", errPreviewBadAnswer, nil)
+			return
+		}
+		if at := done.Preview.ExpiresAt; !at.IsZero() {
+			at = at.UTC()
+			answer.ExpiresAt = &at
+		}
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, answer)
 }
 
 // workspaceFailed answers a refused workspace action: the gate's code in

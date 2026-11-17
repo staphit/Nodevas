@@ -4,9 +4,12 @@
 // helps, a second. The answers themselves happen
 // where they always did: the war room's ask and held-mail dialogs, a
 // goal's review, a node's Runs tab. An offer the app's own runner asks about
-// (single-user edition) is answered right in its tile.
+// (single-user edition) is answered right in its tile, and so is a finished
+// result there: looked at and applied with its plain buttons. Once applied
+// it no longer waits, but its tile stays where the person pressed Apply,
+// saying so with "Open my folder", until they dismiss it or leave Station.
 
-import type { ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import { excerpt } from "../agents/agentStore";
 import type { Run } from "../api";
@@ -19,10 +22,14 @@ import { confirmCancelRun } from "../runs/confirmCancelRun";
 import { OfferAskCard, runAsksInApp } from "../runs/OfferAskCard";
 import { askMachine } from "../runs/offerReasons";
 import { openNodeRuns } from "../runs/openRuns";
+import { ResultActions } from "../runs/ResultActions";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
+import { useGlobalAgents } from "./globalAgentsStore";
+import { dismissResult, placeResults, useKeptResults } from "./keptResults";
 import { useTitleOf } from "./StationControl";
 import { StationTile, StationTiles } from "./StationTile";
+import { useStation } from "./stationStore";
 import { useWaitingItems } from "./useWaitingItems";
 import { waitingKey, type WaitingItem } from "./waiting";
 
@@ -43,12 +50,68 @@ interface Row {
   body?: ReactNode;
 }
 
+/** A tile in the list: something that waits, or a result applied during
+ * this visit, kept in place. */
+type Shown = { item: WaitingItem } | { applied: Run };
+
+/** The copy of a run, from any list that holds it, that says it was applied
+ * to the person's folder; undefined while none does. Applied never goes
+ * back, so any copy saying so is the truth. */
+function useAppliedCopy(): (runId: string) => Run | undefined {
+  const globalById = useRuns((s) => s.globalById);
+  const runsByNode = useRuns((s) => s.runsByNode);
+  const globalRuns = useGlobalAgents((s) => s.runs);
+  const stationRuns = useStation((s) => s.runs);
+  return useMemo(() => {
+    const applied = new Map<string, Run>();
+    const add = (run: Run | undefined) => {
+      if (run?.id && run.workspace === "merged_local" && !applied.has(run.id)) applied.set(run.id, run);
+    };
+    Object.values(globalById).forEach(add);
+    for (const list of Object.values(runsByNode)) list?.forEach(add);
+    globalRuns.forEach(add);
+    stationRuns.forEach(add);
+    return (runId: string) => applied.get(runId);
+  }, [globalById, runsByNode, globalRuns, stationRuns]);
+}
+
 export function StationWaiting() {
   const { t } = useI18n();
   const cancelling = useRuns((s) => s.cancelling);
   const { dispatch } = useGameActions();
   const titleOf = useTitleOf();
   const items = useWaitingItems();
+  const appliedOf = useAppliedCopy();
+  // Results seen waiting during this visit, at their last place in the
+  // list; and the applied ones the person dismissed (keptResults).
+  const placed = useKeptResults((s) => s.placed);
+  const dismissedIds = useKeptResults((s) => s.dismissed);
+  const dismissed = useMemo(() => new Set(Object.keys(dismissedIds)), [dismissedIds]);
+
+  useEffect(() => {
+    placeResults(items.map((item) => (item.kind === "apply" ? item.run.id : null)));
+  }, [items]);
+
+  // What waits (the count, the call for attention) and what is shown: a
+  // result applied here stays in its place, applied, until dismissed.
+  const waiting: WaitingItem[] = [];
+  const shown: Shown[] = [];
+  const applyIds = new Set<string>();
+  for (const item of items) {
+    const applied = item.kind === "apply" ? appliedOf(item.run.id) : undefined;
+    if (item.kind === "apply") applyIds.add(item.run.id);
+    if (applied) {
+      if (!dismissed.has(applied.id)) shown.push({ applied });
+      continue;
+    }
+    waiting.push(item);
+    shown.push({ item });
+  }
+  for (const [id, index] of Object.entries(placed).sort((a, b) => a[1] - b[1])) {
+    if (applyIds.has(id) || dismissed.has(id)) continue;
+    const applied = appliedOf(id);
+    if (applied) shown.splice(Math.min(index, shown.length), 0, { applied });
+  }
 
   const openRun = (run: Run): Action => ({
     label: t("station.waiting.openRun"),
@@ -124,6 +187,15 @@ export function StationWaiting() {
               }
             : undefined,
         };
+      case "apply":
+        return {
+          text: t("result.waiting", {
+            name: item.run.global ? item.run.title || item.run.id : titleOf(item.run.nodeId),
+          }),
+          sub: t("result.waiting.sub", { agent: agentWho(item.run.agent, item.run.model) }),
+          nodeId: item.run.nodeId || undefined,
+          body: <ResultActions run={item.run} compact />,
+        };
       case "offer":
         if (runAsksInApp(item.run)) {
           return {
@@ -163,18 +235,42 @@ export function StationWaiting() {
 
   return (
     <section
-      className={`station-panel station-waiting${items.length > 0 ? " is-attention" : ""}`}
+      className={`station-panel station-waiting${waiting.length > 0 ? " is-attention" : ""}`}
       aria-labelledby="station-waiting-title"
     >
       <div className="station-panel-head">
         <h2 id="station-waiting-title">{t("station.waiting.title")}</h2>
-        {items.length > 0 && <span className="station-count">{items.length}</span>}
+        {waiting.length > 0 && <span className="station-count">{waiting.length}</span>}
       </div>
-      {items.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="station-empty">{t("station.waiting.empty")}</p>
       ) : (
         <StationTiles label={t("station.waiting.title")}>
-          {items.map((item) => {
+          {shown.map((entry) => {
+            if ("applied" in entry) {
+              const run = entry.applied;
+              // The key it had while it waited: the result buttons stay
+              // the same ones, now saying it was applied.
+              return (
+                <StationTile
+                  key={waitingKey({ kind: "apply", run })}
+                  dot="succeeded"
+                  className="station-waiting-item is-apply is-applied"
+                  title={t("result.waiting.applied", {
+                    name: run.global ? run.title || run.id : titleOf(run.nodeId),
+                  })}
+                  nodeId={run.nodeId || undefined}
+                >
+                  <ResultActions run={run} compact />
+                  <span className="station-waiting-actions">
+                    <button type="button" className="ap-btn" onClick={() => dismissResult(run.id)}>
+                      {t("result.dismiss")}
+                    </button>
+                  </span>
+                </StationTile>
+              );
+            }
+            const { item } = entry;
             const { text, sub, nodeId, primary, secondary, body } = row(item);
             return (
               <StationTile

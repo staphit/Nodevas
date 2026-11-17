@@ -222,6 +222,10 @@ func changesScorecards(method, path string) bool {
 	if !isUnsafeMethod(method) {
 		return false
 	}
+	// A preview token only lets the owner look at a run's page.
+	if strings.HasSuffix(path, "/workspace/preview") {
+		return false
+	}
 	if path == "/api/verdicts" || path == "/api/runs" {
 		return true
 	}

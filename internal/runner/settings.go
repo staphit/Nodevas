@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 
 	"nodevas/internal/runnerwire"
@@ -55,6 +56,9 @@ func (c *Client) applySettings(ownerID string, req runnerwire.SettingsRequest) r
 			"from the app; change them on the runner's own machine")
 	}
 	if err := checkLocalRequest(req); err != nil {
+		if refusal := (*agentPathError)(nil); errors.As(err, &refusal) {
+			done.Refused = agentPathRefusal(err)
+		}
 		return refuse(runnerwire.SettingsErrInvalid, "%v", err)
 	}
 	n, ceiling := 0, cfg.MaxConcurrentCeilingOrDefault()
@@ -63,6 +67,34 @@ func (c *Client) applySettings(ownerID string, req runnerwire.SettingsRequest) r
 			return refuse(runnerwire.SettingsErrRange, "maxConcurrent must be from 1 to %d here "+
 				"(maxConcurrentCeiling on the runner)", ceiling)
 		}
+	}
+	// An agent path is code this computer will run: the file is checked, and
+	// must answer --version, before it is kept, as the path picked (cleaned;
+	// agentBinary checks it again at every use; agentpath.go). It answers with
+	// its folder already on PATH, as every later run has it: an npm CLI's
+	// `#!/usr/bin/env node` finds node there when the app was opened from the
+	// desktop with a short PATH. checkLocalRequest let at most one through.
+	for kind, path := range req.AgentPath {
+		if path == "" {
+			continue
+		}
+		picked, err := checkAgentPath(cfg, kind, path)
+		if err == nil {
+			trial := cfg.Clone()
+			if trial.AgentPaths == nil {
+				trial.AgentPaths = map[string]string{}
+			}
+			trial.AgentPaths[kind] = picked
+			syncAgentPathDirs(trial)
+			if err = agentPathAnswers(c.commandRunner(), picked); err != nil {
+				syncAgentPathDirs(cfg)
+			}
+		}
+		if err != nil {
+			done.Refused = agentPathRefusal(err)
+			return refuse(runnerwire.SettingsErrInvalid, "%v", err)
+		}
+		req.AgentPath = map[string]string{kind: picked}
 	}
 	persisted := true
 	var notSaved []string
@@ -76,6 +108,10 @@ func (c *Client) applySettings(ownerID string, req runnerwire.SettingsRequest) r
 			persisted = false
 		}
 		c.logf("settings changed from Nodevas%s", savedWhere(saved, err, c.ConfigPath))
+		if req.AgentPath != nil {
+			// The added program's folder on PATH (or off it) from now on.
+			syncAgentPathDirs(c.cfg())
+		}
 	}
 	if req.MaxConcurrent != nil {
 		from := done.MaxConcurrent

@@ -98,6 +98,8 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/workspace/git/status", a.workspaceStatus)
 	api.POST("/runs/:id/workspace/merge", a.workspaceMerge)
 	api.POST("/runs/:id/workspace/discard", a.workspaceDiscard)
+	// A finished run's page, on the built-in runner's own listener.
+	api.POST("/runs/:id/workspace/preview", a.workspacePreview)
 	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)

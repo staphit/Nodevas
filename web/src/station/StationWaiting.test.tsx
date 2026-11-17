@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgents } from "../agents/agentStore";
@@ -6,10 +6,17 @@ import { api, type AgentMessage, type Run } from "../api";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { GameActionsProvider } from "../game/GameActions";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider, type Edition } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
+import { makeInfo, makeView } from "../runs/workspaceFixtures";
+import { useWorkspace } from "../runs/workspaceStore";
 import { useApp } from "../store";
+import { useGlobalAgents } from "./globalAgentsStore";
+import { forgetKeptResults } from "./keptResults";
 import { StationWaiting } from "./StationWaiting";
 import { useStation } from "./stationStore";
 
@@ -55,18 +62,24 @@ beforeEach(() => {
   useStation.getState().reset();
   useRuns.getState().reset();
   useBudget.getState().reset();
+  useRunners.setState({ runners: [], loaded: false });
+  useGlobalAgents.setState({ runs: [], loaded: true });
+  useWorkspace.getState().reset();
+  forgetKeptResults();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount() {
+function mount(edition: Edition = "team") {
   return render(
-    <GameActionsProvider>
-      <StationWaiting />
-      <ConfirmDialogHost />
-    </GameActionsProvider>,
+    <EditionProvider edition={edition}>
+      <GameActionsProvider>
+        <StationWaiting />
+        <ConfirmDialogHost />
+      </GameActionsProvider>
+    </EditionProvider>,
   );
 }
 
@@ -225,5 +238,92 @@ describe("StationWaiting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Answer" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("button", { name: /Allow for this run/ })).toBeInTheDocument();
+  });
+
+  // Single-user edition: a finished result on this computer waits for the
+  // person to look at it and apply it, in plain words.
+  describe("results to apply", () => {
+    const result = (overrides: Partial<Run> = {}) =>
+      makeRun({ runnerId: "local1", runnerName: "this machine", commit: "c0ffee", workspace: "", ...overrides });
+
+    it("shows a card with both plain buttons in the single-user edition", () => {
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      useStation.setState({ runs: [result()], project: "p", loaded: true });
+      useGlobalAgents.setState({ runs: [result({ id: "g1", nodeId: "", global: true, title: "Bakery page" })] });
+      mount("single");
+      const card = screen.getByText("Ready for you: Fix the login").closest(".station-waiting-item") as HTMLElement;
+      expect(within(card).getByText("Claude opus finished. Take a look, then apply it to your folder.")).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Take a look" })).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+      const global = screen.getByText("Ready for you: Bakery page").closest(".station-waiting-item") as HTMLElement;
+      expect(within(global).getByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+    });
+
+    // Applying removes the result from what waits; the card stays where the
+    // person pressed it, saying it was applied, with Open my folder.
+    it.each([
+      ["a project result", false],
+      ["a global result", true],
+    ])("keeps %s in place once applied, with Open my folder, until dismissed", async (_what, global) => {
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const ready = global ? result({ id: "g1", nodeId: "", global: true, title: "Bakery page" }) : result();
+      const applied = { ...ready, workspace: "merged_local" as const };
+      if (global) useGlobalAgents.setState({ runs: [ready] });
+      else useStation.setState({ runs: [ready], project: "p", loaded: true });
+      vi.spyOn(api, "getRunWorkspace").mockResolvedValue(makeView({ info: makeInfo({ baseCheckout: "repo" }) }));
+      vi.spyOn(api, "getRun").mockResolvedValue(applied);
+      vi.spyOn(api, "mergeRunLocal").mockImplementation(async () => {
+        // The lists follow the hub too.
+        if (global) useGlobalAgents.setState({ runs: [applied] });
+        else useStation.setState({ runs: [applied] });
+        return applied;
+      });
+      const open = vi.spyOn(api, "openFolder").mockResolvedValue({ ok: true, path: "D:\\code\\my-app" });
+      const { container, unmount } = mount("single");
+      const title = global ? "Ready for you: Bakery page" : "Ready for you: Fix the login";
+      const card = screen.getByText(title).closest(".station-waiting-item") as HTMLElement;
+      fireEvent.click(within(card).getByRole("button", { name: "Apply to my folder" }));
+      fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Apply" }));
+
+      const done = await screen.findByText("Applied to your folder");
+      const kept = done.closest(".station-waiting-item") as HTMLElement;
+      expect(kept).toBeInTheDocument();
+      expect(kept).toHaveClass("is-applied");
+      // Nothing waits any more: no count, no call for attention.
+      expect(container.querySelector(".station-count")).toBeNull();
+      expect(container.querySelector(".station-waiting")).not.toHaveClass("is-attention");
+      fireEvent.click(within(kept).getByRole("button", { name: "Open my folder" }));
+      await waitFor(() => expect(open).toHaveBeenCalledWith("D:\\code\\my-app"));
+
+      // Still there after a look at Station's other tab.
+      unmount();
+      mount("single");
+      const again = screen.getByText("Applied to your folder").closest(".station-waiting-item") as HTMLElement;
+      fireEvent.click(within(again).getByRole("button", { name: "Got it" }));
+      expect(screen.queryByText("Applied to your folder")).toBeNull();
+      expect(screen.getByText(/Nothing waits on you/)).toBeInTheDocument();
+    });
+
+    it("forgets an applied result once Station is left", async () => {
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      useStation.setState({ runs: [result()], project: "p", loaded: true });
+      const { unmount } = mount("single");
+      expect(screen.getByText("Ready for you: Fix the login")).toBeInTheDocument();
+      act(() => useStation.setState({ runs: [result({ workspace: "merged_local" })] }));
+      expect(screen.getByText("Applied: Fix the login")).toBeInTheDocument();
+      unmount();
+      forgetKeptResults();
+      mount("single");
+      expect(screen.queryByText("Applied: Fix the login")).toBeNull();
+      expect(screen.getByText(/Nothing waits on you/)).toBeInTheDocument();
+    });
+
+    it("shows no card on a team hub", () => {
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      useStation.setState({ runs: [result()], project: "p", loaded: true });
+      mount("team");
+      expect(screen.queryByText(/Ready for you/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Apply to my folder" })).toBeNull();
+    });
   });
 });

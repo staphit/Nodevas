@@ -3,9 +3,12 @@ import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
 import { agentName, agentWho } from "../game/labels";
+import { builtInRunner } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
 import { openNodeRuns } from "./openRuns";
 import { openRunWorkspace } from "./openWorkspace";
+import { applyRefusalKey } from "./resultState";
 import { useRuns } from "./runStore";
 import { workspaceCodeText } from "./workspaceStore";
 
@@ -22,7 +25,9 @@ import { workspaceCodeText } from "./workspaceStore";
  *
  * Single-user edition: the app's own runner asking before it starts a run
  * (the hub sends run-notify for an offer's first ask) is told too, so the
- * person sees "Waiting for your OK" even with no run list on screen.
+ * person sees "Waiting for your OK" even with no run list on screen; and a
+ * result on that runner is told in plain words, as something to look at and
+ * apply to the person's folder.
  */
 export type RunNotifyKind =
   | "succeeded"
@@ -68,6 +73,9 @@ export interface RunToast {
   kind: RunNotifyKind;
   title: string;
   body: string;
+  /** A result applied on this computer's built-in runner: the person's
+   * folder, offered as "Open my folder" on the toast. */
+  folder?: string;
 }
 
 /** Older news than this is not news: a page that connects late should not
@@ -157,6 +165,22 @@ function runSubject(run: Run): string {
   return run.global ? run.title || run.branch || run.id : nodeTitle(run.nodeId);
 }
 
+/** Whether the run is on this computer's built-in runner (the hub's word,
+ * so single-user edition only). */
+function onBuiltInRunner(run: Run): boolean {
+  const local = builtInRunner(useRunners.getState().runners);
+  return Boolean(local && run.runnerId === local.id);
+}
+
+/** The person's folder a result on this computer was applied to; "" for
+ * anything else. */
+function appliedFolder(run: Run, kind: RunNotifyKind): string {
+  if (kind !== "workspace-merged") return "";
+  const local = builtInRunner(useRunners.getState().runners);
+  if (!local || run.runnerId !== local.id) return "";
+  return local.info?.repos?.find((repo) => repo.id === run.repoId)?.path ?? "";
+}
+
 /** The toast's two lines, in the reader's language. */
 export function runNotifyText(
   run: Run,
@@ -167,6 +191,22 @@ export function runNotifyText(
     translate(key, undefined, values);
   const name = runSubject(run);
   const pr = run.prNumber ? t("runs.pr", { number: run.prNumber }) : "";
+  // A result on this computer: looked at and applied, in plain words.
+  if (onBuiltInRunner(run)) {
+    const agent = agentWho(run.agent, run.model);
+    if (kind === "succeeded" && run.commit && !run.prUrl) {
+      return { title: t("result.toast.finished", { agent, title: name }), body: t("result.toast.finishedBody") };
+    }
+    if (kind === "workspace-merged") return { title: t("result.toast.applied", { title: name }), body: "" };
+    // An apply refused after the fact: the plain sentence the result buttons
+    // say, which always says nothing was changed.
+    if (kind === "workspace-failed" && run.workspaceAction?.action === "merge_local") {
+      const action = run.workspaceAction;
+      const code = action.status === "expired" ? "expired" : (action.code ?? "");
+      const reason = [workspaceCodeText(code, { base: run.base }), action.reason].filter(Boolean).join(" · ") || code;
+      return { title: t("result.toast.notApplied", { title: name }), body: t(applyRefusalKey(code), { reason }) };
+    }
+  }
   // A global agent has no node to name: the toast says whose task it was.
   if (run.global && (kind === "succeeded" || kind === "failed")) {
     const agent = agentWho(run.agent, run.model);
@@ -354,8 +394,17 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
     if (!what || told.has(what.key)) return;
     told.add(what.key);
     const { title, body } = runNotifyText(run, what.kind, pipeline);
+    const folder = appliedFolder(run, what.kind);
     get().push(
-      { runId: run.id, nodeId: run.nodeId, kind: what.kind, title, body, ...(run.global ? { global: true } : {}) },
+      {
+        runId: run.id,
+        nodeId: run.nodeId,
+        kind: what.kind,
+        title,
+        body,
+        ...(run.global ? { global: true } : {}),
+        ...(folder ? { folder } : {}),
+      },
       `nodevas-run-${what.key}`,
     );
   },

@@ -320,3 +320,104 @@ func TestConfigClone(t *testing.T) {
 		t.Fatalf("clone differs:\n%s\n%s", before, again)
 	}
 }
+
+// "Ask me each time an agent wants to run a command" from the app: in effect
+// at once, saved with the rest of the file kept, and in the next hello.
+func TestLocalSettingsPermissionRelay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runner.json")
+	start := &Config{Hub: "http://127.0.0.1:1", Token: testToken, MaxConcurrent: 2, PRDraft: true}
+	if err := SaveConfig(path, start); err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{Config: start, ConfigPath: path, Log: &bytes.Buffer{}}
+	c.builtIn.Store(true)
+	if c.refreshInfo(runnerwire.Info{}).PermissionRelay {
+		t.Fatal("relay on before it was turned on")
+	}
+	on, off := true, false
+	done := c.applySettings(wsOwner, runnerwire.SettingsRequest{ID: "s", AccountID: wsOwner, PermissionRelay: &on})
+	if done.Code != "" || !done.Persisted || !c.cfg().PermissionRelay {
+		t.Fatalf("on: %+v, in effect %v", done, c.cfg().PermissionRelay)
+	}
+	if !c.refreshInfo(runnerwire.Info{}).PermissionRelay {
+		t.Fatal("the hello does not follow the change")
+	}
+	saved, err := LoadConfig(path)
+	if err != nil || !saved.PermissionRelay || saved.Token != testToken || saved.MaxConcurrent != 2 || !saved.PRDraft {
+		t.Fatalf("saved %+v, %v", saved, err)
+	}
+	if done := c.applySettings(wsOwner, runnerwire.SettingsRequest{ID: "s2", AccountID: wsOwner, PermissionRelay: &off}); done.Code != "" ||
+		c.cfg().PermissionRelay || c.refreshInfo(runnerwire.Info{PermissionRelay: true}).PermissionRelay {
+		t.Fatalf("off: %+v", done)
+	}
+	if saved, _ := LoadConfig(path); saved.PermissionRelay {
+		t.Fatal("off was not saved")
+	}
+	if start.PermissionRelay {
+		t.Fatal("the starting config changed")
+	}
+}
+
+// editLocal gives the same config however often it runs, and an emptied
+// agentPaths is no agentPaths.
+func TestEditLocalIdempotent(t *testing.T) {
+	on := true
+	req := runnerwire.SettingsRequest{PermissionRelay: &on, AskEveryRun: &on,
+		Permission: map[string]string{"codex": runnerwire.PermFull}, ShellWithoutAsking: map[string]bool{"codex": true},
+		AgentPath: map[string]string{"claude": "/opt/claude/bin/claude"}}
+	once := &Config{AgentPaths: map[string]string{"codex": "/x/codex"}}
+	if err := editLocal(req)(once); err != nil {
+		t.Fatal(err)
+	}
+	twice := once.Clone()
+	if err := editLocal(req)(twice); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(once)
+	b, _ := json.Marshal(twice)
+	if string(a) != string(b) || once.AgentPaths["claude"] != "/opt/claude/bin/claude" || once.AgentPaths["codex"] != "/x/codex" ||
+		!once.PermissionRelay {
+		t.Fatalf("once %s\ntwice %s", a, b)
+	}
+	clear := runnerwire.SettingsRequest{AgentPath: map[string]string{"claude": ""}}
+	cfg := &Config{AgentPaths: map[string]string{"claude": "/opt/claude/bin/claude"}}
+	for range 2 {
+		if err := editLocal(clear)(cfg); err != nil || cfg.AgentPaths != nil {
+			t.Fatalf("cleared: %+v, %v", cfg.AgentPaths, err)
+		}
+	}
+	local := localSettings(once, "")
+	if local.AgentPaths["claude"] != "/opt/claude/bin/claude" {
+		t.Fatalf("local %+v", local.AgentPaths)
+	}
+	if local.AgentPaths["claude"] = "x"; once.AgentPaths["claude"] == "x" {
+		t.Fatal("Info.Local shares the config's map")
+	}
+}
+
+// The result preview is the built-in runner's alone: offered while
+// runPreview is on, and never taken from a hello a classic runner starts
+// from.
+func TestRunPreviewCapability(t *testing.T) {
+	forged := runnerwire.Info{Capabilities: []string{runnerwire.CapHeadless, runnerwire.CapRunPreview, runnerwire.CapAppAccept}}
+	classic := &Client{Config: &Config{}}
+	if caps := classic.refreshInfo(forged).Capabilities; slices.Contains(caps, runnerwire.CapRunPreview) ||
+		slices.Contains(caps, runnerwire.CapAppAccept) || !slices.Contains(caps, runnerwire.CapHeadless) {
+		t.Fatalf("classic: %q", caps)
+	}
+	builtIn := &Client{Config: &Config{}}
+	builtIn.builtIn.Store(true)
+	caps := builtIn.refreshInfo(runnerwire.Info{Capabilities: []string{runnerwire.CapHeadless}}).Capabilities
+	if !slices.Contains(caps, runnerwire.CapRunPreview) {
+		t.Fatalf("built-in: %q", caps)
+	}
+	again := builtIn.refreshInfo(forged).Capabilities
+	if n := len(slices.DeleteFunc(slices.Clone(again), func(cp string) bool { return cp != runnerwire.CapRunPreview })); n != 1 {
+		t.Fatalf("run-preview %d times: %q", n, again)
+	}
+	off := false
+	builtIn.Config.RunPreview = &off
+	if caps := builtIn.refreshInfo(forged).Capabilities; slices.Contains(caps, runnerwire.CapRunPreview) {
+		t.Fatalf("runPreview off: %q", caps)
+	}
+}

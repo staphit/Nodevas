@@ -87,6 +87,24 @@ function projectExportPath(project?: string): string {
   return `/api/projects/export?${exportQuery(project ? { project } : {})}`;
 }
 
+export interface ListDirsOptions {
+  /** A program's file stem to list files for (^[a-z0-9][a-z0-9-]{0,31}$). */
+  files?: string;
+  /** Also list folders whose name starts with a dot. */
+  hidden?: boolean;
+}
+
+/** GET /api/fs/dirs. */
+export interface DirListing {
+  path: string;
+  parent: string;
+  /** The person's home folder; "" when the hub could not tell. */
+  home?: string;
+  dirs: { name: string; path: string }[] | null;
+  /** Present only when `files` was asked for. */
+  files?: { name: string; path: string }[] | null;
+}
+
 export const workspaceApi = {
   getTrash: () =>
     req<{
@@ -145,12 +163,16 @@ export const workspaceApi = {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
-  listDirs: (path = "") =>
-    req<{
-      path: string;
-      parent: string;
-      dirs: { name: string; path: string }[] | null;
-    }>(`/api/fs/dirs?path=${encodeURIComponent(path)}`),
+  /** The folders in `path` ("" lists the drives, or /). `files` also lists
+   * the files named like that agent's program (the stem "claude": claude,
+   * claude.exe, claude.cmd…), and `hidden` shows dot folders. Answered on
+   * this computer only. */
+  listDirs: (path = "", options: ListDirsOptions = {}) => {
+    let query = `path=${encodeURIComponent(path)}`;
+    if (options.files) query += `&files=${encodeURIComponent(options.files)}`;
+    if (options.hidden) query += "&hidden=1";
+    return req<DirListing>(`/api/fs/dirs?${query}`);
+  },
   createDir: (path: string, name: string) =>
     req<{ ok: boolean; path: string }>("/api/fs/mkdir", {
       method: "POST",

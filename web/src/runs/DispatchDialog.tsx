@@ -51,6 +51,7 @@ import { openNodeDetail } from "../components/drawer/openNodeDetail";
 import { requiresAcceptance, workflowForNode } from "../domain/graph/stages";
 import { FOCUS_ACCEPTANCE_EVENT } from "../roles/AcceptanceCriteria";
 import { StageChain, stagedNeedsTests } from "../roles/StageChain";
+import { SIMPLE_OVERRIDE_REASON, useSimpleMode } from "../simple/simpleMode";
 
 /** Longest reason a person gives for skipping enabled stages. */
 export const MAX_OVERRIDE_CHARS = 200;
@@ -183,6 +184,7 @@ export function DispatchDialog({
   const createRun = useRuns((s) => s.createRun);
 
   const single = useEdition() === "single";
+  const simple = useSimpleMode();
   const mine = useMemo(() => ownRunners(runners, viewer), [runners, viewer]);
   // Single-user: this computer's built-in runner, and no choice. Without
   // one (it did not start) a runner someone connected by hand still works
@@ -313,9 +315,20 @@ export function DispatchDialog({
       : "";
 
   const fallbackInvalid = fallbacks.some((item) => agentModelProblem(item) !== "");
+  const repo = repos.find((item) => item.id === repoId);
+  // Simple mode: a check the stages want but the task lacks (criteria, a
+  // test command) does not stop the start. The run skips the stages through
+  // the person's own override, with a fixed reason the hub records; with
+  // nothing that would block, the stages run as usual.
+  const blocked =
+    workflow !== null &&
+    !overrideOn &&
+    ((requiresAcceptance(workflow) && !hasCriteria) ||
+      (stagedNeedsTests(workflow) && Boolean(repo) && !repo?.verify));
+  const simpleSkip = simple && blocked;
   // A staged project picks the pipeline from its stages; a person may skip
   // them for one run, with a reason the hub records.
-  const staged = workflow !== null && !overrideOn;
+  const staged = workflow !== null && !overrideOn && !simpleSkip;
   const stagedPipeline = staged && Boolean(workflow?.stages.tester || workflow?.stages.reviewer);
   const reviewOn = staged ? Boolean(workflow?.stages.reviewer) : workflow === null && pipelineOn;
   // Staged review starts on another vendor where one exists, until changed.
@@ -325,7 +338,6 @@ export function DispatchDialog({
       : review;
   const reviewInvalid = reviewOn && agentModelProblem(shownReview) !== "";
   const missingCriteria = staged && requiresAcceptance(workflow) && !hasCriteria;
-  const repo = repos.find((item) => item.id === repoId);
   const needsTests = staged && stagedNeedsTests(workflow);
   const missingTestCommand = needsTests && Boolean(repo) && !repo?.verify;
   const runnerCaps = runner?.info?.capabilities ?? [];
@@ -421,9 +433,10 @@ export function DispatchDialog({
                 },
               }
             : {}),
-        ...(overrideOn ? { override: overrideValue } : {}),
+        ...(overrideOn ? { override: overrideValue } : simpleSkip ? { override: SIMPLE_OVERRIDE_REASON } : {}),
         ...(mode === "interactive" ? { mode } : {}),
         ...(routePick ? { routePick } : {}),
+        ...(simple ? { simple: true } : {}),
       });
       onCreated(run);
     } catch (caught) {
@@ -549,7 +562,13 @@ export function DispatchDialog({
             </p>
           )}
 
-          {workflow && (
+          {simpleSkip && (
+            <p className="run-stage-warning" role="status">
+              {t("dispatch.simpleNoChecksLocal")}
+            </p>
+          )}
+
+          {workflow && !simpleSkip && (
             <div className="run-stages">
               {!overrideOn && <StageChain workflow={workflow} />}
               {missingCriteria && (

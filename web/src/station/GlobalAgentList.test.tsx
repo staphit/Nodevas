@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { api, forgetGlobalRuns, type Run, type RunnerLoad } from "../api";
+import { api, forgetGlobalRuns, WorkspaceActionError, type Run, type RunnerLoad } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useRuns } from "../runs/runStore";
 import { makeView } from "../runs/workspaceFixtures";
@@ -380,5 +382,139 @@ describe("GlobalAgentList", () => {
     });
     expect(useGlobalAgents.getState().focus).toBeNull();
     expect(rowOf("Other")).not.toHaveClass("is-focus");
+  });
+
+  // Single-user edition: a finished result on this computer is offered in
+  // plain words; the technical merge stays in its workspace panel.
+  describe("plain result buttons", () => {
+    const done = () =>
+      makeGlobalRun({
+        id: "g2",
+        title: "Bakery page",
+        runnerId: "local1",
+        runnerName: "this machine",
+        status: "succeeded",
+        noPR: true,
+        commit: "c0ffee1234567",
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+
+    it("shows Take a look and Apply to my folder in place of Merge locally", () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      seed([done()]);
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      const row = rowOf("Bakery page");
+      expect(within(row).getByRole("button", { name: "Take a look" })).toBeInTheDocument();
+      expect(within(row).getByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+      expect(within(row).queryByRole("button", { name: "Merge locally" })).not.toBeInTheDocument();
+      expect(within(row).getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    });
+
+    // A discard pressed beside the result buttons is not an apply: no
+    // "Applying…" while it runs, and its refusal is the row's own words.
+    it("says a refused discard as a discard, not as an apply", async () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      seed([done()]);
+      let refuse!: (error: unknown) => void;
+      vi.spyOn(api, "discardRun").mockReturnValue(
+        new Promise((_, reject) => {
+          refuse = reject;
+        }),
+      );
+      vi.spyOn(api, "getRun").mockResolvedValue(done());
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Discard" }));
+      fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard" }));
+      await waitFor(() => expect(api.discardRun).toHaveBeenCalled());
+      expect(within(rowOf("Bakery page")).queryByText("Applying…")).not.toBeInTheDocument();
+      expect(within(rowOf("Bakery page")).getByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+
+      await act(async () => refuse(new WorkspaceActionError(409, "FAILED_PRECONDITION", "in_use", "the worktree is in use")));
+      const alerts = within(rowOf("Bakery page")).getAllByRole("alert");
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveClass("global-agent-error");
+      expect(rowOf("Bakery page").textContent).not.toMatch(/could not be applied|Still working on it/);
+    });
+
+    // Simple: the row speaks of results, never of branches or pull requests.
+    it("shows no branch or pull request words in Simple", async () => {
+      viewer = null;
+      useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const running = makeGlobalRun({ id: "g3", title: "Menu page", runnerId: "local1", noPR: true });
+      seed([done(), running, { ...done(), id: "g4", title: "Old page", workspace: "discarded", status: "failed" }]);
+      const { container } = render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      expect(screen.queryByRole("columnheader", { name: "Branch" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "Pull request" })).not.toBeInTheDocument();
+      expect(container.textContent).not.toMatch(/agent\/fix-the-flaky|Branch kept|branch|pull request/i);
+      expect(within(rowOf("Bakery page")).getByRole("button", { name: "See what it did" })).toBeInTheDocument();
+      fireEvent.click(within(rowOf("Menu page")).getByRole("button", { name: "Stop" }));
+      const confirm = await screen.findByRole("alertdialog");
+      expect(confirm.textContent).not.toMatch(/branch|commit|runner/i);
+    });
+
+    // Simple: an applied result says so in the person's words, usage is
+    // what it cost (no token counts), and a result that is not ready to look
+    // at is still applied in the person's words.
+    it("says applied, cost only, and apply in Simple", () => {
+      viewer = null;
+      useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      seed([
+        { ...done(), id: "g5", title: "Applied page", workspace: "merged_local" },
+        { ...done(), id: "g6", title: "Half page", status: "failed" },
+      ]);
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      const applied = rowOf("Applied page");
+      expect(within(applied).getAllByText("Applied to your folder").length).toBeGreaterThan(0);
+      expect(applied.textContent).not.toMatch(/Merged locally|tokens/);
+      expect(applied.textContent).toMatch(/\$0\.04/);
+      const half = rowOf("Half page");
+      expect(within(half).getByRole("button", { name: "Apply to my folder" })).toBeInTheDocument();
+      expect(within(half).queryByRole("button", { name: "Merge locally" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the precise words in full mode", () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      seed([{ ...done(), id: "g5", title: "Applied page", workspace: "merged_local" }]);
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+        </EditionProvider>,
+      );
+      expect(rowOf("Applied page").textContent).toMatch(/Merged locally/);
+      expect(rowOf("Applied page").textContent).toMatch(/tokens/);
+    });
+
+    it("leaves a team hub's row as it was", () => {
+      seed([{ ...done(), runnerId: "r1" }]);
+      show();
+      const row = rowOf("Bakery page");
+      expect(within(row).getByRole("button", { name: "Merge locally" })).toBeInTheDocument();
+      expect(within(row).queryByRole("button", { name: "Apply to my folder" })).not.toBeInTheDocument();
+    });
   });
 });

@@ -4,7 +4,8 @@
 // which runners there are and what the agents say to each other, each folded
 // to a line until asked. Info (the board) is the other face of the same
 // project; the top bar switches between them. A second tab holds the
-// viewer's global agents, which work outside any project.
+// viewer's global agents, which work outside any project. In Simple
+// (single-user edition) the describe box comes first on the project tab.
 //
 // Loaded on demand (App's React.lazy), so a browser that stays in Info never
 // downloads it, and the war room's drawing below it loads lazily again.
@@ -20,11 +21,14 @@ import { useI18n } from "../i18n";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
+import { useSimpleMode } from "../simple/simpleMode";
 import { reportError, useApp } from "../store";
 import { buildActivity, type ActivityLane } from "./activity";
 import { useBuilding } from "./buildingStore";
 import { GlobalAgentsPanel } from "./GlobalAgentsPanel";
 import { useGlobalAgents } from "./globalAgentsStore";
+import { forgetKeptResults } from "./keptResults";
+import { SimpleAgentBox } from "./SimpleAgentBox";
 import { StationControlReport, StationPauseButton } from "./StationControl";
 import { StationSide } from "./StationSide";
 import { useStation } from "./stationStore";
@@ -37,6 +41,7 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
   const activeProject = useApp((s) => s.activeProject);
   const setWatching = useStation((s) => s.setWatching);
   const tab = useStation((s) => s.tab);
+  const simple = useSimpleMode();
   const world = useWorld();
 
   useEffect(() => {
@@ -48,6 +53,8 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
       setWatching(false);
       useBuilding.getState().setWatching(false);
       useGlobalAgents.getState().setWatching(false);
+      // A result applied here is kept in place only while Station is open.
+      forgetKeptResults();
     };
   }, [setWatching]);
   const firstProject = useRef(true);
@@ -77,6 +84,8 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
         <div className="station-center" role="tabpanel" id={STATION_PANEL_ID} aria-labelledby={stationTabId(tab)}>
           {tab === "project" ? (
             <>
+              {/* Simple: say what you want first, then what waits on you. */}
+              {simple && <SimpleAgentBox variant="station" />}
               <StationWaiting />
               {/* A goal opened from a node's panel (or a review waiting on
                   you) is why Station opened: right under what waits on you. */}

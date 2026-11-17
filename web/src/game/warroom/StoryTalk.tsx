@@ -11,6 +11,7 @@ import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 
 import { askQuestionText } from "../../agents/AskCard";
 import { excerpt } from "../../agents/agentStore";
 import { useI18n } from "../../i18n";
+import { useSimpleMode } from "../../simple/simpleMode";
 import type { ControlRow } from "../../station/control";
 import { StationMenu, type StationMenuItem } from "../../station/StationMenu";
 import { useGameActions } from "../GameActions";
@@ -77,15 +78,17 @@ function actorLine(
 
 type Fact = [name: string, value: string];
 
-function actorFacts(t: Translate, { say }: StoryWords, actor: Actor): Fact[] {
+/** In Simple: where it works in plain words (this computer), and no token
+ * count. */
+function actorFacts(t: Translate, { say }: StoryWords, actor: Actor, simple = false): Fact[] {
   const facts: Fact[] = [[say("status"), poseLabel(t, actor.pose)]];
   if (actor.role) {
     const role = roleBadgeKey(actor.role) === "custom" ? actor.role : t(`roles.name.${actor.role}`);
     facts.push([say("role"), role]);
   }
   if (actor.nodeTitle) facts.push([say("node"), actor.nodeTitle]);
-  facts.push([say("runner"), placeOf(t, actor)]);
-  if (actor.energy) facts.push([say("tokens"), energyLabel(t, actor.energy.used, actor.energy.cap)]);
+  facts.push([simple ? t("simple.story.where") : say("runner"), placeOf(t, actor, simple)]);
+  if (actor.energy && !simple) facts.push([say("tokens"), energyLabel(t, actor.energy.used, actor.energy.cap)]);
   if (actor.heldMail.length) facts.push([say("held"), String(actor.heldMail.length)]);
   if (actor.testState) facts.push([say("tests"), t(`warroom.test.${actor.testState}`)]);
   return facts;
@@ -275,6 +278,7 @@ export function StoryTalk({
   const { dispatch } = useGameActions();
   const words = useStoryWords();
   const cast = useThemeCast();
+  const simple = useSimpleMode();
   if (!group || !person) {
     return (
       <TalkBox plate={words.say("narrator")} line={narration} still={still}>
@@ -344,7 +348,7 @@ export function StoryTalk({
       alert={personAlert(person)}
       tabs={tabs}
       line={actorLine(t, words, character, actor, row)}
-      facts={actorFacts(t, words, actor)}
+      facts={actorFacts(t, words, actor, simple)}
       notes={actorNotes(t, actor, meetingOf.get(actor.id))}
       still={still}
     >

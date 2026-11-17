@@ -173,8 +173,8 @@ func ownBranch(job runnerwire.WorkspaceActionJob) bool {
 }
 
 // browseRun answers a run-scoped repo_request (runnerwire.RunRepoOp) for the
-// runner whose owner is ownerID: the run's worktree browsed like a repo, or
-// run_info.
+// runner whose owner is ownerID: the run's worktree browsed like a repo,
+// run_info, or run_preview.
 func (j *jobs) browseRun(ctx context.Context, ownerID string, req runnerwire.RepoRequest) runnerwire.RepoDone {
 	cfg := j.c.cfg()
 	done := runnerwire.RepoDone{ID: req.ID}
@@ -193,6 +193,11 @@ func (j *jobs) browseRun(ctx context.Context, ownerID string, req runnerwire.Rep
 	}
 	if ownerID == "" || req.AccountID != ownerID {
 		return fail(refuseRepo(runnerwire.RepoErrRefused, "only this runner's owner may look into its runs' worktrees"))
+	}
+	// A preview is the built-in runner's alone (preview.go): a member's PC
+	// never opens a listener for the hub's sake.
+	if req.Op == runnerwire.RepoOpRunPreview && (!j.c.BuiltIn() || !cfg.RunPreviewOn()) {
+		return fail(refuseRepo(runnerwire.RepoErrPreviewOff, "previews are only for the built-in runner, with runPreview on"))
 	}
 	// run_info shows no file content, so it answers with browsing off.
 	if req.Op != runnerwire.RepoOpRunInfo && !cfg.RepoBrowseOn() {
@@ -248,6 +253,12 @@ func (j *jobs) browseRun(ctx context.Context, ownerID string, req runnerwire.Rep
 			return fail(err)
 		}
 		done.Status = &status
+	case runnerwire.RepoOpRunPreview:
+		preview, err := j.c.previewRun(ctx, dataDir, req.RepoID, wt, req.RunID)
+		if err != nil {
+			return fail(err)
+		}
+		done.Preview = &preview
 	default:
 		return fail(refuseRepo(runnerwire.RepoErrBadPath, "unknown repo operation"))
 	}

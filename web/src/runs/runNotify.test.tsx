@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, forgetGlobalRuns, rememberGlobalRun, type Run, type RunMergeRequest } from "../api";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
-import { resetRunNotify, runNotifyKind, useRunToasts } from "./runNotify";
+import { resetRunNotify, runNotifyKind, runNotifyText, useRunToasts } from "./runNotify";
 import { RunToasts } from "./RunToasts";
 import { useRuns } from "./runStore";
 import { useWorkspace } from "./workspaceStore";
@@ -358,5 +360,130 @@ describe("global agents", () => {
   it("names the task in a global run's merge and workspace toasts", async () => {
     await notify(globalRun({ prUrl: "https://github.com/o/r/pull/7", prNumber: 7, prState: "merged", merge: merge({ runId: "g1" }) }));
     expect(useRunToasts.getState().toasts[0]).toMatchObject({ kind: "merged", body: "Fix the login button" });
+  });
+});
+
+// Single-user edition: a result on this computer's own runner is told in
+// plain words, as something to look at and apply.
+describe("results on this computer", () => {
+  const local = (overrides: Partial<Run> = {}) =>
+    makeRun({
+      runnerId: "local1",
+      runnerName: "this machine",
+      commit: "c0ffee",
+      prUrl: undefined,
+      prNumber: undefined,
+      prState: undefined,
+      ciStatus: undefined,
+      ...overrides,
+    });
+
+  beforeEach(() => useRunners.setState({ runners: [localRunner()], loaded: true }));
+  afterEach(() => useRunners.setState({ runners: [], loaded: false }));
+
+  it("says a finished result is ready to look at and apply", () => {
+    expect(runNotifyText(local(), "succeeded")).toEqual({
+      title: "Claude opus finished: Design doc",
+      body: "Take a look, then apply it to your folder.",
+    });
+    expect(
+      runNotifyText(local({ id: "g1", global: true, nodeId: "", title: "Bakery page" }), "succeeded"),
+    ).toEqual({ title: "Claude opus finished: Bakery page", body: "Take a look, then apply it to your folder." });
+  });
+
+  it("says an apply landed in the folder", () => {
+    const run = local({
+      workspace: "merged_local",
+      workspaceAction: {
+        id: "wa1",
+        runId: "run2",
+        action: "merge_local",
+        status: "done",
+        requestedBy: "alice",
+        createdAt: "2026-10-24T08:11:00Z",
+        finishedAt: "2026-10-24T08:11:30Z",
+      },
+    });
+    expect(runNotifyKind(run, NOW)?.kind).toBe("workspace-merged");
+    expect(runNotifyText(run, "workspace-merged").title).toBe("Applied to your folder: Design doc");
+  });
+
+  it("offers Open my folder on the toast after an apply", async () => {
+    const run = local({
+      workspace: "merged_local",
+      workspaceAction: {
+        id: "wa1",
+        runId: "run2",
+        action: "merge_local",
+        status: "done",
+        requestedBy: "alice",
+        createdAt: "2026-10-24T08:11:00Z",
+        finishedAt: "2026-10-24T08:11:30Z",
+      },
+    });
+    const openFolder = vi.spyOn(api, "openFolder").mockResolvedValue({ ok: true, path: "D:\\code\\my-app" });
+    const openWorkspace = vi.fn();
+    useWorkspace.setState({ openWorkspace });
+    render(<RunToasts />);
+    await notify(run);
+    const toast = screen.getByText("Applied to your folder: Design doc").closest(".run-toast") as HTMLElement;
+    fireEvent.click(within(toast).getByRole("button", { name: "Open my folder" }));
+    expect(openFolder).toHaveBeenCalledWith("D:\\code\\my-app");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(screen.queryByText("Applied to your folder: Design doc")).toBeNull();
+
+    // Another runner's merge has no folder here to open.
+    resetRunNotify();
+    render(<RunToasts />);
+    await notify({ ...run, runnerId: "r1" });
+    expect(screen.queryByRole("button", { name: "Open my folder" })).toBeNull();
+  });
+
+  it("says a refused apply in plain words that say nothing was changed", () => {
+    const refused = (status: "failed" | "expired", code?: string) =>
+      local({
+        workspaceAction: {
+          id: "wa2",
+          runId: "run2",
+          action: "merge_local",
+          status,
+          code,
+          reason: "base checkout has uncommitted changes",
+          requestedBy: "alice",
+          createdAt: "2026-10-24T08:11:00Z",
+          finishedAt: "2026-10-24T08:11:30Z",
+        },
+      });
+    const dirty = runNotifyText(refused("failed", "dirty_base"), "workspace-failed");
+    expect(dirty).toEqual({
+      title: "Not applied: Design doc",
+      body: "Your folder has edits of your own that are not saved yet. Nothing was changed, so your edits are safe.",
+    });
+    const conflict = runNotifyText(refused("failed", "conflict"), "workspace-failed");
+    expect(conflict.body).toMatch(/Nothing was changed/);
+    for (const text of [dirty, conflict]) {
+      expect(`${text.title} ${text.body}`).not.toMatch(/merge|branch|rebase|checkout|commit/i);
+    }
+    // In Chinese too.
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    try {
+      const zh = runNotifyText(refused("failed", "dirty_base"), "workspace-failed");
+      expect(`${zh.title} ${zh.body}`).not.toMatch(/合併|分支|rebase|提交/);
+    } finally {
+      useApp.setState({ preferences: { ...useApp.getState().preferences, language: "en" } });
+    }
+    // Another runner keeps the precise words.
+    expect(runNotifyText({ ...refused("failed", "dirty_base"), runnerId: "r1" }, "workspace-failed").title).toMatch(
+      /Local merge/,
+    );
+  });
+
+  it("keeps the old words for a run with a PR, nothing committed, or another runner", () => {
+    expect(runNotifyText(local({ prUrl: "https://github.com/o/r/pull/4", prNumber: 4 }), "succeeded").title).toBe(
+      "Run succeeded: Design doc",
+    );
+    expect(runNotifyText(local({ commit: undefined }), "succeeded").body).not.toMatch(/apply/);
+    expect(runNotifyText(local({ runnerId: "r1" }), "succeeded").body).not.toMatch(/apply/);
+    expect(runNotifyText(local({ runnerId: "r1" }), "workspace-merged").title).not.toMatch(/Applied/);
   });
 });

@@ -151,7 +151,7 @@ func (d *Dispatcher) StartGlobal(ctx context.Context, req GlobalStartRequest) (R
 		Global: true, NodeTitle: title, BranchSlug: slug, NoPR: !body.OpenPR,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		JobPrompt: BuildPrompt(title, rest, "", ""),
+		JobPrompt: BuildPrompt(title, rest, "", withSimple("", body.Simple)),
 		CreatedBy: req.ActorID, CreatedByName: name,
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode,
 		// Only a person starts a global agent (its routes refuse agents),
@@ -164,7 +164,7 @@ func (d *Dispatcher) StartGlobal(ctx context.Context, req GlobalStartRequest) (R
 	d.record(AuditEntry{ActorID: req.ActorID, ActorName: name, Action: "run.global.start", Target: record.ID,
 		Detail: map[string]any{
 			"runner": runner.ID, "repo": repo.ID, "agent": record.Agent, "model": record.Model, "mode": record.Mode,
-			"base": record.Base, "slug": slug, "noPR": record.NoPR, "taskBytes": len(task),
+			"base": record.Base, "slug": slug, "noPR": record.NoPR, "taskBytes": len(task), "simple": body.Simple,
 		}})
 	return d.Submit(ctx, record), nil
 }
