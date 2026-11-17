@@ -5,9 +5,13 @@
 // created_by_run.json: who made the batch, through what, which nodes, and for
 // each node a fingerprint of its own fields and its status at commit. Undo
 // trashes the nodes nobody has touched since and refuses the rest; redo
-// restores them and puts back the dependencies the batch had added to nodes
-// that were already on the board, which a plain restore from the trash does
-// not know about.
+// restores them and puts back the wiring the undo cut from the nodes that
+// stayed (their dependencies and references on the trashed nodes, and the
+// graph's edges), which a plain restore from the trash does not know about.
+//
+// While a batch is recorded and not undone its via is taken: a second commit
+// with the same via (the same draft created twice, say from two tabs) is
+// refused with ErrBatchViaTaken.
 //
 // There is no per-node revision to compare against: the node document's own
 // revision moves when another node links to it and stays put when the node's
@@ -30,6 +34,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
@@ -37,13 +43,24 @@ import (
 	"nodevas/internal/locale"
 )
 
-const (
-	// maxBatchRecords bounds the sidecar; the oldest batches go first and
-	// can no longer be undone.
+// maxBatchFileBytes bounds what a read of the sidecar takes in. A sidecar
+// over it (an older build let one grow) is started over, like one that does
+// not parse.
+const maxBatchFileBytes = 16 << 20
+
+// maxBatchLabelBytes bounds BatchSpec.Label once cleaned.
+const maxBatchLabelBytes = 80
+
+// Variables, not constants, so tests can make them small.
+var (
+	// maxBatchRecords bounds the sidecar's record count; past it the busiest
+	// actor's oldest batch goes first and can no longer be undone.
 	maxBatchRecords = 200
-	// maxBatchFileBytes bounds what a read of the sidecar takes in: two
-	// hundred batches of a hundred nodes, with room.
-	maxBatchFileBytes = 16 << 20
+	// maxBatchStoreBytes bounds the records' total size, undo snapshots
+	// included, well under maxBatchFileBytes; past it the actor whose records
+	// take the most room loses their oldest first, so one member's batches
+	// cannot push out another's or make the sidecar unreadable.
+	maxBatchStoreBytes = 12 << 20
 )
 
 var (
@@ -52,9 +69,54 @@ var (
 )
 
 // BatchSpec asks create_subgraph to record the call as a batch. Via says what
-// made it ("copilot-draft:<draft id>"); the server picks the batch id.
+// made it ("copilot-draft:<draft id>"); the server picks the batch id. Label
+// is optional and only for the audit trail (the model that drafted the
+// nodes, e.g. "ollama · qwen3:8b"): control characters are stripped, it is
+// trimmed and cut to maxBatchLabelBytes, then recorded with the batch and
+// named in the history note.
 type BatchSpec struct {
-	Via string `json:"via"`
+	Via   string `json:"via"`
+	Label string `json:"label,omitempty"`
+}
+
+// cleanBatchLabel is a label as it is recorded: valid UTF-8, no control
+// characters (it lands in a commit message), trimmed, and at most
+// maxBatchLabelBytes, cut on a character boundary.
+func cleanBatchLabel(label string) string {
+	label = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(label, ""))
+	label = strings.TrimSpace(label)
+	if len(label) > maxBatchLabelBytes {
+		cut := maxBatchLabelBytes
+		for cut > 0 && !utf8.RuneStart(label[cut]) {
+			cut--
+		}
+		label = strings.TrimSpace(label[:cut])
+	}
+	return label
+}
+
+// ErrBatchViaTaken refuses a commit whose via names a batch that is recorded
+// and not undone: the same draft would be created twice. BatchID is that
+// batch. Nothing was written.
+type ErrBatchViaTaken struct {
+	Via, BatchID string
+	said         error
+}
+
+func (e *ErrBatchViaTaken) Error() string { return e.said.Error() }
+
+// Unwrap is the refusal in both languages.
+func (e *ErrBatchViaTaken) Unwrap() error { return e.said }
+
+func batchViaTaken(via, batchID string) error {
+	return &ErrBatchViaTaken{Via: via, BatchID: batchID, said: locale.Errorf(
+		"batch %s (from %s) is still on the board; undo it before creating it again",
+		"批次 %s（來自 %s）仍在畫布上；請先復原再重新建立", batchID, via)}
 }
 
 // BatchLink is a dependency a batch put into a node that already existed:
@@ -80,7 +142,7 @@ const (
 	BatchSkippedExists = "exists"
 	// BatchSkippedNotInTrash: redo found no copy of the node in the trash.
 	BatchSkippedNotInTrash = "not-in-trash"
-	// BatchSkippedLink: redo could not put a dependency back.
+	// BatchSkippedLink: redo could not put a dependency or reference back.
 	BatchSkippedLink = "link"
 )
 
@@ -108,8 +170,8 @@ type BatchUndoResult struct {
 }
 
 // BatchRedoResult is what a redo did: the nodes restored, the ones (or
-// links) it could not bring back, and how many links into existing nodes it
-// put back.
+// links) it could not bring back, and how many dependencies and references
+// into nodes that stayed on the board it put back.
 type BatchRedoResult struct {
 	Restored []string       `json:"restored"`
 	Skipped  []BatchRefusal `json:"skipped"`
@@ -149,6 +211,7 @@ type batchRecord struct {
 	Project   string                   `json:"project"`
 	Actor     batchActor               `json:"actor"`
 	Via       string                   `json:"via"`
+	Label     string                   `json:"label,omitempty"`
 	CreatedAt string                   `json:"createdAt"`
 	IDs       []string                 `json:"ids"`
 	Nodes     map[string]batchNodeMark `json:"nodes"`
@@ -165,6 +228,23 @@ type batchUndone struct {
 	IDs       []string                   `json:"ids"`
 	Nodes     map[string]engine.Node     `json:"nodes"`
 	Positions map[string]engine.Position `json:"positions,omitempty"`
+	// Kept is the wiring the delete cut from what stayed on the board. It is
+	// nil in a record made before it was kept; that redo puts back only the
+	// batch's Links.
+	Kept *batchKeptWiring `json:"kept,omitempty"`
+}
+
+// batchKeptWiring is what deleting the undone nodes took from the rest of the
+// board, for the redo to put back: the requires of each node that stayed
+// (a kept batch node or any other) as it was when it named an undone node,
+// those nodes' references to undone nodes, and every graph edge touching an
+// undone node with its label placement and bends.
+type batchKeptWiring struct {
+	Requires     map[string]string                    `json:"requires,omitempty"`
+	Refs         map[string][]string                  `json:"refs,omitempty"`
+	Edges        []engine.Edge                        `json:"edges,omitempty"`
+	EdgeLabels   map[string]engine.EdgeLabelPlacement `json:"edgeLabels,omitempty"`
+	WireVertices map[string][]engine.Position         `json:"wireVertices,omitempty"`
 }
 
 // errBatchesUnparsable is a sidecar that was read but is not batch records.
@@ -179,7 +259,8 @@ func (s *Store) batchesPath() string {
 
 // loadBatchesLocked reads the sidecar; a missing one is empty. A sidecar that
 // cannot be read is an error, so a write never replaces records it did not
-// see; one that does not parse is reported too.
+// see; one that does not parse, or is over maxBatchFileBytes, is reported as
+// errBatchesUnparsable.
 func (s *Store) loadBatchesLocked() (*batchFile, error) {
 	file := &batchFile{Batches: map[string]*batchRecord{}}
 	raw, err := ReadProjectFileLimit(s.root, s.batchesPath(), maxBatchFileBytes)
@@ -187,6 +268,9 @@ func (s *Store) loadBatchesLocked() (*batchFile, error) {
 		return file, nil
 	}
 	if err != nil {
+		if info, statErr := s.statPath(s.batchesPath()); statErr == nil && info.Mode().IsRegular() && info.Size() > maxBatchFileBytes {
+			return nil, &errBatchesUnparsable{err: err}
+		}
 		return nil, err
 	}
 	if err := json.Unmarshal(raw, file); err != nil {
@@ -198,19 +282,35 @@ func (s *Store) loadBatchesLocked() (*batchFile, error) {
 	return file, nil
 }
 
-func (s *Store) saveBatchesLocked(file *batchFile) error {
-	for len(file.Batches) > maxBatchRecords {
-		oldestID, oldest := "", ""
-		for id, record := range file.Batches {
-			if oldestID == "" || record.CreatedAt < oldest {
-				oldestID, oldest = id, record.CreatedAt
-			}
+// saveBatchesLocked writes the sidecar within maxBatchRecords and
+// maxBatchStoreBytes, evicting as batchToEvict picks. keep is the record the
+// caller is writing (a new batch, or an undo's snapshot): it is never
+// evicted, and a save that cannot fit it fails and writes nothing.
+func (s *Store) saveBatchesLocked(file *batchFile, keep string) error {
+	sizes := make(map[string]int, len(file.Batches))
+	total := 0
+	for id, record := range file.Batches {
+		raw, err := json.Marshal(record)
+		if err != nil {
+			return err
 		}
-		delete(file.Batches, oldestID)
+		sizes[id] = len(raw)
+		total += len(raw)
 	}
-	data, err := json.MarshalIndent(file, "", "  ")
+	for len(file.Batches) > maxBatchRecords || total > maxBatchStoreBytes {
+		victim := batchToEvict(file, sizes, keep, total > maxBatchStoreBytes)
+		if victim == "" {
+			return locale.Errorf("the batch record is too large to keep (%d bytes)", "這批節點的紀錄太大，無法保存（%d 位元組）", total)
+		}
+		total -= sizes[victim]
+		delete(file.Batches, victim)
+	}
+	data, err := json.Marshal(file)
 	if err != nil {
 		return err
+	}
+	if len(data) >= maxBatchFileBytes {
+		return locale.Errorf("the batch records are too large to keep (%d bytes)", "批次紀錄太大，無法保存（%d 位元組）", len(data))
 	}
 	if err := MkdirAllProjectPath(s.root, filepath.Dir(s.batchesPath()), 0o755); err != nil {
 		return err
@@ -218,14 +318,71 @@ func (s *Store) saveBatchesLocked(file *batchFile) error {
 	return s.WriteAtomic(s.batchesPath(), append(data, '\n'))
 }
 
+// batchToEvict picks the record to drop: the oldest of the actor whose
+// records take the largest share (by bytes when bySize, else by count), so
+// the member making the most batches loses their own first. keep is never
+// picked; "" means nothing else is left.
+func batchToEvict(file *batchFile, sizes map[string]int, keep string, bySize bool) string {
+	share := map[string]int{}
+	for id, record := range file.Batches {
+		if bySize {
+			share[record.Actor.ID] += sizes[id]
+		} else {
+			share[record.Actor.ID]++
+		}
+	}
+	victim := ""
+	for id, record := range file.Batches {
+		if id == keep {
+			continue
+		}
+		if victim == "" {
+			victim = id
+			continue
+		}
+		best := file.Batches[victim]
+		mine, theirs := share[record.Actor.ID], share[best.Actor.ID]
+		if mine > theirs || (mine == theirs && (record.CreatedAt < best.CreatedAt ||
+			(record.CreatedAt == best.CreatedAt && id < victim))) {
+			victim = id
+		}
+	}
+	return victim
+}
+
+// liveBatchWithViaLocked is the newest batch recorded with via and not undone,
+// or "". Records that cannot be read hold no live batch: they could not be
+// undone either, and the commit goes ahead as it would without them.
+func (s *Store) liveBatchWithViaLocked(via string) string {
+	file, err := s.loadBatchesLocked()
+	if err != nil {
+		log.Printf("batch records unreadable, via %s not checked: %v", via, err)
+		return ""
+	}
+	live := ""
+	for id, record := range file.Batches {
+		if record.Via != via || record.Undone != nil {
+			continue
+		}
+		if live == "" || record.CreatedAt > file.Batches[live].CreatedAt {
+			live = id
+		}
+	}
+	return live
+}
+
 // batchHistoryNote is how the version history names a batch commit, or "" to
-// let it name the change itself.
-func batchHistoryNote(via string) string {
+// let it name the change itself. A label (already cleaned) follows the via.
+func batchHistoryNote(via, label string) string {
+	named := via
+	if label != "" {
+		named += ", " + label
+	}
 	if strings.HasPrefix(via, CopilotDraftVia) {
-		return "created from a Copilot draft (" + via + ")"
+		return "created from a Copilot draft (" + named + ")"
 	}
 	if strings.HasPrefix(via, CopilotPlanVia) {
-		return "created from a coding agent's plan (via Copilot) (" + via + ")"
+		return "created from a coding agent's plan (via Copilot) (" + named + ")"
 	}
 	return ""
 }
@@ -242,7 +399,7 @@ func newBatchID() (string, error) {
 // holds s.mu exclusively and has just written ids. The marks are taken from
 // what is now on disk, through the same reads an undo makes, so an untouched
 // node always matches.
-func (s *Store) recordBatchLocked(actor identity.Actor, via string, ids []string, links []BatchLink) (string, error) {
+func (s *Store) recordBatchLocked(actor identity.Actor, via, label string, ids []string, links []BatchLink) (string, error) {
 	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return "", err
@@ -283,12 +440,13 @@ func (s *Store) recordBatchLocked(actor identity.Actor, via string, ids []string
 		Project:   filepath.Base(s.root),
 		Actor:     batchActor{ID: actor.ID, Name: actor.Name},
 		Via:       via,
+		Label:     label,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		IDs:       append([]string(nil), ids...),
 		Nodes:     marks,
 		Links:     append([]BatchLink(nil), links...),
 	}
-	if err := s.saveBatchesLocked(file); err != nil {
+	if err := s.saveBatchesLocked(file, id); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -302,6 +460,12 @@ func (s *Store) batchForLocked(actor identity.Actor, batchID string) (*batchFile
 	}
 	file, err := s.loadBatchesLocked()
 	if err != nil {
+		var unparsable *errBatchesUnparsable
+		if errors.As(err, &unparsable) {
+			// Nothing in it can be undone; the next batch starts it over.
+			log.Printf("batch %s: %v", batchID, err)
+			return nil, nil, batchNotFound()
+		}
 		return nil, nil, err
 	}
 	record := file.Batches[batchID]
@@ -512,14 +676,15 @@ func (s *Store) UndoBatch(actor identity.Actor, batchID string, opts BatchUndoOp
 			}
 		}
 	}
+	undone.Kept = keptWiring(g, removing)
 	record.Undone = undone
-	if err := s.saveBatchesLocked(file); err != nil {
+	if err := s.saveBatchesLocked(file, batchID); err != nil {
 		return BatchUndoResult{Trashed: []string{}, Refused: []BatchRefusal{}},
 			locale.Errorf("cannot record the undo: %w", "無法記錄這次復原：%w", err)
 	}
 	if _, err := s.deleteNodesLocked(actor, eligible, removing); err != nil {
 		record.Undone = nil
-		if saveErr := s.saveBatchesLocked(file); saveErr != nil {
+		if saveErr := s.saveBatchesLocked(file, batchID); saveErr != nil {
 			log.Printf("batch %s: undo failed and its record could not be put back: %v", batchID, saveErr)
 		}
 		return BatchUndoResult{Trashed: []string{}, Refused: []BatchRefusal{}}, err
@@ -528,13 +693,218 @@ func (s *Store) UndoBatch(actor identity.Actor, batchID string, opts BatchUndoOp
 	return result, nil
 }
 
+// keptWiring is the wiring deleting removing would cut from the rest of g,
+// as batchKeptWiring keeps it.
+func keptWiring(g *engine.Graph, removing map[string]bool) *batchKeptWiring {
+	kept := &batchKeptWiring{}
+	for _, n := range g.Nodes {
+		if n == nil || removing[n.ID] {
+			continue
+		}
+		if expr, parseErr := dsl.Parse(n.Requires); parseErr == nil && expr != nil {
+			for _, ref := range dsl.NodeRefs(expr) {
+				if removing[ref] {
+					if kept.Requires == nil {
+						kept.Requires = map[string]string{}
+					}
+					kept.Requires[n.ID] = n.Requires
+					break
+				}
+			}
+		}
+		for _, ref := range n.Refs {
+			if removing[ref] {
+				if kept.Refs == nil {
+					kept.Refs = map[string][]string{}
+				}
+				kept.Refs[n.ID] = append(kept.Refs[n.ID], ref)
+			}
+		}
+	}
+	for _, edge := range g.Edges {
+		if edge == nil || (!removing[edge.From] && !removing[edge.To]) {
+			continue
+		}
+		kept.Edges = append(kept.Edges, *edge)
+		if g.UI == nil {
+			continue
+		}
+		key := edge.From + "->" + edge.To
+		if label, ok := g.UI.EdgeLabels[key]; ok {
+			if kept.EdgeLabels == nil {
+				kept.EdgeLabels = map[string]engine.EdgeLabelPlacement{}
+			}
+			kept.EdgeLabels[key] = label
+		}
+		if bends, ok := g.UI.WireVertices[key]; ok {
+			if kept.WireVertices == nil {
+				kept.WireVertices = map[string][]engine.Position{}
+			}
+			kept.WireVertices[key] = append([]engine.Position(nil), bends...)
+		}
+	}
+	return kept
+}
+
+// requiresWithout is requires without the operands drop names, as text ("" if
+// nothing is left); ok is false when it does not parse.
+func requiresWithout(requires string, drop func(string) bool) (string, bool) {
+	expr, parseErr := dsl.Parse(requires)
+	if parseErr != nil {
+		return requires, false
+	}
+	if expr == nil {
+		return "", true
+	}
+	if pruned := dsl.PruneNodeRefs(expr, drop); pruned != nil {
+		return pruned.String(), true
+	}
+	return "", true
+}
+
+// rewireKept puts back, on g, the wiring an undo cut from the nodes that
+// stayed (kept): their requires and references on the undone nodes now
+// present again, then the graph edges whose two ends are present. A node's
+// requires that nobody changed since the undo gets its whole expression
+// back (an "a | b" stays an "or"); one that changed, or that a gate, its
+// access or a cycle stands in the way of, gets each dependency through the
+// add-edge op instead, and one that op refuses is reported in skipped.
+// It returns how many dependencies and references it put back.
+func rewireKept(actor identity.Actor, g *engine.Graph, kept *batchKeptWiring, undoneIDs []string,
+	back map[string]bool, present func(string) bool, touched map[string]bool,
+	skip func(id, code, reason string)) int {
+	undone := make(map[string]bool, len(undoneIDs))
+	for _, id := range undoneIDs {
+		undone[id] = true
+	}
+	links := 0
+	for _, n := range g.Nodes {
+		if n == nil || back[n.ID] {
+			continue // a restored node carries its own wiring
+		}
+		if before, ok := kept.Requires[n.ID]; ok {
+			links += restoreRequires(actor, g, n, before, undone, present, touched, skip)
+		}
+		for _, ref := range kept.Refs[n.ID] {
+			if !present(ref) || n.HasRef(ref) {
+				continue
+			}
+			if err := applyGraphOp(actor, g, GraphOp{Kind: "add-ref", NodeID: n.ID, Ref: ref}, touched, func(string) bool { return false }); err != nil {
+				skip(n.ID, BatchSkippedLink, fmt.Sprintf("%s refers to %s: %v", n.ID, ref, err))
+				continue
+			}
+			links++
+		}
+	}
+
+	for _, edge := range kept.Edges {
+		if !present(edge.From) || !present(edge.To) {
+			continue
+		}
+		exists := false
+		for _, e := range g.Edges {
+			if e != nil && e.From == edge.From && e.To == edge.To {
+				exists = true
+				break
+			}
+		}
+		// A required edge is the drawing of a dependency: without the
+		// dependency (skipped above, or changed by hand) it stays out.
+		if exists || (edge.Blocks() && !nodeRequiresRef(g.NodeByID(edge.To), edge.From)) {
+			continue
+		}
+		restored := edge
+		g.Edges = append(g.Edges, &restored)
+		key := edge.From + "->" + edge.To
+		label, hasLabel := kept.EdgeLabels[key]
+		bends, hasBends := kept.WireVertices[key]
+		if !hasLabel && !hasBends {
+			continue
+		}
+		if g.UI == nil {
+			g.UI = &engine.UIState{}
+		}
+		if hasLabel {
+			if g.UI.EdgeLabels == nil {
+				g.UI.EdgeLabels = map[string]engine.EdgeLabelPlacement{}
+			}
+			if _, set := g.UI.EdgeLabels[key]; !set {
+				g.UI.EdgeLabels[key] = label
+			}
+		}
+		if hasBends {
+			if g.UI.WireVertices == nil {
+				g.UI.WireVertices = map[string][]engine.Position{}
+			}
+			if _, set := g.UI.WireVertices[key]; !set {
+				g.UI.WireVertices[key] = bends
+			}
+		}
+	}
+	return links
+}
+
+// restoreRequires puts the undone operands of before that are present again
+// back into n's requires, as rewireKept describes, and returns how many.
+func restoreRequires(actor identity.Actor, g *engine.Graph, n *engine.Node, before string,
+	undone map[string]bool, present func(string) bool, touched map[string]bool,
+	skip func(id, code, reason string)) int {
+	expr, parseErr := dsl.Parse(before)
+	if parseErr != nil || expr == nil {
+		return 0
+	}
+	var operands []string
+	for _, ref := range dsl.NodeRefs(expr) {
+		if undone[ref] && present(ref) && !nodeRequiresRef(n, ref) {
+			operands = append(operands, ref)
+		}
+	}
+	if len(operands) == 0 {
+		return 0
+	}
+
+	whole := func() bool {
+		left, ok := requiresWithout(before, func(id string) bool { return undone[id] })
+		current, currentOK := requiresWithout(n.Requires, func(string) bool { return false })
+		if !ok || !currentOK || left != current {
+			return false // changed since the undo
+		}
+		if booleanGateForOutput(g, n.ID) != "" || checkNodeWrite(actor, n) != nil || checkRoleLink(actor, g, n, false) != nil {
+			return false
+		}
+		for _, from := range operands {
+			if !dependsOn(g, n, from) && refuseDependencyCycle(g, from, n.ID) != nil {
+				return false
+			}
+		}
+		return true
+	}
+	if whole() {
+		restored, _ := requiresWithout(before, func(id string) bool { return !present(id) })
+		n.Requires = restored
+		touched[n.ID] = true
+		return len(operands)
+	}
+	links := 0
+	for _, from := range operands {
+		if err := applyGraphOp(actor, g, GraphOp{Kind: "add-edge", From: from, To: n.ID}, touched, func(string) bool { return false }); err != nil {
+			skip(n.ID, BatchSkippedLink, fmt.Sprintf("%s -> %s: %v", from, n.ID, err))
+			continue
+		}
+		links++
+	}
+	return links
+}
+
 // RedoBatch takes an undo back: the nodes it trashed return from the trash
-// with their full definitions and places, and the dependencies the batch had
-// put into existing nodes are put back. A node already back, or no longer in
-// the trash, is skipped, and so is a dependency whose endpoint is gone; any
-// node or dependency a restored node names that is gone is dropped from it.
-// The same actors as UndoBatch may redo. Redoing a batch that is not undone
-// is a no-op.
+// with their full definitions and places, and the wiring the undo cut from
+// the nodes that stayed (kept batch nodes and existing ones: dependencies,
+// references, graph edges) is put back. A node already back, or no longer in
+// the trash, is skipped, and so is a dependency whose endpoint is gone or
+// that can no longer be added; any node or dependency a restored node names
+// that is gone is dropped from it. A redo with no node left to restore makes
+// the batch live again, so it can be undone. The same actors as UndoBatch
+// may redo. Redoing a batch that is not undone is a no-op.
 func (s *Store) RedoBatch(actor identity.Actor, batchID string) (BatchRedoResult, error) {
 	result := BatchRedoResult{Restored: []string{}, Skipped: []BatchRefusal{}}
 	if !batchIDPattern.MatchString(batchID) {
@@ -617,6 +987,14 @@ func (s *Store) RedoBatch(actor identity.Actor, batchID string) (BatchRedoResult
 		restores = append(restores, restoring{node: &n, trashPath: path, data: data})
 	}
 	if len(restores) == 0 {
+		// Nothing is left for a redo to bring back: every node is on the
+		// board again (restored from the trash by hand) or gone for good.
+		// The batch is live again, so an undo works on what is there rather
+		// than answering nothing forever.
+		record.Undone = nil
+		if err := s.saveBatchesLocked(file, batchID); err != nil {
+			log.Printf("batch %s: nothing to redo, record not updated: %v", batchID, err)
+		}
 		return result, nil
 	}
 
@@ -662,19 +1040,25 @@ func (s *Store) RedoBatch(actor identity.Actor, batchID string) (BatchRedoResult
 	}
 
 	touched := map[string]bool{}
-	for _, link := range record.Links {
-		if !back[link.From] && !back[link.To] {
-			continue // nothing of this link was taken away by the undo
+	if undone.Kept != nil {
+		result.Links = rewireKept(actor, g, undone.Kept, undone.IDs, back, present, touched, skip)
+	} else {
+		// A record from before the undo kept the cut wiring: only the links
+		// the batch itself put into existing nodes are known.
+		for _, link := range record.Links {
+			if !back[link.From] && !back[link.To] {
+				continue // nothing of this link was taken away by the undo
+			}
+			if g.NodeByID(link.From) == nil || g.NodeByID(link.To) == nil {
+				skip(link.To, BatchSkippedLink, fmt.Sprintf("%s -> %s: a node it joins is gone", link.From, link.To))
+				continue
+			}
+			if err := applyGraphOp(actor, g, GraphOp{Kind: "add-edge", From: link.From, To: link.To}, touched, func(string) bool { return false }); err != nil {
+				skip(link.To, BatchSkippedLink, fmt.Sprintf("%s -> %s: %v", link.From, link.To, err))
+				continue
+			}
+			result.Links++
 		}
-		if g.NodeByID(link.From) == nil || g.NodeByID(link.To) == nil {
-			skip(link.To, BatchSkippedLink, fmt.Sprintf("%s -> %s: a node it joins is gone", link.From, link.To))
-			continue
-		}
-		if err := applyGraphOp(actor, g, GraphOp{Kind: "add-edge", From: link.From, To: link.To}, touched, func(string) bool { return false }); err != nil {
-			skip(link.To, BatchSkippedLink, fmt.Sprintf("%s -> %s: %v", link.From, link.To, err))
-			continue
-		}
-		result.Links++
 	}
 
 	if err := ValidateGraphForStorage(g); err != nil {
@@ -730,7 +1114,7 @@ func (s *Store) RedoBatch(actor identity.Actor, batchID string) (BatchRedoResult
 		result.Restored = append(result.Restored, r.node.ID)
 	}
 	record.Undone = nil
-	if err := s.saveBatchesLocked(file); err != nil {
+	if err := s.saveBatchesLocked(file, batchID); err != nil {
 		// The nodes are back; only a later undo of this batch is lost.
 		log.Printf("batch %s: redone, record not updated: %v", batchID, err)
 	}

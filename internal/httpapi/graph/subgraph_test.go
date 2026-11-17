@@ -223,3 +223,35 @@ func TestBatchUndoKeepsANodeARunIsWorkingOn(t *testing.T) {
 		t.Fatalf("undo result = %s", response.Body)
 	}
 }
+
+// One live commit per draft (contract C3): a second commit with the via of a
+// batch that is recorded and not undone answers 409 BATCH_VIA_TAKEN naming
+// that batch, and creates nothing. The label (C4) rides along in the batch.
+func TestASecondCommitOfALiveDraftIsRefused(t *testing.T) {
+	api, st := graphTestAPI(t)
+	body := `{"nodes":[{"key":"a","title":"A"}],"batch":{"via":"copilot-draft:twice","label":"ollama · qwen3:8b"}}`
+	response, payload := call(t, api.postSubgraph, httpBea, "/api/graph/subgraph", body, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", response.Code, response.Body)
+	}
+	batchID := payload["batchId"].(string)
+	g, rev, _ := st.LoadGraph()
+	count := len(g.Nodes)
+
+	response, payload = call(t, api.postSubgraph, httpBea, "/api/graph/subgraph", body, "")
+	if response.Code != http.StatusConflict || payload["code"] != "BATCH_VIA_TAKEN" || payload["batchId"] != batchID {
+		t.Fatalf("second: %d %s", response.Code, response.Body)
+	}
+	if g, after, _ := st.LoadGraph(); after != rev || len(g.Nodes) != count {
+		t.Fatal("the refused commit wrote the graph")
+	}
+
+	// Undone, the via is free again.
+	if response, _ := call(t, api.postBatchUndo, httpBea, "/api/graph/batches/"+batchID+"/undo", "", batchID); response.Code != http.StatusOK {
+		t.Fatalf("undo: %d %s", response.Code, response.Body)
+	}
+	response, payload = call(t, api.postSubgraph, httpBea, "/api/graph/subgraph", body, "")
+	if response.Code != http.StatusCreated || payload["batchId"] == batchID {
+		t.Fatalf("after undo: %d %s", response.Code, response.Body)
+	}
+}
