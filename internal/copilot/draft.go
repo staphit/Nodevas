@@ -106,6 +106,53 @@ func (r *draftRun) run() (string, Usage, error) {
 		addPreviousTargets(&board, context.Previous)
 	}
 
+	outcome, err := draftWith(r.ctx, r.model, context, board, func(step string) {
+		r.emit(Event{Type: EventDraftStatus, Code: step})
+	})
+	usage = outcome.usage
+	if err != nil {
+		if r.ctx.Err() != nil {
+			return StopCancelled, usage, nil
+		}
+		return "", usage, err
+	}
+	draft, issues, capped := outcome.draft, outcome.issues, outcome.capped
+	if issues == nil {
+		issues = []DraftIssue{}
+	}
+	data := DraftData{
+		Draft: draft, Issues: issues, Capped: capped,
+		Provider: string(r.plan.provider), Model: r.plan.model,
+		State: DraftOpen, RefineOf: r.request.RefineOf,
+	}
+	entry, err := r.service.store.AppendEntry(r.storeCtx, Entry{
+		ConversationID: r.conversationID, Kind: EntryDraft, Text: draftLine(draft),
+		Message: mustJSON(textMessage(draftHistoryText(draft))), Data: mustJSON(data),
+	})
+	if err != nil {
+		return "", usage, err
+	}
+	r.emit(Event{Type: EventEntry, Entry: &entry})
+	return string(provider.StopEndTurn), usage, nil
+}
+
+// draftOutcome is what one drafting attempt produced.
+type draftOutcome struct {
+	draft  Draft
+	issues []DraftIssue
+	capped bool
+	usage  Usage
+	// calls is how many model calls it took.
+	calls int
+}
+
+// draftWith is the drafter's core, without the board reading or the storing
+// around it: the prompt, one structured call, at most one repair with the
+// exact problems, then the normalized draft and its issues. step reports
+// DraftStep* progress. An answer that never parses is a codedError.
+func draftWith(ctx context.Context, model provider.Provider, context draftContext, board draftBoard, step func(string)) (draftOutcome, error) {
+	var outcome draftOutcome
+	usage := &outcome.usage
 	messages := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.Block{{
 		Type: provider.BlockText, Text: draftUserMessage(context),
 	}}}}
@@ -115,24 +162,17 @@ func (r *draftRun) run() (string, Usage, error) {
 		ResponseSchema: &provider.ResponseSchema{Name: draftSchemaName, Schema: draftSchema(board.allowedKinds())},
 	}
 
-	r.emit(Event{Type: EventDraftStatus, Code: DraftStepDrafting})
-	var (
-		draft  Draft
-		issues []DraftIssue
-		capped bool
-		parsed bool
-	)
+	step(DraftStepDrafting)
+	var parsed bool
 	for attempt := 0; attempt <= maxDraftRepairs; attempt++ {
 		if attempt > 0 {
-			r.emit(Event{Type: EventDraftStatus, Code: DraftStepChecking})
+			step(DraftStepChecking)
 		}
 		request.Messages = messages
-		response, err := r.model.Stream(r.ctx, request, nil)
+		response, err := model.Stream(ctx, request, nil)
+		outcome.calls++
 		if err != nil {
-			if r.ctx.Err() != nil {
-				return StopCancelled, usage, nil
-			}
-			return "", usage, err
+			return outcome, err
 		}
 		usage.InputTokens += response.InputTokens
 		usage.OutputTokens += response.OutputTokens
@@ -146,10 +186,10 @@ func (r *draftRun) run() (string, Usage, error) {
 		case err != nil:
 			problems = []string{"the answer is not one complete JSON object matching the schema"}
 		default:
-			draft, parsed = candidate, true
-			capped = normalizeDraft(&draft, board, defaultKind(context))
-			issues = validateDraft(draft, board)
-			for _, issue := range issues {
+			outcome.draft, parsed = candidate, true
+			outcome.capped = normalizeDraft(&outcome.draft, board, defaultKind(context))
+			outcome.issues = validateDraft(outcome.draft, board)
+			for _, issue := range outcome.issues {
 				if issue.Severity == IssueError {
 					problems = append(problems, issue.Message)
 				}
@@ -169,26 +209,13 @@ func (r *draftRun) run() (string, Usage, error) {
 		)
 	}
 	if !parsed {
-		return "", usage, &codedError{code: "draft_unreadable",
+		return outcome, &codedError{code: "draft_unreadable",
 			message: "The model's answer could not be read as a draft. Try again, or describe fewer steps."}
 	}
-	if issues == nil {
-		issues = []DraftIssue{}
+	if outcome.issues == nil {
+		outcome.issues = []DraftIssue{}
 	}
-	data := DraftData{
-		Draft: draft, Issues: issues, Capped: capped,
-		Provider: string(r.plan.provider), Model: r.plan.model,
-		State: DraftOpen, RefineOf: r.request.RefineOf,
-	}
-	entry, err := r.service.store.AppendEntry(r.storeCtx, Entry{
-		ConversationID: r.conversationID, Kind: EntryDraft, Text: draftLine(draft),
-		Message: mustJSON(textMessage(draftHistoryText(draft))), Data: mustJSON(data),
-	})
-	if err != nil {
-		return "", usage, err
-	}
-	r.emit(Event{Type: EventEntry, Entry: &entry})
-	return string(provider.StopEndTurn), usage, nil
+	return outcome, nil
 }
 
 // codedError is a turn failure with its own error code for the panel.

@@ -411,3 +411,4 @@ Other corrections the build follows:
 - The canvas selection is mirrored into an app slice from `LaneView`, not lifted.
 - Package files widened: P0 also owns `servertools_test.go`, `copilot_test.go` and COPILOT.md's tool list; P4 also owns `web/src/api/copilot.ts`, `copilotStore.ts`, `state/undoSlice.ts`; P5 follows P4 in `Composer.tsx`.
 - macOS: run Go tests with a real `TMPDIR` (e.g. `/private/tmp/...`); `/var` is a symlink and two existing tests fail otherwise.
+- P7's runner is `internal/copilot/draft_eval_test.go` (build tag `copilot_eval`, package-internal so nothing is exported for it); the cases are `internal/copilot/evals/cases.json`. Run: `go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model ollama:qwen3:8b -v`.

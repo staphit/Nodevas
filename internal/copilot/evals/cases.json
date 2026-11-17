@@ -1,0 +1,114 @@
+{
+  "boards": {
+    "empty": {"layout": "workflow", "nodes": [], "edges": []},
+    "product": {
+      "layout": "workflow",
+      "nodes": [
+        {"id": "n-spec", "title": "寫規格", "kind": "task", "status": "done"},
+        {"id": "n-api", "title": "登入 API", "kind": "task", "status": "in_progress"},
+        {"id": "n-ui", "title": "登入畫面", "kind": "task", "status": "ready"},
+        {"id": "n-docs", "title": "使用文件", "kind": "task", "status": "ready"},
+        {"id": "n-launch", "title": "產品上線", "kind": "goal", "status": "ready"}
+      ],
+      "edges": [["n-api", "n-spec"], ["n-ui", "n-api"], ["n-launch", "n-ui"]]
+    },
+    "product_en": {
+      "layout": "workflow",
+      "nodes": [
+        {"id": "n-spec", "title": "Write the spec", "kind": "task", "status": "done"},
+        {"id": "n-api", "title": "Login API", "kind": "task", "status": "in_progress"},
+        {"id": "n-ui", "title": "Login screen", "kind": "task", "status": "ready"},
+        {"id": "n-docs", "title": "User docs", "kind": "task", "status": "ready"},
+        {"id": "n-launch", "title": "Launch", "kind": "goal", "status": "ready"}
+      ],
+      "edges": [["n-api", "n-spec"], ["n-ui", "n-api"], ["n-launch", "n-ui"]]
+    },
+    "story": {
+      "layout": "story",
+      "nodes": [
+        {"id": "n-mara", "title": "Mara（角色）", "kind": "note", "status": "ready"},
+        {"id": "n-ch2", "title": "第二章：出航", "kind": "scene", "status": "done"}
+      ],
+      "edges": []
+    },
+    "story_en": {
+      "layout": "story",
+      "nodes": [
+        {"id": "n-mara", "title": "Mara (character)", "kind": "note", "status": "ready"},
+        {"id": "n-ch2", "title": "Chapter 2: setting sail", "kind": "scene", "status": "done"}
+      ],
+      "edges": []
+    },
+    "wedding": {
+      "layout": "workflow",
+      "nodes": [
+        {"id": "n-date", "title": "決定日期", "kind": "task", "status": "done"},
+        {"id": "n-venue", "title": "訂場地", "kind": "task", "status": "ready"}
+      ],
+      "edges": [["n-venue", "n-date"]]
+    }
+  },
+  "cases": [
+    {"name": "zh-launch", "language": "zh-TW", "board": "empty", "text": "規劃產品上線：寫文件、測試、發布",
+     "expect": {"minNodes": 3, "maxNodes": 6, "keywords": [["文件"], ["測試"], ["發布", "上線"]], "order": [[["測試"], ["發布", "上線"]]]}},
+    {"name": "zh-after-selection", "language": "zh-TW", "board": "product", "selected": ["n-ui"], "text": "接在這個之後：寫測試、修 bug、上線",
+     "expect": {"minNodes": 3, "maxNodes": 5, "keywords": [["測試"], ["bug", "修"], ["上線", "發布"]], "attachesTo": ["n-ui"], "order": [[["測試"], ["上線", "發布"]]]}},
+    {"name": "zh-split", "language": "zh-TW", "board": "product", "selected": ["n-docs"], "text": "把選取的節點拆成小步驟",
+     "expect": {"minNodes": 2, "maxNodes": 8, "noDuplicateOf": ["n-docs"]}},
+    {"name": "zh-no-duplicate", "language": "zh-TW", "board": "product", "text": "加上：登入畫面、忘記密碼、註冊流程",
+     "expect": {"minNodes": 2, "maxNodes": 4, "keywords": [["忘記密碼", "密碼"], ["註冊"]], "noDuplicateOf": ["n-ui"]}},
+    {"name": "zh-story-chapter", "language": "zh-TW", "board": "story", "text": "第三章：三個場景，Mara 都在",
+     "expect": {"minNodes": 3, "maxNodes": 5, "kinds": ["scene"], "noDuplicateOf": ["n-mara"]}},
+    {"name": "zh-wedding", "language": "zh-TW", "board": "wedding", "text": "接下來要：寄喜帖、找攝影師、訂喜餅，喜帖要等場地訂好",
+     "expect": {"minNodes": 3, "maxNodes": 5, "keywords": [["喜帖"], ["攝影"], ["喜餅"]], "attachesTo": ["n-venue"]}},
+    {"name": "zh-review-gate", "language": "zh-TW", "board": "empty", "text": "寫新聞稿，主管審核後再發布",
+     "expect": {"minNodes": 3, "maxNodes": 4, "kinds": ["gate"], "order": [[["新聞稿", "撰寫", "寫"], ["發布"]]]}},
+    {"name": "zh-parallel", "language": "zh-TW", "board": "empty", "text": "同時進行：設計 logo、選字型、挑配色，三個都好了再做品牌手冊",
+     "expect": {"minNodes": 4, "maxNodes": 5, "keywords": [["logo", "標誌"], ["字型"], ["配色", "顏色"], ["手冊"]], "order": [[["字型"], ["手冊"]], [["配色", "顏色"], ["手冊"]]]}},
+    {"name": "zh-bullets", "language": "zh-TW", "board": "empty", "text": "- 盤點庫存\n- 下訂單\n- 驗收\n- 上架",
+     "expect": {"minNodes": 4, "maxNodes": 4, "keywords": [["庫存"], ["訂單"], ["驗收"], ["上架"]], "order": [[["訂單"], ["驗收"]], [["驗收"], ["上架"]]]}},
+    {"name": "zh-vague", "language": "zh-TW", "board": "empty", "text": "幫我弄一下",
+     "expect": {"questionsOk": true, "maxNodes": 3}},
+    {"name": "zh-goal-big", "language": "zh-TW", "board": "product", "text": "加一個大目標：支援多國語系，之後再拆",
+     "expect": {"minNodes": 1, "maxNodes": 2, "kinds": ["goal"]}},
+    {"name": "zh-note", "language": "zh-TW", "board": "story", "text": "新增一個反派角色 Kade 的設定，和一個 Kade 出場的場景",
+     "expect": {"minNodes": 2, "maxNodes": 3, "kinds": ["note", "scene"], "keywords": [["Kade"]]}},
+    {"name": "zh-after-existing", "language": "zh-TW", "board": "product", "text": "上線之後要做：收集回饋、寫週報",
+     "expect": {"minNodes": 2, "maxNodes": 3, "keywords": [["回饋"], ["週報"]], "attachesTo": ["n-launch"]}},
+    {"name": "zh-long-spec", "language": "zh-TW", "board": "empty", "text": "搬家計畫：先找房子、簽約，簽約後同時處理打包和叫搬家公司，搬完要辦地址變更跟網路移機",
+     "expect": {"minNodes": 5, "maxNodes": 8, "keywords": [["找房", "看房"], ["簽約"], ["打包"], ["搬家公司"], ["地址"], ["網路"]], "order": [[["簽約"], ["打包"]], [["簽約"], ["搬家公司"]]]}},
+    {"name": "zh-mixed-terms", "language": "zh-TW", "board": "product", "text": "幫 login API 加 rate limit 跟 unit test",
+     "expect": {"minNodes": 1, "maxNodes": 3, "keywords": [["rate", "限流", "速率"], ["test", "測試"]], "noDuplicateOf": ["n-api"]}},
+
+    {"name": "en-launch", "language": "en", "board": "empty", "text": "Plan the product launch: write docs, test, release",
+     "expect": {"minNodes": 3, "maxNodes": 6, "keywords": [["doc"], ["test"], ["release", "launch"]], "order": [[["test"], ["release", "launch"]]]}},
+    {"name": "en-after-selection", "language": "en", "board": "product_en", "selected": ["n-ui"], "text": "After this: write tests, fix bugs, ship",
+     "expect": {"minNodes": 3, "maxNodes": 5, "keywords": [["test"], ["bug", "fix"], ["ship", "release"]], "attachesTo": ["n-ui"], "order": [[["test"], ["ship", "release"]]]}},
+    {"name": "en-split", "language": "en", "board": "product_en", "selected": ["n-docs"], "text": "Split the selected node into small steps",
+     "expect": {"minNodes": 2, "maxNodes": 8, "noDuplicateOf": ["n-docs"]}},
+    {"name": "en-no-duplicate", "language": "en", "board": "product_en", "text": "Add: login screen, password reset, sign-up flow",
+     "expect": {"minNodes": 2, "maxNodes": 4, "keywords": [["password"], ["sign"]], "noDuplicateOf": ["n-ui"]}},
+    {"name": "en-story-chapter", "language": "en", "board": "story_en", "text": "Chapter 3: three scenes, Mara is in all of them",
+     "expect": {"minNodes": 3, "maxNodes": 5, "kinds": ["scene"], "noDuplicateOf": ["n-mara"]}},
+    {"name": "en-review-gate", "language": "en", "board": "empty", "text": "Draft the press release, have my manager approve it, then publish",
+     "expect": {"minNodes": 3, "maxNodes": 4, "kinds": ["gate"], "order": [[["draft", "write", "press"], ["publish"]]]}},
+    {"name": "en-parallel", "language": "en", "board": "empty", "text": "In parallel: design the logo, pick fonts, choose colours; when all three are done, make the brand guide",
+     "expect": {"minNodes": 4, "maxNodes": 5, "keywords": [["logo"], ["font"], ["colo"], ["guide"]], "order": [[["font"], ["guide"]], [["colo"], ["guide"]]]}},
+    {"name": "en-bullets", "language": "en", "board": "empty", "text": "- count stock\n- place orders\n- check deliveries\n- shelve items",
+     "expect": {"minNodes": 4, "maxNodes": 4, "keywords": [["stock"], ["order"], ["deliver"], ["shelve"]], "order": [[["order"], ["deliver"]], [["deliver"], ["shelve"]]]}},
+    {"name": "en-vague", "language": "en", "board": "empty", "text": "sort it out",
+     "expect": {"questionsOk": true, "maxNodes": 3}},
+    {"name": "en-goal-big", "language": "en", "board": "product_en", "text": "Add a big goal: support multiple languages, to be broken down later",
+     "expect": {"minNodes": 1, "maxNodes": 2, "kinds": ["goal"]}},
+    {"name": "en-note", "language": "en", "board": "story_en", "text": "Add a character sheet for the villain Kade and a scene where Kade appears",
+     "expect": {"minNodes": 2, "maxNodes": 3, "kinds": ["note", "scene"], "keywords": [["Kade"]]}},
+    {"name": "en-after-existing", "language": "en", "board": "product_en", "text": "After the launch: collect feedback, write a weekly report",
+     "expect": {"minNodes": 2, "maxNodes": 3, "keywords": [["feedback"], ["report"]], "attachesTo": ["n-launch"]}},
+    {"name": "en-long-spec", "language": "en", "board": "empty", "text": "Moving plan: find a flat, sign the lease; after signing, pack and book movers at the same time; after the move, change the address and move the internet",
+     "expect": {"minNodes": 5, "maxNodes": 8, "keywords": [["flat", "apartment"], ["lease", "sign"], ["pack"], ["mover"], ["address"], ["internet"]], "order": [[["lease", "sign"], ["pack"]], [["lease", "sign"], ["mover"]]]}},
+    {"name": "en-wedding-zh-board", "language": "en", "board": "wedding", "text": "Next: send invitations once the venue is booked, find a photographer",
+     "expect": {"minNodes": 2, "maxNodes": 3, "keywords": [["invitation"], ["photograph"]], "attachesTo": ["n-venue"]}},
+    {"name": "en-code-hint", "language": "en", "board": "product_en", "text": "Refactor internal/auth/session.go to rotate CSRF tokens and add tests",
+     "expect": {"minNodes": 1, "maxNodes": 4, "keywords": [["csrf", "rotate", "token"]], "needsCode": true}}
+  ]
+}

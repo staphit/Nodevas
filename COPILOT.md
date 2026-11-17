@@ -18,6 +18,8 @@ A configured provider or key always wins: **Anthropic** or **OpenAI-compatible**
 2. the browser's built-in model (Gemini Nano in Chrome 148 or later on a desktop), when it is ready: it is the smallest and is declared for English (and your interface language when Chrome's model takes it), so it comes last;
 3. the browser's model again, once you click **Download the on-device model**.
 
+Ollama's default context window is small for a board listing; start it with `OLLAMA_CONTEXT_LENGTH=16384` (for example `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`) so a draft sees the whole board around your request.
+
 When none is available, the button opens a help panel: use Chrome on a desktop, install Ollama and `ollama pull qwen3:8b`, or set a key on the server or your runner.
 
 ### A key on the server
