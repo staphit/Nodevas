@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreference, readPreferences, writePreference } from "../preferences";
@@ -99,5 +99,78 @@ describe("Composer", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("plan the launch");
     expect(screen.queryByText("Check the text, then send")).toBeNull();
+  });
+
+  it("uses a fill once: closing and reopening the panel does not bring it back", () => {
+    const first = renderComposer();
+    act(() => useCopilot.getState().fillComposer("Plan a product launch", true));
+    expect(first.box).toHaveValue("Plan a product launch");
+    fireEvent.keyDown(first.box, { key: "Enter" });
+    expect(first.onSend).toHaveBeenCalledWith("Plan a product launch");
+    cleanup();
+    const again = renderComposer();
+    expect(again.box).toHaveValue("");
+    expect(again.box).not.toHaveClass("is-from-voice");
+    expect(screen.queryByText("Check the text, then send")).toBeNull();
+  });
+
+  it("takes a fill that came while the panel was closed, once", () => {
+    act(() => useCopilot.getState().fillComposer("What is blocked?"));
+    const first = renderComposer();
+    expect(first.box).toHaveValue("What is blocked?");
+    cleanup();
+    expect(renderComposer().box).toHaveValue("");
+  });
+
+  it("adds spoken text after what was typed, and an example replaces it", async () => {
+    const user = userEvent.setup();
+    const { box } = renderComposer();
+    await user.type(box, "plan the launch,");
+    act(() => useCopilot.getState().fillComposer("then email the team", true));
+    expect(box).toHaveValue("plan the launch, then email the team");
+    expect(box).toHaveClass("is-from-voice");
+    act(() => useCopilot.getState().fillComposer("and a press kit", true));
+    expect(box).toHaveValue("plan the launch, then email the team and a press kit");
+    act(() => useCopilot.getState().fillComposer("What is blocked?"));
+    expect(box).toHaveValue("What is blocked?");
+    expect(box).not.toHaveClass("is-from-voice");
+  });
+
+  it("names one selected node in the singular", () => {
+    useApp.setState({ canvasSelection: { project: "main", ids: ["a"] } });
+    renderComposer();
+    expect(screen.getByText("After 1 selected node")).toBeInTheDocument();
+  });
+
+  describe("growing with its text", () => {
+    let style: HTMLStyleElement;
+    let scrollHeight = 0;
+    beforeEach(() => {
+      // jsdom lays nothing out: the box's sizes come from this sheet and the
+      // scrollHeight below (content plus padding, never the border).
+      style = document.createElement("style");
+      style.textContent =
+        ".copilot-input { box-sizing: border-box; line-height: 20px; padding-top: 8px; padding-bottom: 8px;" +
+        " border-top-width: 1px; border-bottom-width: 1px; border-style: solid; }";
+      document.head.appendChild(style);
+      vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockImplementation(() => scrollHeight);
+    });
+    afterEach(() => style.remove());
+
+    it("counts the border, so the text fits without a scrollbar", async () => {
+      const user = userEvent.setup();
+      const { box } = renderComposer();
+      scrollHeight = 56; // two lines: 2 x 20 + 16 padding
+      await user.type(box, "a{Shift>}{Enter}{/Shift}b");
+      expect(box.style.height).toBe("58px");
+    });
+
+    it("stops at eight lines, border included", async () => {
+      const user = userEvent.setup();
+      const { box } = renderComposer();
+      scrollHeight = 20 * 30 + 16;
+      await user.type(box, "long");
+      expect(box.style.height).toBe(`${20 * 8 + 16 + 2}px`);
+    });
   });
 });
