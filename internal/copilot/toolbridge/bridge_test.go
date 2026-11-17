@@ -311,6 +311,11 @@ func TestCreateSubgraphNeverCarriesAcceptance(t *testing.T) {
 	if strings.Contains(sent.body, "acceptance") || !strings.Contains(sent.body, `"dependsOn"`) {
 		t.Errorf("subgraph body = %s, want acceptance dropped and the rest kept", sent.body)
 	}
+	// Only where dropping keeps the call's meaning: a message with files is
+	// refused, not sent without them.
+	if _, dropped := droppedArgs["send_message"]; dropped {
+		t.Error("send_message's files are dropped from its arguments instead of refused")
+	}
 }
 
 func TestWithoutInputsWalksNestedPaths(t *testing.T) {

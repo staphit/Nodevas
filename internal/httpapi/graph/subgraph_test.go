@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/store"
 )
 
 var (
@@ -190,5 +192,34 @@ func TestBatchUndoAndRedoOverHTTP(t *testing.T) {
 	g, _, _ := st.LoadGraph()
 	if b := g.NodeByID(ids["b"].(string)); b == nil || b.Requires != ids["a"] {
 		t.Fatalf("b = %+v", b)
+	}
+}
+
+// A node a run is working on is kept by undo, like a claimed one; the run
+// lookup is the server's (SetActiveRun).
+func TestBatchUndoKeepsANodeARunIsWorkingOn(t *testing.T) {
+	api, _ := graphTestAPI(t)
+	response, payload := call(t, api.postSubgraph, httpBea, "/api/graph/subgraph",
+		`{"nodes":[{"key":"a","title":"A"},{"key":"b","title":"B"}],"batch":{"via":"copilot-draft:d2"}}`, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("commit: %d %s", response.Code, response.Body)
+	}
+	batchID := payload["batchId"].(string)
+	busy := payload["ids"].(map[string]any)["a"].(string)
+	api.SetActiveRun(func(_ context.Context, st *store.Store, nodeID string) bool {
+		if st == nil {
+			t.Error("no store handed to the run lookup")
+		}
+		return nodeID == busy
+	})
+	response, payload = call(t, api.postBatchUndo, httpBea, "/api/graph/batches/"+batchID+"/undo", "", batchID)
+	if response.Code != http.StatusOK {
+		t.Fatalf("undo: %d %s", response.Code, response.Body)
+	}
+	refused, _ := payload["refused"].([]any)
+	trashed, _ := payload["trashed"].([]any)
+	if len(refused) != 1 || refused[0].(map[string]any)["id"] != busy || refused[0].(map[string]any)["code"] != store.BatchRefusedBusy ||
+		len(trashed) != 1 {
+		t.Fatalf("undo result = %s", response.Body)
 	}
 }

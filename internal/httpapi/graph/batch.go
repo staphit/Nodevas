@@ -19,10 +19,20 @@ import (
 // anyone else, as for an unknown id, it is 404 BATCH_NOT_FOUND. Undoing twice
 // answers an empty result.
 func (a *API) postBatchUndo(c *gin.Context) {
-	// No Busy check: this handler set reaches no run records (New takes the
-	// project manager and the hub only), so "a run is working on it" is left
-	// to the claim check, which an agent's run holds while it works.
-	result, err := httpx.StoreFor(c.Request, a.pm).UndoBatch(auth.ActorFrom(c.Request), c.Param("id"), store.BatchUndoOptions{})
+	st := httpx.StoreFor(c.Request, a.pm)
+	var options store.BatchUndoOptions
+	if a.activeRun != nil {
+		// A node a run is working on is kept, like a claimed one (a run
+		// that has not claimed yet holds no claim).
+		ctx := c.Request.Context()
+		options.Busy = func(nodeID string) (bool, string) {
+			if a.activeRun(ctx, st, nodeID) {
+				return true, "a run is working on it"
+			}
+			return false, ""
+		}
+	}
+	result, err := st.UndoBatch(auth.ActorFrom(c.Request), c.Param("id"), options)
 	if err != nil {
 		writeBatchError(c, err)
 		return

@@ -162,16 +162,25 @@ var offTopic = map[string]bool{
 }
 
 // unusableInputs are tool inputs the hub always refuses the copilot. They are
-// left out of the schema the model sees, for the same reason as unusable,
-// and dropped from the arguments of a call that sends them anyway: the MCP
-// server validates against its own schema, not the one offered here. A path
-// steps through properties by name; "items" steps into an array's elements.
+// left out of the schema the model sees, for the same reason as unusable. A
+// path steps through properties by name; "items" steps into an array's
+// elements.
 var unusableInputs = map[string][]string{
 	// No folder to attach files from (NoLocalFiles).
 	"send_message": {"files"},
 	// Acceptance is written by a person or a planner/QA run, never by the
 	// role-less copilot, and CreateSubgraph checks every node before writing
 	// any: one node carrying it would fail the whole batch.
+	"create_subgraph": {"nodes.items.acceptance"},
+}
+
+// droppedArgs are unusable inputs also removed from the arguments of a call
+// that sends them anyway (the MCP server validates against its own schema,
+// not the one offered here). Only where dropping keeps the call's meaning:
+// a batch of nodes is still the batch without acceptance criteria, while a
+// message whose attachments were dropped is not the message the model meant
+// to send, so send_message's files stay refused with the server's reason.
+var droppedArgs = map[string][]string{
 	"create_subgraph": {"nodes.items.acceptance"},
 }
 
@@ -340,7 +349,7 @@ func (b *bridge) Call(ctx context.Context, name string, input json.RawMessage) (
 		if !json.Valid(trimmed) {
 			return Result{Output: "tool input is not valid JSON", IsError: true}, nil
 		}
-		args = withoutArgs(json.RawMessage(trimmed), unusableInputs[name])
+		args = withoutArgs(json.RawMessage(trimmed), droppedArgs[name])
 	}
 	result, err := b.client.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: args})
 	if err != nil {

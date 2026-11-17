@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
+	"nodevas/internal/store"
 )
 
 // API serves this package's endpoints. It holds only what these
@@ -15,6 +17,17 @@ import (
 type API struct {
 	pm  *project.ProjectManager
 	hub *realtime.Hub
+	// activeRun, when set, reports whether a run that has not ended works
+	// on the node; batch undo keeps such a node. Wired by the server, which
+	// holds the run records.
+	activeRun func(ctx context.Context, st *store.Store, nodeID string) bool
+}
+
+// SetActiveRun gives batch undo a way to see runs (internal/runs), which this
+// handler set does not otherwise reach.
+func (a *API) SetActiveRun(check func(ctx context.Context, st *store.Store, nodeID string) bool) *API {
+	a.activeRun = check
+	return a
 }
 
 // New builds the handler set.
