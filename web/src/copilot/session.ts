@@ -29,7 +29,7 @@ import {
   runBrowserModel,
 } from "./browserModel";
 import { runClientTool, SUPPORTED_CLIENT_TOOLS } from "./clientTools";
-import { activeDraftId, currentDraft, useCopilot } from "./copilotStore";
+import { activeDraftId, currentDraft, isPlanDraft, refinableDraftId, useCopilot } from "./copilotStore";
 import { cancelSpeech } from "./speech";
 
 let controller: AbortController | null = null;
@@ -368,11 +368,17 @@ export function sendTurn(raw: string, source: CopilotSource): Promise<void> {
 /**
  * A "Make nodes" turn: the copilot drafts nodes and nothing is written. With
  * an open draft on screen it refines that one, sending it as the person
- * edited it.
+ * edited it. A coding agent's plan is not refined: the person creates or
+ * discards it first (or asks in "Ask"), and their words go back into the box.
  */
 export function sendDraft(raw: string, source: CopilotSource): Promise<void> {
   const state = useCopilot.getState();
-  const active = activeDraftId(state);
+  if (isPlanDraft(state, activeDraftId(state))) {
+    state.setNotice(translate("copilot.planOpen"));
+    state.fillComposer(raw, source === "voice");
+    return Promise.resolve();
+  }
+  const active = refinableDraftId(state);
   if (active) return refineDraft(raw, source, active);
   return runTurn(raw, source, { intent: "draft" });
 }

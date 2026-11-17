@@ -152,6 +152,22 @@ export interface CopilotDraftIssue {
 
 export type CopilotDraftState = "open" | "committed" | "discarded";
 
+/** The plan run a draft came from (a coding agent's plan, P6). */
+export interface CopilotDraftOrigin {
+  runId: string;
+  goalId: string;
+  goalTitle?: string;
+  agent?: string;
+  model?: string;
+}
+
+/** What the planner wrote for a node that the card does not edit. */
+export interface CopilotDraftExtras {
+  tags?: string[];
+  acceptance?: string[];
+  priority?: string;
+}
+
 export interface CopilotDraftData {
   draft: CopilotDraft;
   issues: CopilotDraftIssue[];
@@ -163,6 +179,10 @@ export interface CopilotDraftData {
   refineOf?: string;
   batchId?: string;
   createdIds?: string[];
+  /** Set on a coding agent's plan (P6): the run, its goal, who planned it. */
+  origin?: CopilotDraftOrigin;
+  /** By draft key: what the planner wrote that the card does not edit. */
+  extras?: Record<string, CopilotDraftExtras>;
 }
 
 /** Steps of a draft turn, as `draft_status` events name them. */

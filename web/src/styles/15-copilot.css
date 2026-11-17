@@ -1203,6 +1203,26 @@
 .draft-chip.is-existing {
   border: 1px dashed var(--border-strong);
 }
+/* A coding agent's plan: who planned it, and what each step carries. */
+.draft-origin {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0 calc(1.4em + 26px);
+}
+.draft-extras .draft-chip {
+  padding-right: 8px;
+  cursor: default;
+}
+.draft-chip.is-unused {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
 .draft-chip-x {
   display: inline-flex;
   padding: 2px;

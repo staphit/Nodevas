@@ -76,6 +76,10 @@ export interface SubgraphNodeSpec {
   dependsOn?: string[];
   /** Keys or node ids of Notes it uses as context. */
   refs?: string[];
+  tags?: string[];
+  /** Acceptance criteria; only for a type that hands work to an agent. */
+  acceptance?: string[];
+  priority?: string;
 }
 
 /** POST /api/graph/subgraph and its dry run /subgraph/check. */

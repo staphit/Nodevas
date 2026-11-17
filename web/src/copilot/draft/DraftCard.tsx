@@ -27,7 +27,7 @@ import {
   refreshCanWrite,
 } from "./draftApi";
 import { DraftList, issueText, KindGlyph, type NodeMark } from "./DraftList";
-import { countLinks, diffDrafts, MAX_DRAFT_NODES, mentionsCode, mergeMany, type DiffMark } from "./draftStore";
+import { countLinks, diffDrafts, goalTagOf, maxNodesOf, mentionsCode, mergeMany, type DiffMark } from "./draftStore";
 import { useDraftUi } from "./draftUi";
 
 /** More nodes than this, and the coding agent's plan is the suggestion. */
@@ -45,6 +45,7 @@ function marksFor(
   draft: CopilotDraft,
   serverIssues: CopilotDraftIssue[],
   edited: boolean,
+  maxNodes: number,
 ): { byKey: Record<string, NodeMark[]>; general: NodeMark[] } {
   const byKey: Record<string, NodeMark[]> = {};
   const general: NodeMark[] = [];
@@ -64,7 +65,7 @@ function marksFor(
       title: issue.title,
     });
   }
-  for (const issue of checkLocally(draft)) {
+  for (const issue of checkLocally(draft, undefined, maxNodes)) {
     // The server already named the same problem without the ref.
     if (issue.key && seen.has(`${issue.key}:${issue.code}:`)) continue;
     add(issue.key, { code: issue.code, severity: isBlocking(issue) ? "error" : "warning", ref: issue.ref });
@@ -115,9 +116,13 @@ export function DraftCard({
   }, [live, canWrite, project]);
 
   const draft = edited ?? data?.draft ?? null;
+  const maxNodes = data ? maxNodesOf(data) : undefined;
   const nodeTypes = useMemo(() => nodeTypesForLayout(graph), [graph]);
   const marks = useMemo(
-    () => (draft && data ? marksFor(draft, data.issues ?? [], edited !== undefined) : { byKey: {}, general: [] }),
+    () =>
+      draft && data
+        ? marksFor(draft, data.issues ?? [], edited !== undefined, maxNodesOf(data))
+        : { byKey: {}, general: [] },
     // graph: the client checks read the board's ids and types.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [draft, data, edited, graph],
@@ -134,14 +139,23 @@ export function DraftCard({
 
   const count = draft.nodes.length;
   const links = countLinks(draft);
-  const model = modelLabel({ provider: data.provider, model: data.model } as CopilotStatus, t);
+  // A coding agent's plan names who planned it; the copilot's own, its model.
+  const origin = data.origin;
+  const model = origin
+    ? [origin.agent, origin.model].filter(Boolean).join(" · ")
+    : modelLabel({ provider: data.provider, model: data.model } as CopilotStatus, t);
+  const goalTitle = origin
+    ? origin.goalTitle || graph?.nodes?.find((node) => node.id === origin.goalId)?.title || origin.goalId
+    : "";
+  const planExtras = origin ? (data.extras ?? {}) : undefined;
+  const goalTag = origin ? goalTagOf(origin.goalId) : undefined;
   const blocking =
     Object.values(marks.byKey).some((list) => list.some((mark) => mark.severity === "error")) ||
     marks.general.some((mark) => mark.severity === "error");
   const noWrite = unreadable || canWrite === false;
   const createDisabled = !live || blocking || check?.status === "error" || noWrite || busy !== undefined;
   const deeper =
-    count > DEEPER_NODE_COUNT || Boolean(draft.needsCodeKnowledge) || mentionsCode(prompt);
+    !origin && (count > DEEPER_NODE_COUNT || Boolean(draft.needsCodeKnowledge) || mentionsCode(prompt));
   const smallModel =
     data.provider === "browser" &&
     language === "zh-TW" &&
@@ -161,6 +175,11 @@ export function DraftCard({
         </span>
       )}
       {stateLabel && <span className={`draft-state is-${open ? "superseded" : data.state}`}>{stateLabel}</span>}
+      {origin && (
+        <span className="draft-origin">
+          {t("draft.plan.origin", { agent: origin.agent || t("draft.plan.agentUnknown"), goal: goalTitle })}
+        </span>
+      )}
     </div>
   );
 
@@ -183,6 +202,9 @@ export function DraftCard({
             selected={new Set()}
             onToggleSelect={() => undefined}
             onEdit={() => undefined}
+            extras={planExtras}
+            goalTag={goalTag}
+            maxNodes={maxNodes}
           />
         )}
       </section>
@@ -207,8 +229,9 @@ export function DraftCard({
     <section className={`draft-card${themed ? " is-themed" : ""}`} data-draft-entry={item.id} data-state="open">
       {header}
       {draft.summary && <p className="draft-summary">{draft.summary}</p>}
+      {origin && <p className="draft-note">{t("draft.plan.note")}</p>}
       {smallModel && <p className="draft-note">{t("draft.smallModel")}</p>}
-      {data.capped && <p className="draft-note">{t("draft.capped", { max: MAX_DRAFT_NODES })}</p>}
+      {data.capped && <p className="draft-note">{t("draft.capped", { max: maxNodesOf(data) })}</p>}
       {(draft.questions?.length ?? 0) > 0 && (
         <div className="draft-questions">
           <span className="draft-questions-label">{t("draft.questions")}</span>
@@ -253,6 +276,9 @@ export function DraftCard({
           selected={selected}
           onToggleSelect={toggleSelect}
           onEdit={onEdit}
+          extras={planExtras}
+          goalTag={goalTag}
+          maxNodes={maxNodes}
         />
       )}
       {diff.removed.length > 0 && (
@@ -265,7 +291,7 @@ export function DraftCard({
       )}
       {marks.general.map((mark) => (
         <p key={mark.code} className={`draft-issue is-${mark.severity}`} role="alert" data-issue={mark.code}>
-          {issueText(mark, t)}
+          {issueText(mark, t, maxNodes)}
         </p>
       ))}
       {check?.status === "error" && (
@@ -308,14 +334,17 @@ export function DraftCard({
           {t("draft.discard")}
         </button>
       </div>
-      <button
-        type="button"
-        className={`draft-deeper${deeper ? " is-suggested" : ""}`}
-        onClick={() => void planWithAgent(item.id)}
-        disabled={running}
-      >
-        {t("draft.deeper")}
-      </button>
+      {/* A coding agent's plan already is the deeper path. */}
+      {!origin && (
+        <button
+          type="button"
+          className={`draft-deeper${deeper ? " is-suggested" : ""}`}
+          onClick={() => void planWithAgent(item.id)}
+          disabled={running}
+        >
+          {t("draft.deeper")}
+        </button>
+      )}
       {deeper && <p className="draft-deeper-hint">{t("draft.deeperHint")}</p>}
     </section>
   );

@@ -14,6 +14,8 @@ import type {
   CopilotConversation,
   CopilotDraft,
   CopilotDraftData,
+  CopilotDraftExtras,
+  CopilotDraftOrigin,
   CopilotDraftStep,
   CopilotEntry,
   CopilotMode,
@@ -221,6 +223,37 @@ export function formatToolValue(value: unknown): string {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/** A plan draft's origin, when it names its run and goal; else undefined. */
+function parseDraftOrigin(value: unknown): CopilotDraftOrigin | undefined {
+  if (!isRecord(value) || typeof value.runId !== "string" || typeof value.goalId !== "string") return undefined;
+  const origin: CopilotDraftOrigin = { runId: value.runId, goalId: value.goalId };
+  for (const field of ["goalTitle", "agent", "model"] as const) {
+    if (typeof value[field] === "string") origin[field] = value[field];
+  }
+  return origin;
+}
+
+/** A plan draft's extras by key; a malformed value or field is dropped. */
+function parseDraftExtras(value: unknown): Record<string, CopilotDraftExtras> | undefined {
+  if (!isRecord(value)) return undefined;
+  const extras: Record<string, CopilotDraftExtras> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!isRecord(item)) continue;
+    const parsed: CopilotDraftExtras = {};
+    if (isStringList(item.tags)) parsed.tags = item.tags;
+    if (isStringList(item.acceptance)) parsed.acceptance = item.acceptance;
+    if (typeof item.priority === "string" && item.priority) parsed.priority = item.priority;
+    if (Object.keys(parsed).length) extras[key] = parsed;
+  }
+  return extras;
+}
+
 /** A draft entry's data; null when it is missing or not a draft. */
 export function parseDraftData(raw: string | undefined): CopilotDraftData | null {
   if (!raw) return null;
@@ -229,8 +262,13 @@ export function parseDraftData(raw: string | undefined): CopilotDraftData | null
     if (!value || typeof value !== "object" || !value.draft || !Array.isArray(value.draft.nodes)) {
       return null;
     }
+    const { origin: rawOrigin, extras: rawExtras, ...rest } = value;
+    const origin = parseDraftOrigin(rawOrigin);
+    const extras = parseDraftExtras(rawExtras);
     return {
-      ...value,
+      ...rest,
+      ...(origin ? { origin } : {}),
+      ...(extras ? { extras } : {}),
       draft: {
         ...value.draft,
         summary: value.draft.summary ?? "",
@@ -369,9 +407,26 @@ export function activeDraftId(state: { items: TranscriptItem[] }): string | null
   return null;
 }
 
+/** Whether a draft is a coding agent's plan (it names the run it came from). */
+export function isPlanDraft(state: { items: TranscriptItem[] }, entryId: string | null): boolean {
+  return Boolean(entryId && draftItemOf(state, entryId)?.data?.origin);
+}
+
+/**
+ * The open draft a "Make nodes" message refines. A coding agent's plan is
+ * never refined by the copilot's drafter (it holds fewer nodes and knows
+ * nothing of the plan's tags and acceptance): it is created or discarded.
+ */
+export function refinableDraftId(state: { items: TranscriptItem[] }): string | null {
+  const active = activeDraftId(state);
+  return isPlanDraft(state, active) ? null : active;
+}
+
 /** The composer's placeholder in "Make nodes": refining while a draft is open. */
 export function makePlaceholderKey(state: { items: TranscriptItem[] }): string {
-  return activeDraftId(state) ? "copilot.placeholder.refine" : "copilot.placeholder.make";
+  const active = activeDraftId(state);
+  if (!active) return "copilot.placeholder.make";
+  return isPlanDraft(state, active) ? "copilot.placeholder.planOpen" : "copilot.placeholder.refine";
 }
 
 export function draftItemOf(state: { items: TranscriptItem[] }, entryId: string): DraftItem | undefined {

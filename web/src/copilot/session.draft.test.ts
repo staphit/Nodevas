@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotDraftData } from "../api";
+import { translate } from "../i18n";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { resetBrowserModelCache } from "./browserModel";
@@ -118,5 +119,29 @@ describe("sendDraft", () => {
       refineOf: "d1",
       previous: { nodes: [{ key: "a", title: "Write the guide" }] },
     });
+  });
+
+  it("sendDraft does not refine an open plan draft and sets the planOpen notice", async () => {
+    const plan: CopilotDraftData = {
+      ...draftData,
+      provider: "",
+      model: "",
+      draft: { ...draftData.draft, summary: "" },
+      origin: { runId: "run-7", goalId: "n-12", agent: "claude" },
+      extras: { a: { acceptance: ["Docs build"] } },
+    };
+    useCopilot.setState({
+      items: [entryToItem({ id: "p1", seq: 1, kind: "draft", text: "", data: JSON.stringify(plan), createdAt: 1 })],
+      notice: null,
+    });
+    await sendDraft("add a review step", "text");
+    expect(turnBodies).toEqual([]);
+    expect(useCopilot.getState().notice).toBe(translate("copilot.planOpen", "zh-TW"));
+    // The words are not lost: they go back into the box.
+    expect(useCopilot.getState().composerFill?.text).toBe("add a review step");
+    // Ask mode is unaffected.
+    await sendTurn("what does the plan do?", "text");
+    expect(turnBodies).toHaveLength(1);
+    expect(turnBodies[0].intent).toBeUndefined();
   });
 });
