@@ -32,6 +32,18 @@ const (
 	maxDraftTitleRunes = 60
 	maxDraftBodyRunes  = 600
 	maxDraftQuestions  = 5
+	// maxPlanDraftTitleRunes clips a coding agent's task title (P6): the
+	// planner is not held to the drafter's 60 characters.
+	maxPlanDraftTitleRunes = 200
+	// maxStoredDraftKeyBytes and maxStoredDraftRefBytes bound what a draft
+	// the browser sends back (a refine's previous, the draft-state's final)
+	// may hold per key and per link; maxStoredDraftKindBytes per kind.
+	maxStoredDraftKeyBytes  = 64
+	maxStoredDraftKindBytes = 128
+	maxStoredDraftRefBytes  = 200
+	// draftTemperature is the drafter's sampling temperature where a model
+	// takes one (C5): a draft should follow the description, not vary.
+	draftTemperature = 0.2
 	// existingPrefix marks a reference to a node already on the board.
 	existingPrefix = "existing:"
 )
@@ -95,6 +107,9 @@ const (
 	// IssueBodyClipped (warning): a plan draft node's body was longer than
 	// the card keeps (maxDraftBodyRunes).
 	IssueBodyClipped = "body_clipped"
+	// IssueTitleClipped (warning): a plan draft node's title was longer
+	// than maxPlanDraftTitleRunes.
+	IssueTitleClipped = "title_clipped"
 )
 
 var draftKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
@@ -142,14 +157,7 @@ func parseDraft(raw string) (Draft, error) {
 // kind, rewrites a bare existing id in After or Refs to its existing: form,
 // and cuts the draft to MaxDraftNodes. It reports whether nodes were cut.
 func normalizeDraft(draft *Draft, board draftBoard, defaultKind string) (capped bool) {
-	draft.Summary = clipRunes(flatLine(draft.Summary), 200)
-	questions := draft.Questions[:0]
-	for _, question := range draft.Questions {
-		if question = clipRunes(flatLine(question), 200); question != "" && len(questions) < maxDraftQuestions {
-			questions = append(questions, question)
-		}
-	}
-	draft.Questions = questions
+	normalizeDraftText(draft)
 	if len(draft.Nodes) > MaxDraftNodes {
 		draft.Nodes, capped = draft.Nodes[:MaxDraftNodes], true
 	}
@@ -171,6 +179,58 @@ func normalizeDraft(draft *Draft, board draftBoard, defaultKind string) (capped 
 		node.Refs = normalizeTargets(node.Refs, keys, board, capped)
 	}
 	return capped
+}
+
+// normalizeDraftText trims and clips the summary and the questions.
+func normalizeDraftText(draft *Draft) {
+	draft.Summary = clipRunes(flatLine(draft.Summary), 200)
+	questions := draft.Questions[:0]
+	for _, question := range draft.Questions {
+		if question = clipRunes(flatLine(question), 200); question != "" && len(questions) < maxDraftQuestions {
+			questions = append(questions, question)
+		}
+	}
+	draft.Questions = questions
+}
+
+// boundDraft checks and normalizes a draft the browser sends back: a
+// refine's previous draft, or the person's final one on the draft-state call
+// (C2). At most limit nodes; a key, kind or link longer than any the card
+// makes, or more links than a plan holds nodes, is refused; text is trimmed
+// and clipped as a drafted node's is, the title to titleLimit. Links are
+// kept as written, trimmed and deduplicated: the board checks them at Create.
+func boundDraft(draft *Draft, limit, titleLimit int) error {
+	if len(draft.Nodes) > limit {
+		return fmt.Errorf("the draft has more than %d nodes", limit)
+	}
+	normalizeDraftText(draft)
+	for i := range draft.Nodes {
+		node := &draft.Nodes[i]
+		node.Key = strings.TrimSpace(node.Key)
+		node.Kind = strings.TrimSpace(node.Kind)
+		if len(node.Key) > maxStoredDraftKeyBytes || len(node.Kind) > maxStoredDraftKindBytes {
+			return fmt.Errorf("nodes[%d] has a key or kind longer than a draft makes", i)
+		}
+		node.Title = clipRunes(flatLine(node.Title), titleLimit)
+		node.Body = clipRunes(planDraftBody(node.Body), maxDraftBodyRunes)
+		for _, list := range []*[]string{&node.After, &node.Refs} {
+			if len(*list) > MaxPlanDraftNodes {
+				return fmt.Errorf("nodes[%d] has more than %d links", i, MaxPlanDraftNodes)
+			}
+			var out []string
+			for _, target := range *list {
+				target = strings.TrimSpace(target)
+				if len(target) > maxStoredDraftRefBytes {
+					return fmt.Errorf("nodes[%d] links to an overlong id", i)
+				}
+				if target != "" && !slices.Contains(out, target) {
+					out = append(out, target)
+				}
+			}
+			*list = out
+		}
+	}
+	return nil
 }
 
 // normalizeTargets trims, deduplicates and rewrites references. With capped,

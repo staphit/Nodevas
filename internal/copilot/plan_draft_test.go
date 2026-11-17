@@ -251,10 +251,10 @@ func TestSetDraftStateTakesAHundredIDsForAPlanDraft(t *testing.T) {
 	h := newHarness(t, nil)
 	conversation := h.conversation(alice, ModeDefault)
 	plan := appendPlanDraft(t, h, conversation, "node-0042", DraftOpen, nil)
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, plan.ID, DraftCommitted, "b-1", idList(100)); err != nil {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, plan.ID, DraftCommitted, "b-1", idList(100), nil); err != nil {
 		t.Fatalf("100 ids for a plan draft: %v", err)
 	}
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, plan.ID, DraftCommitted, "b-1", idList(101)); !errors.Is(err, ErrInvalid) {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, plan.ID, DraftCommitted, "b-1", idList(101), nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("101 ids: %v", err)
 	}
 	own, err := h.service.store.AppendEntry(ctx, Entry{ConversationID: conversation.ID, Kind: EntryDraft, Text: "Draft",
@@ -262,10 +262,10 @@ func TestSetDraftStateTakesAHundredIDsForAPlanDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, own.ID, DraftCommitted, "b-2", idList(41)); !errors.Is(err, ErrInvalid) {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, own.ID, DraftCommitted, "b-2", idList(41), nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("41 ids for a copilot draft: %v", err)
 	}
-	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, own.ID, DraftCommitted, "b-2", idList(40)); err != nil {
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, own.ID, DraftCommitted, "b-2", idList(40), nil); err != nil {
 		t.Fatalf("40 ids for a copilot draft: %v", err)
 	}
 }
@@ -378,7 +378,7 @@ func TestPlanDraftBusy(t *testing.T) {
 		t.Fatal("another goal's, account's or project's view is busy")
 	}
 	for _, state := range []string{DraftCommitted, DraftDiscarded} {
-		if _, err := h.service.SetDraftState(ctx, alice.ID, other.ID, card.ID, state, "", nil); err != nil {
+		if _, err := h.service.SetDraftState(ctx, alice.ID, other.ID, card.ID, state, "", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		if got := busy(alice.ID, "demo", "node-0042"); got != "" {

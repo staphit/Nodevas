@@ -79,6 +79,11 @@ type Request struct {
 	// A vendor or local server may not enforce it, and an older runner
 	// drops it: callers validate the answer whatever was asked.
 	ResponseSchema *ResponseSchema
+	// Temperature, when set, is the sampling temperature (0..2). Only an
+	// OpenAI-compatible model that is not a reasoning model is sent one
+	// (Ollama, LM Studio); Anthropic ignores it, since thinking is on and
+	// refuses a temperature other than 1. The drafter sets 0.2.
+	Temperature *float64
 }
 
 // ResponseSchema names a JSON Schema the answer must match. Name is a short

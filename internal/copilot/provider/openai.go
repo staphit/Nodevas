@@ -85,6 +85,9 @@ type oaRequest struct {
 	// take this OpenAI shape too; a server that does not answers 400, and
 	// the call is made again without it.
 	ResponseFormat *oaResponseFormat `json:"response_format,omitempty"`
+	// Temperature is sent only when the request sets one and the model is
+	// not a reasoning model, which rejects it.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 // oaResponseFormat is json_schema without strict: strict mode requires every
@@ -146,6 +149,9 @@ func (p *openaiProvider) Stream(ctx context.Context, req Request, onDelta func(D
 	reasoning := reasoningModel(p.model)
 	if p.effort != "" && reasoning {
 		body.ReasoningEffort = p.effort
+	}
+	if req.Temperature != nil && !reasoning {
+		body.Temperature = req.Temperature
 	}
 	if req.MaxTokens > 0 {
 		if reasoning {

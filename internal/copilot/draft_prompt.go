@@ -28,6 +28,10 @@ type draftContext struct {
 	Previous *Draft
 	// Small trims the prompt for an on-device model's few thousand tokens.
 	Small bool
+	// MaxBytes, when set, bounds the user message (the browser's model):
+	// the previous draft's bodies, then the far end of the listing give way;
+	// the person's words never do.
+	MaxBytes int
 }
 
 // boardNode is one board node as the prompt shows it.
@@ -37,6 +41,9 @@ type boardNode struct {
 	Kind   string
 	Status string
 	After  []string
+	// Before is what waits for a selected node (get_node's downstream); it
+	// orders the listing and is not shown as such.
+	Before []string
 }
 
 // draftSystemPrompt is the drafter's instructions. It is static apart from
@@ -46,8 +53,9 @@ func draftSystemPrompt(c draftContext) string {
 	b.WriteString("You turn a person's description into new nodes for a project board in Nodevas. " +
 		"Output only one JSON object matching the schema: no prose, no code fences.\n\n")
 	b.WriteString("Rules:\n")
-	b.WriteString("1. One node per actionable step. Prefer a handful of well-scoped steps over many tiny ones; " +
-		"at most " + fmt.Sprint(MaxDraftNodes) + ".\n")
+	b.WriteString("1. One node per actionable step. Every step the person listed becomes its own node: never drop " +
+		"or merge one they named, the last one included. Otherwise prefer a handful of well-scoped steps over many " +
+		"tiny ones; at most " + fmt.Sprint(MaxDraftNodes) + ".\n")
 	b.WriteString("2. Titles are short (at most 60 characters) and in the person's language. A body is optional: " +
 		"one or two sentences on what the step means, never a copy of the title.\n")
 	b.WriteString("3. key is your own short name for a node in this draft (n1, n2, …). " +
@@ -81,7 +89,8 @@ func draftKindRule(c draftContext) string {
 		b.WriteString("this is a story board: writing units are \"scene\", plot beats or turning points \"event\", " +
 			"characters, settings and research \"note\" (a note gets no after; nodes that use it list it in refs). ")
 	} else {
-		b.WriteString("most steps are \"task\"; a person's approval or review is \"gate\"; a decision is \"choice\"; " +
+		b.WriteString("most steps are \"task\"; a step where a person approves, signs off or reviews (a manager's " +
+			"approval, a sign-off, a review before release) is \"gate\", never \"task\"; a decision is \"choice\"; " +
 			"reference material is \"note\" (no after; nodes that use it list it in refs); \"goal\" only for a big " +
 			"requirement to be broken down later. ")
 	}
@@ -116,8 +125,47 @@ Person: chapter 3: three scenes, Mara is in all of them
 `
 
 // draftUserMessage is the board and the request. The board sits in a marked
-// DATA block: its titles are other people's text.
+// DATA block: its titles are other people's text. Within c.MaxBytes, what
+// gives way is, in order: the previous draft's bodies (shorter, then none),
+// then listed nodes from the end of the listing (the farthest from the
+// selection) with their links. The instruction is always whole and last: a
+// cut message would otherwise lose exactly what the person asked.
 func draftUserMessage(c draftContext) string {
+	message := renderDraftUserMessage(c)
+	if c.MaxBytes <= 0 || len(message) <= c.MaxBytes {
+		return message
+	}
+	if shown := len(c.Selected) + len(c.Listed); c.Total < shown {
+		c.Total = shown // still say how many there are once some go
+	}
+	if c.Previous != nil {
+		for _, limit := range []int{200, 60, 0} {
+			trimmed := *c.Previous
+			trimmed.Nodes = slices.Clone(c.Previous.Nodes)
+			for i := range trimmed.Nodes {
+				trimmed.Nodes[i].Body = clipRunes(trimmed.Nodes[i].Body, limit)
+			}
+			c.Previous = &trimmed
+			if message = renderDraftUserMessage(c); len(message) <= c.MaxBytes {
+				return message
+			}
+		}
+	}
+	for len(c.Listed) > 0 {
+		c.Listed = c.Listed[:len(c.Listed)*3/4]
+		kept := map[string]bool{}
+		for _, node := range slices.Concat(c.Selected, c.Listed) {
+			kept[node.ID] = true
+		}
+		c.Edges = slices.DeleteFunc(slices.Clone(c.Edges), func(edge [2]string) bool { return !kept[edge[0]] || !kept[edge[1]] })
+		if message = renderDraftUserMessage(c); len(message) <= c.MaxBytes {
+			return message
+		}
+	}
+	return message
+}
+
+func renderDraftUserMessage(c draftContext) string {
 	var b strings.Builder
 	if c.Language != "" {
 		fmt.Fprintf(&b, "The person's interface language: %s.\n", clip(c.Language))

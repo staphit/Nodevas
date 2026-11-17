@@ -114,7 +114,18 @@ type LLMRequest struct {
 	// decode without DisallowUnknownFields, ignores it and answers free
 	// text, which the copilot validates whatever it asked for.
 	ResponseSchema *LLMResponseSchema `json:"responseSchema,omitempty"`
+	// Temperature, when set, is provider.Request.Temperature: between
+	// MinLLMTemperature and MaxLLMTemperature, or the runner refuses the
+	// call. Optional both ways, like ResponseSchema: an older runner ignores
+	// it and samples at the provider's default.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
+
+// Bounds on LLMRequest.Temperature.
+const (
+	MinLLMTemperature = 0
+	MaxLLMTemperature = 2
+)
 
 // LLMResponseSchema is provider.ResponseSchema on the wire: Name matches
 // [a-zA-Z0-9_-]{1,64} and Schema is a JSON Schema object of at most

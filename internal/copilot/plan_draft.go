@@ -24,7 +24,8 @@ import (
 const maxPlanDraftStateIDs = 20
 
 // planDraftData turns a draft plan run's capture into an EntryDraft's data:
-// the card's nodes (title, kind and body clipped as the drafter's are), the
+// the card's nodes (kind and body as the drafter's are, the title up to
+// maxPlanDraftTitleRunes), the
 // rest of what the planner wrote by key (Extras), and where it came from.
 func planDraftData(capture runnerwire.PlanDraft, run RunInfo, goalID, goalTitle string) DraftData {
 	nodes := capture.Nodes
@@ -73,8 +74,17 @@ func planDraftData(capture runnerwire.PlanDraft, run RunInfo, goalID, goalTitle 
 			data.Issues = append(data.Issues, DraftIssue{Key: key, Field: "body", Severity: IssueWarning,
 				Code: IssueBodyClipped, Message: fmt.Sprintf("the body was cut to %d characters", maxDraftBodyRunes)})
 		}
+		// A planner's title is kept up to the plan bound, not the drafter's
+		// 60 characters: it was never asked for that, and a direct plan run
+		// would have written it whole. Past the bound the card says so.
+		title := flatLine(n.Title)
+		if utf8.RuneCountInString(title) > maxPlanDraftTitleRunes {
+			title = clipRunes(title, maxPlanDraftTitleRunes)
+			data.Issues = append(data.Issues, DraftIssue{Key: key, Field: "title", Severity: IssueWarning,
+				Code: IssueTitleClipped, Message: fmt.Sprintf("the title was cut to %d characters", maxPlanDraftTitleRunes)})
+		}
 		data.Draft.Nodes = append(data.Draft.Nodes, DraftNode{
-			Key: key, Title: clipRunes(flatLine(n.Title), maxDraftTitleRunes), Kind: kind, Body: body,
+			Key: key, Title: title, Kind: kind, Body: body,
 			After: targets(n.DependsOn), Refs: targets(n.Refs),
 		})
 		if len(n.Tags) > 0 || len(n.Acceptance) > 0 || n.Priority != "" {
@@ -174,28 +184,23 @@ func (s *Service) deliverPlanDraft(ctx context.Context, f Followup, conversation
 	goalTitle string, capture runnerwire.PlanDraft) {
 	data := planDraftData(capture, run, f.GoalNodeID, goalTitle)
 	note, shown, reply := planDraftFollowupTexts(f, run, goalTitle, data.Draft)
-	if _, err := s.store.AppendEntry(ctx, Entry{
-		ConversationID: conversation.ID, Kind: EntryEvent, Text: shown,
-		Message: mustJSON(provider.Message{Role: provider.RoleUser, Blocks: []provider.Block{{
-			Type: provider.BlockText, Text: note,
-		}}}),
-	}); err != nil {
-		slog.Warn("copilot: follow-up entry", slog.Any("error", err))
-		return
-	}
-	if _, err := s.store.AppendEntry(ctx, Entry{
-		ConversationID: conversation.ID, Kind: EntryDraft, Text: shown, Data: mustJSON(data),
+	// One transaction: a failure leaves nothing behind, and the follow-up
+	// stays pending for a retry that writes all three once. Written one by
+	// one, a failed card after its note left the note orphaned, a second
+	// note on the retry, and the goal refused as "still drafting" meanwhile.
+	if _, err := s.store.AppendEntries(ctx, []Entry{
+		{ConversationID: conversation.ID, Kind: EntryEvent, Text: shown,
+			Message: mustJSON(provider.Message{Role: provider.RoleUser, Blocks: []provider.Block{{
+				Type: provider.BlockText, Text: note,
+			}}})},
+		{ConversationID: conversation.ID, Kind: EntryDraft, Text: shown, Data: mustJSON(data)},
+		{ConversationID: conversation.ID, Kind: EntryAssistant, Text: reply,
+			Message: mustJSON(provider.Message{Role: provider.RoleAssistant, Blocks: []provider.Block{{
+				Type: provider.BlockText, Text: reply,
+			}}})},
 	}); err != nil {
 		slog.Warn("copilot: follow-up plan draft", slog.Any("error", err))
 		return
-	}
-	if _, err := s.store.AppendEntry(ctx, Entry{
-		ConversationID: conversation.ID, Kind: EntryAssistant, Text: reply,
-		Message: mustJSON(provider.Message{Role: provider.RoleAssistant, Blocks: []provider.Block{{
-			Type: provider.BlockText, Text: reply,
-		}}}),
-	}); err != nil {
-		slog.Warn("copilot: follow-up reply", slog.Any("error", err))
 	}
 	if err := s.store.endFollowup(ctx, f.ID, followupDelivered); err != nil {
 		slog.Warn("copilot: end follow-up", slog.Any("error", err))

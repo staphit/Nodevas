@@ -385,6 +385,11 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 		}
 		schema = &provider.ResponseSchema{Name: rs.Name, Schema: rs.Schema}
 	}
+	// NaN fails both comparisons, so it is refused too.
+	if t := req.Temperature; t != nil && !(*t >= runnerwire.MinLLMTemperature && *t <= runnerwire.MaxLLMTemperature) {
+		s.refuse(req.ID, "the request's temperature is not between 0 and 2")
+		return
+	}
 	maxTokens := req.MaxTokens
 	if maxTokens < 0 {
 		maxTokens = 0
@@ -423,7 +428,7 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 		}()
 		s.call(ctx, req.ID, what, info, key, req.Effort, provider.Request{
 			System: req.System, Messages: messages, Tools: tools, MaxTokens: maxTokens,
-			ResponseSchema: schema,
+			ResponseSchema: schema, Temperature: req.Temperature,
 		})
 	}()
 }

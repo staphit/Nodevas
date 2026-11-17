@@ -158,6 +158,24 @@ func TestRunnerProviderDistrustsMislabelledRaw(t *testing.T) {
 	}
 }
 
+// C5: a draft's temperature goes to the runner; a plain call sends none.
+func TestRunnerProviderSendsTheTemperature(t *testing.T) {
+	message, _ := json.Marshal(provider.Message{Role: provider.RoleAssistant})
+	remote := &fakeRemote{answer: runnerwire.LLMDone{Message: message, Stop: "end_turn"}}
+	p := &runnerProvider{remote: remote, runnerID: "r1",
+		info: runnerwire.LLMInfo{Provider: "openai", Model: "qwen3:8b"}}
+	cool := 0.2
+	for _, req := range []provider.Request{{Temperature: &cool}, {}} {
+		if _, err := p.Stream(context.Background(), req, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(remote.calls) != 2 || remote.calls[0].Temperature == nil || *remote.calls[0].Temperature != 0.2 ||
+		remote.calls[1].Temperature != nil {
+		t.Fatalf("calls = %+v", remote.calls)
+	}
+}
+
 func TestRunnerProviderSendsTheResponseSchema(t *testing.T) {
 	message, _ := json.Marshal(provider.Message{Role: provider.RoleAssistant})
 	remote := &fakeRemote{answer: runnerwire.LLMDone{Message: message, Stop: "end_turn"}}

@@ -330,33 +330,55 @@ WHERE id = ? AND conversation_id = ? AND kind = ?
 // conversation, so the list orders by last activity. ID, Seq and CreatedAt are
 // assigned here.
 func (s *Store) AppendEntry(ctx context.Context, entry Entry) (Entry, error) {
-	entry.ID = newID()
-	entry.CreatedAt = nowMillis()
-	err := s.database.Tx(ctx, func(tx *sql.Tx) error {
-		// The next seq is read inside the write transaction: the single writer
-		// on either engine is what keeps two appends from taking the same one,
-		// and UNIQUE (conversation_id, seq) is the backstop if that ever
-		// changes.
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(MAX(seq), 0) + 1 FROM copilot_entries WHERE conversation_id = ?`,
-			entry.ConversationID).Scan(&entry.Seq); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO copilot_entries (`+entryColumns+`)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			entry.ID, entry.ConversationID, entry.Seq, entry.Kind, entry.Source, entry.Text,
-			entry.ToolName, entry.ToolInput, entry.ToolOutput, entry.ToolStatus, entry.Message,
-			entry.Data, entry.CreatedAt); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx,
-			`UPDATE copilot_conversations SET updated_at = ? WHERE id = ?`,
-			entry.CreatedAt, entry.ConversationID)
-		return err
-	})
+	stored, err := s.AppendEntries(ctx, []Entry{entry})
 	if err != nil {
 		return Entry{}, err
 	}
-	return entry, nil
+	return stored[0], nil
+}
+
+// AppendEntries stores entries at the end of their conversations, in order,
+// in one transaction: all of them or none. A follow-up that writes several
+// (a plan draft's note, card and reply) can then be retried without leaving
+// a second copy of what the failed attempt wrote.
+func (s *Store) AppendEntries(ctx context.Context, entries []Entry) ([]Entry, error) {
+	stored := make([]Entry, len(entries))
+	copy(stored, entries)
+	now := nowMillis()
+	for i := range stored {
+		stored[i].ID = newID()
+		stored[i].CreatedAt = now
+	}
+	err := s.database.Tx(ctx, func(tx *sql.Tx) error {
+		for i := range stored {
+			entry := &stored[i]
+			// The next seq is read inside the write transaction: the single
+			// writer on either engine is what keeps two appends from taking
+			// the same one, and UNIQUE (conversation_id, seq) is the backstop
+			// if that ever changes.
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(seq), 0) + 1 FROM copilot_entries WHERE conversation_id = ?`,
+				entry.ConversationID).Scan(&entry.Seq); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO copilot_entries (`+entryColumns+`)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				entry.ID, entry.ConversationID, entry.Seq, entry.Kind, entry.Source, entry.Text,
+				entry.ToolName, entry.ToolInput, entry.ToolOutput, entry.ToolStatus, entry.Message,
+				entry.Data, entry.CreatedAt); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE copilot_conversations SET updated_at = ? WHERE id = ?`,
+				entry.CreatedAt, entry.ConversationID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stored, nil
 }

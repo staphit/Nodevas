@@ -34,7 +34,10 @@ const (
 	maxSmallBody = 8 << 10
 	// maxTurnBody fits the text plus a draft being refined (40 nodes with
 	// up to 600-character bodies, mostly CJK).
-	maxTurnBody         = 160 << 10
+	maxTurnBody = 160 << 10
+	// maxDraftStateBody fits a coding agent's plan draft (100 nodes with
+	// up to 600-character bodies, mostly CJK, JSON-escaped) plus the ids.
+	maxDraftStateBody   = 400 << 10
 	maxClientResultBody = 256 << 10
 	// A browser model answer is at most copilot.MaxBrowserOutputBytes of
 	// text, JSON-escaped, plus an id.
@@ -418,12 +421,15 @@ func (a *API) putDraftState(c *gin.Context) {
 		State   string   `json:"state"`
 		BatchID string   `json:"batchId"`
 		IDs     []string `json:"ids"`
+		// Draft is the person's own version (C2), sent on Create and on
+		// reopening after an undo, so a reload shows what they had.
+		Draft *copilot.Draft `json:"draft"`
 	}
-	if !httpx.DecodeJSONLimit(c, &body, 16<<10) {
+	if !httpx.DecodeJSONLimit(c, &body, maxDraftStateBody) {
 		return
 	}
 	entry, err := a.service.SetDraftState(c.Request.Context(), auth.ActorFrom(c.Request).ID,
-		c.Param("id"), c.Param("entry"), body.State, body.BatchID, body.IDs)
+		c.Param("id"), c.Param("entry"), body.State, body.BatchID, body.IDs, body.Draft)
 	if err != nil {
 		fail(c, err)
 		return

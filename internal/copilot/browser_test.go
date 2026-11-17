@@ -69,7 +69,9 @@ func TestBrowserModelTurnWithAToolCall(t *testing.T) {
 			} `json:"name"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(request.Schema, &schema); err != nil || len(schema.Properties.Name.Enum) != len(fakeTools) {
+	// The bridge's tools and propose_nodes, which every Ask turn offers.
+	if err := json.Unmarshal(request.Schema, &schema); err != nil || len(schema.Properties.Name.Enum) != len(fakeTools)+1 ||
+		schema.Properties.Name.Enum[len(fakeTools)] != proposeNodesTool {
 		t.Fatalf("schema = %s (%v)", request.Schema, err)
 	}
 
