@@ -262,14 +262,14 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if plan.host == ModelHostBrowser {
 		model = &browserProvider{
 			service: s, turn: turn, emit: emit, timeout: s.opts.BrowserModelTimeout,
-			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
+			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
 		}
 	}
 	run := &turnRun{
 		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
 		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
 		tools: tools, info: info,
-		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
+		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
 		history: appendMessage(history, userMessage),
 	}
 	stop, usage, err := run.loop()
@@ -309,6 +309,7 @@ type turnRun struct {
 func (r *turnRun) loop() (string, Usage, error) {
 	var usage Usage
 	executed := 0
+	retriedCutOff := false
 	limit := r.service.opts.MaxToolCallsPerTurn
 	for {
 		if r.ctx.Err() != nil {
@@ -330,7 +331,7 @@ func (r *turnRun) loop() (string, Usage, error) {
 		usage.InputTokens += response.InputTokens
 		usage.OutputTokens += response.OutputTokens
 
-		message := normalizeCalls(response.Message)
+		message, malformed := normalizeCalls(response.Message)
 		message.Role = provider.RoleAssistant
 		if len(message.Raw) > 0 && message.RawProvider == "" {
 			message.RawProvider, message.RawModel = r.model.Name(), r.model.Model()
@@ -346,15 +347,26 @@ func (r *turnRun) loop() (string, Usage, error) {
 		r.emit(Event{Type: EventEntry, Entry: &entry})
 
 		calls := toolCalls(message)
-		if response.Stop != provider.StopToolUse || len(calls) == 0 {
+		// An answer cut off at the length limit may carry half a call (a
+		// big create_subgraph, typically). None of it runs, the model is
+		// told why, and it gets one more try per turn.
+		cutOff := response.Stop == provider.StopMaxTokens && len(calls) > 0 && !retriedCutOff
+		if !cutOff && (response.Stop != provider.StopToolUse || len(calls) == 0) {
 			return string(response.Stop), usage, nil
 		}
+		retriedCutOff = retriedCutOff || cutOff
 
 		results := provider.Message{Role: provider.RoleUser}
 		exhausted := false
 		for _, call := range calls {
 			var block provider.Block
 			switch {
+			case cutOff:
+				block = r.refuse(call, ToolError, "Not run: your answer was cut off at the length limit, so this "+
+					"call may be incomplete. Send it again in smaller parts (split a large create_subgraph).")
+			case malformed[call.ToolCallID]:
+				block = r.refuse(call, ToolError, "Not run: the input was not valid JSON (it may have been cut "+
+					"off). Send the call again with one complete JSON object.")
 			case executed >= limit:
 				// Every call still gets a result: a history with an
 				// unanswered tool call is one the next turn cannot replay.
@@ -631,21 +643,33 @@ func repairToolResults(history []provider.Message) []provider.Message {
 
 // normalizeCalls makes every tool call's input a JSON object. A model can
 // emit a truncated or malformed argument string; carried as is, it would
-// poison the stored history and every stream event that echoes it.
-func normalizeCalls(message provider.Message) provider.Message {
+// poison the stored history and every stream event that echoes it. The
+// calls it replaced are returned by id: they are answered with an error,
+// never run on the {} that stands in for what the model meant. An absent
+// or null input is not malformed; a tool without arguments may be called so.
+func normalizeCalls(message provider.Message) (provider.Message, map[string]bool) {
 	blocks := make([]provider.Block, len(message.Blocks))
 	copy(blocks, message.Blocks)
+	var malformed map[string]bool
 	for i, block := range blocks {
 		if block.Type != provider.BlockToolCall {
 			continue
 		}
 		trimmed := strings.TrimSpace(string(block.Input))
-		if trimmed == "" || !json.Valid([]byte(trimmed)) || !strings.HasPrefix(trimmed, "{") {
+		if trimmed == "" || trimmed == "null" {
 			blocks[i].Input = json.RawMessage(`{}`)
+			continue
+		}
+		if !json.Valid([]byte(trimmed)) || !strings.HasPrefix(trimmed, "{") {
+			blocks[i].Input = json.RawMessage(`{}`)
+			if malformed == nil {
+				malformed = map[string]bool{}
+			}
+			malformed[block.ToolCallID] = true
 		}
 	}
 	message.Blocks = blocks
-	return message
+	return message, malformed
 }
 
 func toolCalls(message provider.Message) []provider.Block {

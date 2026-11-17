@@ -131,8 +131,6 @@ func TestOpenListsToolsWithPermissionKinds(t *testing.T) {
 		"link_nodes":        KindWrite,
 		"update_node_meta":  KindWrite,
 		"set_node_status":   KindWrite,
-		"claim_task":        KindWrite,
-		"release_task":      KindWrite,
 		"update_node_body":  KindRisky,
 	} {
 		if got, ok := kinds[name]; !ok || got != want {
@@ -257,6 +255,115 @@ func TestOpenOffersNoToolTheCopilotCannotUse(t *testing.T) {
 		result, err := bridge.Call(context.Background(), name, json.RawMessage(`{}`))
 		if err != nil || !result.IsError || !strings.Contains(result.Output, "unknown tool") {
 			t.Errorf("calling %s = %+v, %v; want unknown tool", name, result, err)
+		}
+	}
+}
+
+// create_subgraph's per-node acceptance is always refused the role-less
+// copilot, and the store checks every node before writing any, so one
+// node carrying it failed the whole batch. It is neither offered nor sent.
+func TestCreateSubgraphNeverCarriesAcceptance(t *testing.T) {
+	stub := &stubServer{}
+	bridge, err := Open(context.Background(), Options{Handler: stub, Project: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close()
+	var offered json.RawMessage
+	for _, tool := range bridge.Tools() {
+		if tool.Name == "create_subgraph" {
+			offered = tool.Schema
+		}
+	}
+	if offered == nil {
+		t.Fatal("create_subgraph not offered")
+	}
+	var schema struct {
+		Properties struct {
+			Nodes struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+					Required   []string                   `json:"required"`
+				} `json:"items"`
+			} `json:"nodes"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(offered, &schema); err != nil {
+		t.Fatal(err)
+	}
+	node := schema.Properties.Nodes.Items
+	if _, ok := node.Properties["acceptance"]; ok || slices.Contains(node.Required, "acceptance") {
+		t.Errorf("create_subgraph offers per-node acceptance: %s", offered)
+	}
+	if _, ok := node.Properties["title"]; !ok {
+		t.Errorf("create_subgraph lost its other node inputs: %s", offered)
+	}
+
+	_, err = bridge.Call(context.Background(), "create_subgraph", json.RawMessage(
+		`{"nodes":[{"key":"a","title":"A","acceptance":["x"]},{"key":"b","title":"B","dependsOn":["a"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := stub.last()
+	if sent.path != "/api/graph/subgraph" {
+		t.Fatalf("last request = %s, want the subgraph POST", sent.path)
+	}
+	if strings.Contains(sent.body, "acceptance") || !strings.Contains(sent.body, `"dependsOn"`) {
+		t.Errorf("subgraph body = %s, want acceptance dropped and the rest kept", sent.body)
+	}
+}
+
+func TestWithoutInputsWalksNestedPaths(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"files": map[string]any{"type": "array"},
+			"nodes": map[string]any{"type": "array", "items": map[string]any{
+				"type":       "object",
+				"required":   []any{"key", "acceptance"},
+				"properties": map[string]any{"key": map[string]any{}, "acceptance": map[string]any{}},
+			}},
+		},
+	}
+	before, _ := json.Marshal(schema)
+	got, _ := json.Marshal(withoutInputs(schema, []string{"files", "nodes.items.acceptance", "missing.items.x"}))
+	if after, _ := json.Marshal(schema); string(after) != string(before) {
+		t.Fatalf("withoutInputs changed its argument: %s", after)
+	}
+	want := `{"properties":{"nodes":{"items":{"properties":{"key":{}},"required":["key"],"type":"object"},"type":"array"}},"type":"object"}`
+	if string(got) != want {
+		t.Fatalf("withoutInputs = %s\nwant %s", got, want)
+	}
+}
+
+func TestWithoutArgsDropsNestedArguments(t *testing.T) {
+	in := json.RawMessage(`{"nodes":[{"key":"a","acceptance":["x"]},{"key":"b"},"odd"],"files":["f"],"keep":1}`)
+	got := withoutArgs(in, []string{"files", "nodes.items.acceptance"})
+	if string(got) != `{"keep":1,"nodes":[{"key":"a"},{"key":"b"},"odd"]}` {
+		t.Fatalf("withoutArgs = %s", got)
+	}
+	if raw := withoutArgs(json.RawMessage(`not json`), []string{"files"}); string(raw) != `not json` {
+		t.Fatalf("withoutArgs on invalid JSON = %s, want it untouched for the caller to refuse", raw)
+	}
+}
+
+// Claiming, the inbox and the team roster are for agents working tasks; the
+// copilot authors the board for a person, and each one offered costs a
+// small model a tool to consider.
+func TestOpenOffersNoNonAuthoringTools(t *testing.T) {
+	bridge, err := Open(context.Background(), Options{Handler: &stubServer{}, Project: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close()
+	for _, tool := range bridge.Tools() {
+		if offTopic[tool.Name] {
+			t.Errorf("%s offered to the copilot", tool.Name)
+		}
+	}
+	for _, name := range []string{"claim_task", "release_task", "check_inbox", "list_team", "ask_user", "approve_tool"} {
+		if !offTopic[name] {
+			t.Errorf("%s is not in offTopic", name)
 		}
 	}
 }

@@ -463,7 +463,7 @@ func TestDispatchToolsAlwaysAsk(t *testing.T) {
 }
 
 func TestSystemPromptExplainsNodeTypes(t *testing.T) {
-	prompt := systemPrompt("Bea", "main", ModeDefault, TurnContext{}, nil)
+	prompt := systemPrompt("Bea", "main", ModeDefault, TurnContext{}, nil, "voice")
 	for _, want := range []string{"scene/event", "gate (review by a person)", "note (reference, no status)",
 		"agentMode is none"} {
 		if !strings.Contains(prompt, want) {

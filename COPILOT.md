@@ -1,6 +1,6 @@
 # Voice Copilot
 
-A copilot inside the Nodevas UI that you talk to or type to. It reads and edits the board with the same tools agents get over MCP, less those that need files or a run (it cannot attach files to `send_message`, and has no `save_attachment`, `set_acceptance` or `submit_verdict`; its roster entry shows no repository or folder), asks before changing things as its permission mode says, and keeps each conversation's transcript, per account and project. With one of your runners online, it also turns a requirement you dictate into tasks and starts the autopilot on them.
+A copilot inside the Nodevas UI that you talk to or type to. It reads and edits the board with the same tools agents get over MCP, less those that need files or a run (it cannot attach files to `send_message`, and has no `save_attachment`, `set_acceptance` or `submit_verdict`, nor acceptance criteria in `create_subgraph`; its roster entry shows no repository or folder) and those agents use to coordinate while working tasks (`claim_task`, `release_task`, `check_inbox`, `list_team`, `ask_user`, `approve_tool`), asks before changing things as its permission mode says, and keeps each conversation's transcript, per account and project. With one of your runners online, it also turns a requirement you dictate into tasks and starts the autopilot on them.
 
 ## Using it
 

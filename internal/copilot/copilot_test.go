@@ -754,17 +754,52 @@ func TestToolOutputIsTruncatedForEventsAndModel(t *testing.T) {
 	}
 }
 
-func TestMalformedToolInputIsReplaced(t *testing.T) {
+// A malformed or truncated argument string is stored as {} so the history
+// stays replayable, but the call is not run on it: the model is told its
+// input was invalid and can send it again.
+func TestMalformedToolInputIsRefusedNotRun(t *testing.T) {
 	h := newHarness(t, nil)
 	conversation := h.conversation(alice, ModeDefault)
 	h.model.steps = []step{func(*testing.T, context.Context, provider.Request, func(provider.Delta)) (provider.Response, error) {
 		return provider.Response{Message: provider.Message{Blocks: []provider.Block{
 			{Type: provider.BlockToolCall, ToolCallID: "c1", ToolName: "get_node", Input: json.RawMessage(`{"id":`)},
 		}}, Stop: provider.StopToolUse}, nil
-	}, expectResult("c1", false, "ok")}
+	}, expectResult("c1", true, "not valid JSON")}
 	for _, event := range h.start(h.turn(conversation, ModeDefault)).finish() {
 		if event.Type == EventToolCall && string(event.Input) != `{}` {
 			t.Fatalf("tool_call input = %s", event.Input)
 		}
+	}
+	if calls := h.bridge.called(); len(calls) != 0 {
+		t.Fatalf("bridge ran %v on a malformed input", calls)
+	}
+}
+
+// An answer cut off at the length limit ended the turn with the model never
+// told why; now its calls are answered as cut off and it gets one more try.
+func TestCutOffToolCallsAreRefusedAndRetriedOnce(t *testing.T) {
+	h := newHarness(t, nil)
+	conversation := h.conversation(alice, ModeDefault)
+	cutOff := func(*testing.T, context.Context, provider.Request, func(provider.Delta)) (provider.Response, error) {
+		return provider.Response{Message: provider.Message{Blocks: []provider.Block{
+			{Type: provider.BlockToolCall, ToolCallID: "c1", ToolName: "get_node", Input: json.RawMessage(`{"id":"n1"}`)},
+		}}, Stop: provider.StopMaxTokens}, nil
+	}
+	h.model.steps = []step{cutOff, func(t *testing.T, ctx context.Context, req provider.Request, onDelta func(provider.Delta)) (provider.Response, error) {
+		block := req.Messages[len(req.Messages)-1].Blocks[0]
+		if !block.IsError || !strings.Contains(block.Output, "cut off") {
+			t.Errorf("cut-off call answered %+v", block)
+		}
+		return cutOff(t, ctx, req, onDelta)
+	}}
+	events := h.start(h.turn(conversation, ModeDefault)).finish()
+	if calls := h.bridge.called(); len(calls) != 0 {
+		t.Fatalf("bridge ran %v from a cut-off answer", calls)
+	}
+	if h.model.callCount() != 2 {
+		t.Fatalf("model calls = %d, want the cut-off answer retried once", h.model.callCount())
+	}
+	if finished := last(events); finished.Type != EventTurnFinished || finished.Stop != string(provider.StopMaxTokens) {
+		t.Fatalf("last event = %+v, want turn_finished max_tokens", finished)
 	}
 }
