@@ -29,6 +29,7 @@ import {
   refreshCanWrite,
 } from "./draftApi";
 import { DraftList, issueText, KindGlyph, type NodeMark } from "./DraftList";
+import { DraftPresenter } from "./DraftPresenter";
 import { countLinks, diffDrafts, goalTagOf, maxNodesOf, mentionsCode, mergeMany, type DiffMark } from "./draftStore";
 import { useDraftUi } from "./draftUi";
 
@@ -232,8 +233,9 @@ export function DraftCard({
   return (
     <section className={`draft-card${themed ? " is-themed" : ""}`} data-draft-entry={item.id} data-state="open">
       {header}
+      {themed && <DraftPresenter data={data} count={count} model={model} />}
       {draft.summary && <p className="draft-summary">{draft.summary}</p>}
-      {origin && <p className="draft-note">{t("draft.plan.note")}</p>}
+      {origin &&<p className="draft-note">{t("draft.plan.note")}</p>}
       {smallModel && <p className="draft-note">{t("draft.smallModel")}</p>}
       {data.capped && <p className="draft-note">{t("draft.capped", { max: maxNodesOf(data) })}</p>}
       {(draft.questions?.length ?? 0) > 0 && (
