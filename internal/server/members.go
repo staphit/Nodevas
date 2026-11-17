@@ -81,6 +81,8 @@ var readOnlyPosts = map[string]bool{
 	"/api/export":      true,
 	"/api/export/next": true,
 	"/api/dsl/check":   true,
+	// A subgraph's dry run: a viewer may preview a draft, never create it.
+	"/api/graph/subgraph/check": true,
 }
 
 // projectlessPaths are the account-level routes that never read the

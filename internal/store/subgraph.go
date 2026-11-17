@@ -5,6 +5,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -22,6 +23,22 @@ const (
 	maxSubgraphTotalBodyBytes = 1 << 20
 	maxSubgraphLinks          = 1000
 	maxSubgraphEdges          = 200
+)
+
+// MaxCopilotDraftNodes caps a call whose batch comes from a Copilot draft
+// (via "copilot-draft:..."): a draft is a person's preview, reviewed node by
+// node before one Create, so it stays well under the general limit.
+const MaxCopilotDraftNodes = 40
+
+// CopilotDraftVia prefixes the batch via of a commit made from a Copilot
+// draft: "copilot-draft:<draft id>".
+const CopilotDraftVia = "copilot-draft:"
+
+// Bounds of a position on the board's grid, as the web client keeps them
+// (web/src/components/canvas/useBoardColumns.ts MAX_COL, MAX_ROW).
+const (
+	MaxPositionCol = 499
+	MaxPositionRow = 200
 )
 
 var subgraphKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
@@ -51,10 +68,23 @@ type SubgraphEdge struct {
 	To   string `json:"to"`
 }
 
+// SubgraphPosition is a grid cell on the board: Col 0..MaxPositionCol,
+// Row 0..MaxPositionRow. It is stored as the node's ui.positions {x: col,
+// y: row}.
+type SubgraphPosition struct {
+	Col int `json:"col"`
+	Row int `json:"row"`
+}
+
 // SubgraphSpec is one create_subgraph request.
 type SubgraphSpec struct {
 	Nodes []SubgraphNode `json:"nodes"`
 	Edges []SubgraphEdge `json:"edges,omitempty"`
+	// Positions places new nodes, keyed by their key in this call. Nodes
+	// without one are left to the client's layout, as before.
+	Positions map[string]SubgraphPosition `json:"positions,omitempty"`
+	// Batch, when set, records the call so UndoBatch can take it back.
+	Batch *BatchSpec `json:"batch,omitempty"`
 }
 
 // SubgraphCreated is one node the call made.
@@ -75,6 +105,11 @@ type SubgraphResult struct {
 	// Dependencies and References count the wiring the call added.
 	Dependencies int `json:"dependencies"`
 	References   int `json:"references"`
+	// BatchID names the recorded batch and Undoable says it was recorded;
+	// both are empty for a call without spec.Batch, and for one whose
+	// record could not be written (the nodes were still created).
+	BatchID  string `json:"batchId,omitempty"`
+	Undoable bool   `json:"undoable,omitempty"`
 }
 
 // ErrInvalidSubgraph is a request create_subgraph refuses; Field names the
@@ -142,6 +177,29 @@ func checkSubgraphShape(spec SubgraphSpec) error {
 	if links > maxSubgraphLinks {
 		return &ErrSubgraphTooLarge{Msg: fmt.Sprintf("too many dependencies, references and edges (maximum %d)", maxSubgraphLinks)}
 	}
+	if len(spec.Positions) > len(spec.Nodes) {
+		return invalidSubgraph("positions", "more positions than nodes", "位置比節點還多")
+	}
+	for key, position := range spec.Positions {
+		field := "positions"
+		if subgraphKeyPattern.MatchString(key) {
+			field += "." + key
+		}
+		if !keys[key] {
+			return invalidSubgraph(field, "%q is not a key of this call", "「%s」不是這次呼叫的 key", key)
+		}
+		if position.Col < 0 || position.Col > MaxPositionCol || position.Row < 0 || position.Row > MaxPositionRow {
+			return invalidSubgraph(field, "position must be a column 0-%d and a row 0-%d", "位置須為第 0-%d 欄、第 0-%d 列", MaxPositionCol, MaxPositionRow)
+		}
+	}
+	if spec.Batch != nil {
+		if !batchViaPattern.MatchString(spec.Batch.Via) {
+			return invalidSubgraph("batch.via", "via must be 1-128 letters, digits, '_', '.', ':' or '-'", "via 須為 1 到 128 個字母、數字、'_'、'.'、':' 或 '-'")
+		}
+		if strings.HasPrefix(spec.Batch.Via, CopilotDraftVia) && len(spec.Nodes) > MaxCopilotDraftNodes {
+			return &ErrSubgraphTooLarge{Msg: fmt.Sprintf("too many nodes in one Copilot draft (maximum %d)", MaxCopilotDraftNodes)}
+		}
+	}
 	return nil
 }
 
@@ -150,16 +208,44 @@ func checkSubgraphShape(spec SubgraphSpec) error {
 // goes through the same graph ops link_nodes uses, so every permission and
 // logic-gate rule applies; the whole result is then validated once, and any
 // new error (a cycle, an unknown id) refuses the call.
+//
+// With spec.Batch set, the call is also recorded as a batch that UndoBatch
+// can take back. A record that cannot be written does not undo the commit:
+// the result then says Undoable false.
 func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (SubgraphResult, error) {
-	var zero SubgraphResult
 	if err := checkSubgraphShape(spec); err != nil {
-		return zero, err
+		return SubgraphResult{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	plan, err := s.prepareSubgraphLocked(actor, spec)
+	if err != nil {
+		return SubgraphResult{}, err
+	}
+	return s.commitSubgraphLocked(actor, spec, plan)
+}
+
+// preparedSubgraph is a checked call, ready to be written.
+type preparedSubgraph struct {
+	g        *engine.Graph
+	graphRev string
+	nodes    []*engine.Node
+	files    []*engine.NodeFile
+	touched  map[string]bool
+	// links are the dependencies the call put into nodes that already
+	// existed (spec.Edges): a batch undo removes them with the new nodes,
+	// and a redo has to put them back.
+	links  []BatchLink
+	result SubgraphResult
+}
+
+// prepareSubgraphLocked makes every check of a create_subgraph call and builds
+// the graph it would write, on a private copy. It writes nothing. The caller
+// holds s.mu, for reading (a dry run) or writing (a commit).
+func (s *Store) prepareSubgraphLocked(actor identity.Actor, spec SubgraphSpec) (*preparedSubgraph, error) {
 	g, graphRev, err := s.loadGraphLocked()
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	existing := make(map[string]bool, len(g.Nodes))
 	for _, node := range g.Nodes {
@@ -175,11 +261,11 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	for i, in := range spec.Nodes {
 		field := fmt.Sprintf("nodes[%d]", i)
 		if existing[in.Key] {
-			return zero, invalidSubgraph(field+".key", "key %q is also an existing node id", "key「%s」也是既有的節點代號", in.Key)
+			return nil, invalidSubgraph(field+".key", "key %q is also an existing node id", "key「%s」也是既有的節點代號", in.Key)
 		}
 		nf, err := engine.ParseNodeFile([]byte(in.Body))
 		if err != nil {
-			return zero, invalidSubgraph(field+".body", "%v", "%v", err)
+			return nil, invalidSubgraph(field+".body", "%v", "%v", err)
 		}
 		n := &engine.Node{
 			Title: strings.TrimSpace(in.Title), Kind: in.Kind, Priority: in.Priority,
@@ -194,19 +280,19 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		if !g.KnownNodeKind(n.Kind) {
 			err := unknownNodeTypeError("", n.Kind).(*ErrNodeTypeDenied)
 			err.Msg = field + ".kind: " + err.Error()
-			return zero, err
+			return nil, err
 		}
 		if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
-			return zero, err
+			return nil, err
 		}
 		if len(in.DependsOn) > 0 || len(in.Refs) > 0 {
 			if err := checkRole(actor, g, engine.CapLink, nil); err != nil {
-				return zero, err
+				return nil, err
 			}
 		}
 		if len(in.Acceptance) > 0 {
 			if len(in.Acceptance) > engine.MaxAcceptanceItems {
-				return zero, invalidSubgraph(field+".acceptance", "at most %d criteria", "最多 %d 條條件", engine.MaxAcceptanceItems)
+				return nil, invalidSubgraph(field+".acceptance", "at most %d criteria", "最多 %d 條條件", engine.MaxAcceptanceItems)
 			}
 			acceptance := &engine.Acceptance{By: acceptanceAttribution(actor)}
 			for _, text := range in.Acceptance {
@@ -214,7 +300,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			}
 			acceptance.Items = engine.AssignAcceptanceIDs(acceptance.Items)
 			if err := checkAcceptanceWrite(actor, g, n, nil, acceptance, true); err != nil {
-				return zero, err
+				return nil, err
 			}
 			n.Acceptance = acceptance
 		}
@@ -223,15 +309,23 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	}
 	ids, err := s.nextNodeIDsLocked(g, len(nodes))
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	keyIDs := make(map[string]string, len(nodes))
-	result := SubgraphResult{IDs: keyIDs}
+	plan := &preparedSubgraph{g: g, graphRev: graphRev, nodes: nodes, files: files, touched: map[string]bool{}}
+	result := &plan.result
+	result.IDs = keyIDs
 	for i, n := range nodes {
 		n.ID = ids[i]
 		keyIDs[spec.Nodes[i].Key] = n.ID
 		result.Created = append(result.Created, SubgraphCreated{
 			Key: spec.Nodes[i].Key, ID: n.ID, Title: n.Title, Kind: n.Kind})
+		// Nothing is written over an orphaned document of the same name.
+		if _, err := s.statPath(s.NodePath(n.ID)); err == nil {
+			return nil, locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", n.ID)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
 	}
 	resolve := func(ref, field string) (string, error) {
 		if id, ok := keyIDs[ref]; ok {
@@ -256,7 +350,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		n.WriteAccess = ""
 		g.Nodes = append(g.Nodes, n)
 	}
-	touched := map[string]bool{}
+	touched := plan.touched
 	apply := func(op GraphOp, field string) error {
 		if err := applyGraphOp(actor, g, op, touched, func(string) bool { return false }); err != nil {
 			var writeDenied *ErrNodeWriteDenied
@@ -273,10 +367,10 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			field := fmt.Sprintf("nodes[%d].dependsOn[%d]", i, j)
 			from, err := resolve(dep, field)
 			if err != nil {
-				return zero, err
+				return nil, err
 			}
 			if err := apply(GraphOp{Kind: "add-edge", From: from, To: nodes[i].ID}, field); err != nil {
-				return zero, err
+				return nil, err
 			}
 			result.Dependencies++
 		}
@@ -284,10 +378,10 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			field := fmt.Sprintf("nodes[%d].refs[%d]", i, j)
 			target, err := resolve(ref, field)
 			if err != nil {
-				return zero, err
+				return nil, err
 			}
 			if err := apply(GraphOp{Kind: "add-ref", NodeID: nodes[i].ID, Ref: target}, field); err != nil {
-				return zero, err
+				return nil, err
 			}
 			result.References++
 		}
@@ -296,16 +390,31 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		field := fmt.Sprintf("edges[%d]", i)
 		from, err := resolve(edge.From, field+".from")
 		if err != nil {
-			return zero, err
+			return nil, err
 		}
 		if !existing[edge.To] {
-			return zero, invalidSubgraph(field+".to",
+			return nil, invalidSubgraph(field+".to",
 				"%q is not an existing node id; wire new nodes to each other with dependsOn", "「%s」不是既有的節點代號；新節點之間請用 dependsOn 連接", edge.To)
 		}
 		if err := apply(GraphOp{Kind: "add-edge", From: from, To: edge.To}, field); err != nil {
-			return zero, err
+			return nil, err
 		}
+		plan.links = append(plan.links, BatchLink{From: from, To: edge.To})
 		result.Dependencies++
+	}
+
+	// Where the caller placed the new nodes (grid cells; checkSubgraphShape
+	// bounded them). Without positions the layout is left alone.
+	if len(spec.Positions) > 0 {
+		if g.UI == nil {
+			g.UI = &engine.UIState{}
+		}
+		if g.UI.Positions == nil {
+			g.UI.Positions = map[string]engine.Position{}
+		}
+		for key, position := range spec.Positions {
+			g.UI.Positions[keyIDs[key]] = engine.Position{X: float64(position.Col), Y: float64(position.Row)}
+		}
 	}
 
 	userIDs := make(map[string]struct{}, len(g.Users))
@@ -315,43 +424,52 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	for i, n := range nodes {
 		n.WriteAccess = access[i]
 		if err := validateNodeForStorage(n, userIDs); err != nil {
-			return zero, invalidSubgraph(fmt.Sprintf("nodes[%d] (key %s)", i, spec.Nodes[i].Key), "%v", "%v", err)
+			return nil, invalidSubgraph(fmt.Sprintf("nodes[%d] (key %s)", i, spec.Nodes[i].Key), "%v", "%v", err)
 		}
 	}
 	if err := ValidateGraphForStorage(g); err != nil {
-		return zero, invalidSubgraph("", "%v", "%v", err)
+		return nil, invalidSubgraph("", "%v", "%v", err)
 	}
 	after := engine.Validate(g)
 	for _, issue := range after {
 		if issue.Severity == "error" && !before[issue] {
-			return zero, invalidSubgraph("", "%s", "%s", subgraphIssueText(issue))
+			return nil, invalidSubgraph("", "%s", "%s", subgraphIssueText(issue))
 		}
 	}
+	result.Rev = graphRev
+	result.Issues = after
+	return plan, nil
+}
 
+// commitSubgraphLocked writes a prepared call: the new node files, the
+// existing nodes whose requires changed, then the graph. The caller holds
+// s.mu exclusively and prepared plan under that same hold.
+func (s *Store) commitSubgraphLocked(actor identity.Actor, spec SubgraphSpec, plan *preparedSubgraph) (SubgraphResult, error) {
+	var zero SubgraphResult
+	g, nodes := plan.g, plan.nodes
 	data, err := s.marshalGraph(g)
 	if err != nil {
 		return zero, err
 	}
 	created := make(map[string]bool, len(nodes))
-	updates := make([]fileUpdate, 0, len(nodes)+len(touched)+1)
+	createdIDs := make([]string, 0, len(nodes))
+	nodePaths := make([]string, 0, len(nodes))
+	updates := make([]fileUpdate, 0, len(nodes)+len(plan.touched)+1)
 	for i, n := range nodes {
 		created[n.ID] = true
-		if _, err := s.statPath(s.NodePath(n.ID)); err == nil {
-			return zero, locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", n.ID)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return zero, err
-		}
-		engine.SyncFrontmatter(files[i], n)
-		out, err := engine.ComposeNodeFile(files[i])
+		createdIDs = append(createdIDs, n.ID)
+		engine.SyncFrontmatter(plan.files[i], n)
+		out, err := engine.ComposeNodeFile(plan.files[i])
 		if err != nil {
 			return zero, err
 		}
+		nodePaths = append(nodePaths, s.NodePath(n.ID))
 		updates = append(updates, fileUpdate{path: s.NodePath(n.ID), data: out, checkRevision: true, expectedRev: ""})
 	}
 	// Existing nodes whose requires gained an operand keep their frontmatter
 	// snapshot in step, as ApplyGraphOps does.
 	for _, n := range g.Nodes {
-		if n == nil || created[n.ID] || !touched[n.ID] {
+		if n == nil || created[n.ID] || !plan.touched[n.ID] {
 			continue
 		}
 		update, err := s.prepareNodeFileUpdate(n)
@@ -362,19 +480,26 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			updates = append(updates, *update)
 		}
 	}
-	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data, checkRevision: true, expectedRev: graphRev})
+	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data, checkRevision: true, expectedRev: plan.graphRev})
 	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return zero, err
 	}
 	if actor.RunID != "" {
-		createdIDs := make([]string, 0, len(nodes))
-		for _, n := range nodes {
-			createdIDs = append(createdIDs, n.ID)
-		}
 		s.recordCreatedByRunLocked(actor.RunID, createdIDs)
 	}
+	result := plan.result
 	result.Rev = Rev(data)
-	result.Issues = after
+	if spec.Batch != nil {
+		if note := batchHistoryNote(spec.Batch.Via); note != "" {
+			s.history().wrote(actor, note, nodePaths)
+		}
+		id, err := s.recordBatchLocked(actor, spec.Batch.Via, createdIDs, plan.links)
+		if err != nil {
+			log.Printf("subgraph committed, batch not recorded (not undoable): %v", err)
+		} else {
+			result.BatchID, result.Undoable = id, true
+		}
+	}
 	return result, nil
 }
 

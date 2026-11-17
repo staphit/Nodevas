@@ -194,6 +194,10 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodPost, "/api/history/restore", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/trash/restore", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/graph/subgraph", ClassExpensive, 2.0},
+		{http.MethodPost, "/api/graph/batches/b-0123456789abcdef01234567/undo", ClassExpensive, 1.0},
+		{http.MethodPost, "/api/graph/batches/b-0123456789abcdef01234567/redo", ClassExpensive, 1.0},
+		// A draft's dry run is re-run as the person edits: a read, four times over.
+		{http.MethodPost, "/api/graph/subgraph/check", ClassRead, 4.0},
 		{http.MethodPost, "/api/notify/test", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit/health", ClassExpensive, 2.0},
