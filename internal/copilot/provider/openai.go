@@ -81,6 +81,20 @@ type oaRequest struct {
 	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
 	MaxTokens           int             `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	// ResponseFormat asks for structured output. Ollama, LM Studio and vLLM
+	// take this OpenAI shape too; a server that does not answers 400, and
+	// the call is made again without it.
+	ResponseFormat *oaResponseFormat `json:"response_format,omitempty"`
+}
+
+// oaResponseFormat is json_schema without strict: strict mode requires every
+// property required and rejects keywords a hand-written schema may use.
+type oaResponseFormat struct {
+	Type       string `json:"type"`
+	JSONSchema struct {
+		Name   string          `json:"name"`
+		Schema json.RawMessage `json:"schema"`
+	} `json:"json_schema"`
 }
 
 type oaChunk struct {
@@ -158,26 +172,25 @@ func (p *openaiProvider) Stream(ctx context.Context, req Request, onDelta func(D
 		body.Tools = append(body.Tools, ot)
 	}
 
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return Response{}, fmt.Errorf("openai: encode request: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.base+"/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return Response{}, fmt.Errorf("openai: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	if p.key != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.key)
+	if req.ResponseSchema != nil {
+		body.ResponseFormat = &oaResponseFormat{Type: "json_schema"}
+		body.ResponseFormat.JSONSchema.Name = req.ResponseSchema.Name
+		body.ResponseFormat.JSONSchema.Schema = req.ResponseSchema.Schema
 	}
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.post(ctx, body)
 	if err != nil {
-		if ctx.Err() != nil {
-			return Response{}, ctx.Err()
+		return Response{}, err
+	}
+	if body.ResponseFormat != nil && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) {
+		// Most likely a server that does not take response_format. The
+		// answer is validated by the caller whatever was asked.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
+		body.ResponseFormat = nil
+		if resp, err = p.post(ctx, body); err != nil {
+			return Response{}, err
 		}
-		return Response{}, fmt.Errorf("openai: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -190,6 +203,31 @@ func (p *openaiProvider) Stream(ctx context.Context, req Request, onDelta func(D
 		return Response{}, ctx.Err()
 	}
 	return out, err
+}
+
+// post sends one chat completion request; the caller closes the body.
+func (p *openaiProvider) post(ctx context.Context, body oaRequest) (*http.Response, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("openai: encode request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.base+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if p.key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.key)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("openai: %w", err)
+	}
+	return resp, nil
 }
 
 // partialCall accumulates one tool call whose id, name and arguments arrive in
