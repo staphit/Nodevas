@@ -1,5 +1,5 @@
 import type { Acceptance, AgentRoleDef, DSLCheckResult, Graph, Issue, Status, Workflow } from "../types";
-import { req } from "./http";
+import { ConflictError, req } from "./http";
 import { verifyGraphResponse } from "./verify";
 
 export interface GraphResponse {
@@ -89,8 +89,26 @@ export interface SubgraphSpec {
   edges?: { from: string; to: string }[];
   /** Grid cells by key (graph.ui.positions units): col 0..499, row 0..200. */
   positions?: Record<string, { col: number; row: number }>;
-  /** Records the call for /api/graph/batches/:id/undo. */
-  batch?: { via: string };
+  /**
+   * Records the call for /api/graph/batches/:id/undo. `via` names what made
+   * it, and one live batch holds a via: a second commit with it is refused
+   * (409 BATCH_VIA_TAKEN) until that batch is undone. `label` (≤ 80 bytes)
+   * goes into the history note; a Copilot draft sends the model that drafted
+   * it.
+   */
+  batch?: { via: string; label?: string };
+}
+
+/**
+ * The live batch a refused commit names: 409 BATCH_VIA_TAKEN means a batch
+ * with the same via is recorded and not undone (the draft was created
+ * already, in another tab say), and nothing was created. Null for any other
+ * failure.
+ */
+export function batchViaTaken(error: unknown): string | null {
+  if (!(error instanceof ConflictError) || error.code !== "BATCH_VIA_TAKEN") return null;
+  const batchId = error.details.batchId;
+  return typeof batchId === "string" && batchId ? batchId : null;
 }
 
 export interface SubgraphResult {

@@ -30,6 +30,7 @@ import {
 } from "./browserModel";
 import { runClientTool, SUPPORTED_CLIENT_TOOLS } from "./clientTools";
 import { activeDraftId, currentDraft, isPlanDraft, refinableDraftId, useCopilot } from "./copilotStore";
+import { useDraftUi } from "./draft/draftUi";
 import { cancelSpeech } from "./speech";
 
 let controller: AbortController | null = null;
@@ -407,7 +408,7 @@ async function runTurn(
   const copilot = useCopilot.getState();
   if (!text || copilot.running) return;
   cancelSpeech();
-  copilot.beginTurn(text, source);
+  copilot.beginTurn(text, source, draft.refineOf);
   const project = useApp.getState().activeProject;
   let id = copilot.activeId;
   let finished = false;
@@ -513,6 +514,9 @@ export async function decide(
  * `ui_switch_project` call is itself a running turn).
  */
 export function projectChanged(): void {
+  // The draft toast's Undo names a batch of the project just left; the undo
+  // stack it would replay through was cleared with the switch.
+  useDraftUi.getState().showToast(null);
   if (useCopilot.getState().running) {
     endAfterTurn = true;
     return;

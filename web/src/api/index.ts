@@ -38,6 +38,7 @@ export {
   UnauthorizedError,
 } from "./http";
 export { ApiShapeError } from "./verify";
+export { batchViaTaken } from "./graph";
 export type {
   BatchRedoResult,
   BatchRefusal,

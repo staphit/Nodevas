@@ -13,10 +13,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { CopilotDraft, CopilotDraftIssue, CopilotStatus } from "../../api";
 import { nodeTypeById, nodeTypesForLayout } from "../../domain/graph/nodeTypes";
 import { formatList, useI18n } from "../../i18n";
+import type { Runner } from "../../api";
+import { useEdition } from "../../runners/edition";
+import { useRunners } from "../../runners/runnerStore";
 import { usePreference, useApp } from "../../store";
 import { activeThemePack, useThemePacks } from "../../theme-pack/themePackStore";
 import { browserModelLanguages } from "../browserModel";
-import { currentDraft, useCopilot, type DraftItem } from "../copilotStore";
+import { currentDraft, isRefining, useCopilot, type DraftItem } from "../copilotStore";
 import { modelLabel } from "../modelLabel";
 import {
   checkLocally,
@@ -29,11 +32,26 @@ import {
   refreshCanWrite,
 } from "./draftApi";
 import { DraftList, issueText, KindGlyph, type NodeMark } from "./DraftList";
+import { KeptList } from "./KeptList";
 import { countLinks, diffDrafts, goalTagOf, maxNodesOf, mentionsCode, mergeMany, type DiffMark } from "./draftStore";
 import { useDraftUi } from "./draftUi";
 
 /** More nodes than this, and the coding agent's plan is the suggestion. */
 const DEEPER_NODE_COUNT = 15;
+
+/**
+ * Whether a coding agent could plan it now: some runner is online with a
+ * repo to read and an agent to run. Without one the button would only start
+ * a breakdown that cannot run.
+ */
+export function canPlanWithAgent(runners: readonly Runner[]): boolean {
+  return runners.some(
+    (runner) =>
+      runner.online &&
+      (runner.info?.repos?.length ?? 0) > 0 &&
+      (runner.info?.agents ?? []).some((agent) => agent.installed !== false),
+  );
+}
 
 /** Whether a theme pack dresses this viewer's screens. */
 export function useThemeActive(): boolean {
@@ -96,6 +114,13 @@ export function DraftCard({
     data?.refineOf ? currentDraft(state, data.refineOf) : null,
   );
   const running = useCopilot((state) => state.running);
+  // A refine of this draft is running: what lands replaces it, so it waits.
+  const refining = useCopilot((state) => isRefining(state, item.id));
+  const storedEdited = data?.edited === true;
+  const kept = useDraftUi((state) => state.kept[item.id]);
+  const runners = useRunners((state) => state.runners);
+  const runnersLoaded = useRunners((state) => state.loaded);
+  const hub = useEdition() === "team";
   const graph = useApp((state) => state.graph);
   const project = useApp((state) => state.activeProject);
   const unreadable = useApp((state) => state.graphUnreadable !== null);
@@ -123,17 +148,22 @@ export function DraftCard({
     if (live && canWrite === null) void refreshCanWrite(project);
   }, [live, canWrite, project]);
 
+  // The coding agent's button waits on the runner list.
+  useEffect(() => {
+    if (live && !data?.origin && !runnersLoaded) void useRunners.getState().refresh();
+  }, [live, data?.origin, runnersLoaded]);
+
   const draft = edited ?? data?.draft ?? null;
   const maxNodes = data ? maxNodesOf(data) : undefined;
   const nodeTypes = useMemo(() => nodeTypesForLayout(graph), [graph]);
   const marks = useMemo(
     () =>
       draft && data
-        ? marksFor(draft, data.issues ?? [], edited !== undefined, maxNodesOf(data))
+        ? marksFor(draft, data.issues ?? [], edited !== undefined || storedEdited, maxNodesOf(data))
         : { byKey: {}, general: [] },
     // graph: the client checks read the board's ids and types.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft, data, edited, graph],
+    [draft, data, edited, storedEdited, graph],
   );
   const diff = useMemo<{ marks: Record<string, DiffMark>; removed: string[] }>(() => {
     if (!base || !data) return { marks: {}, removed: [] };
@@ -161,9 +191,11 @@ export function DraftCard({
     Object.values(marks.byKey).some((list) => list.some((mark) => mark.severity === "error")) ||
     marks.general.some((mark) => mark.severity === "error");
   const noWrite = unreadable || canWrite === false;
-  const createDisabled = !live || blocking || check?.status === "error" || noWrite || busy !== undefined;
+  const createDisabled =
+    !live || refining || blocking || check?.status === "error" || noWrite || busy !== undefined;
+  const agentReady = !origin && canPlanWithAgent(runners);
   const deeper =
-    !origin && (count > DEEPER_NODE_COUNT || Boolean(draft.needsCodeKnowledge) || mentionsCode(prompt));
+    agentReady && (count > DEEPER_NODE_COUNT || Boolean(draft.needsCodeKnowledge) || mentionsCode(prompt));
   const smallModel =
     data.provider === "browser" &&
     language === "zh-TW" &&
@@ -211,6 +243,12 @@ export function DraftCard({
             maxNodes={maxNodes}
           />
         )}
+        {data.state === "committed" && kept && kept.length > 0 && (
+          <div className="draft-kept-block">
+            <p className="draft-note">{t("draft.kept.card")}</p>
+            <KeptList nodes={kept} />
+          </div>
+        )}
       </section>
     );
   }
@@ -234,6 +272,11 @@ export function DraftCard({
       {header}
       {draft.summary && <p className="draft-summary">{draft.summary}</p>}
       {origin && <p className="draft-note">{t("draft.plan.note")}</p>}
+      {refining && (
+        <p className="draft-note" role="status">
+          {t("draft.refining")}
+        </p>
+      )}
       {smallModel && <p className="draft-note">{t("draft.smallModel")}</p>}
       {data.capped && <p className="draft-note">{t("draft.capped", { max: maxNodesOf(data) })}</p>}
       {(draft.questions?.length ?? 0) > 0 && (
@@ -276,7 +319,7 @@ export function DraftCard({
           nodeTypes={nodeTypes}
           marks={marks.byKey}
           diff={diff.marks}
-          readOnly={false}
+          readOnly={refining}
           selected={selected}
           onToggleSelect={toggleSelect}
           onEdit={onEdit}
@@ -332,14 +375,14 @@ export function DraftCard({
         <button
           type="button"
           className="draft-secondary"
-          disabled={busy !== undefined}
+          disabled={busy !== undefined || refining}
           onClick={() => void discardDraft(item.id)}
         >
           {t("draft.discard")}
         </button>
       </div>
-      {/* A coding agent's plan already is the deeper path. */}
-      {!origin && (
+      {/* A coding agent's plan already is the deeper path; it needs a runner that can take it. */}
+      {agentReady && (
         <button
           type="button"
           className={`draft-deeper${deeper ? " is-suggested" : ""}`}
@@ -350,6 +393,7 @@ export function DraftCard({
         </button>
       )}
       {deeper && <p className="draft-deeper-hint">{t("draft.deeperHint")}</p>}
+      {agentReady && hub && <p className="draft-deeper-hint">{t("draft.deeperHub")}</p>}
     </section>
   );
 }

@@ -112,7 +112,12 @@ describe("sendDraft", () => {
       ],
     });
     useCopilot.getState().editDraft("d1", (draft) => renameNode(draft, "a", "Write the guide"));
+    const refining: (string | null)[] = [];
+    const stop = useCopilot.subscribe((state) => refining.push(state.running ? state.refining : null));
     await sendDraft("add a review before shipping", "voice");
+    stop();
+    // The card it refines is read-only meanwhile.
+    expect(refining).toContain("d1");
     expect(turnBodies[0]).toMatchObject({
       intent: "draft",
       source: "voice",

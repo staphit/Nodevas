@@ -93,6 +93,24 @@ describe("draft entries", () => {
     expect(useCopilot.getState().drafts).toEqual({});
   });
 
+  it("a follow-up keeps the edits of drafts still in the conversation (finding 18)", () => {
+    useCopilot.setState({ items: [entryToItem(entry("d1")), entryToItem(entry("d0"))] });
+    useCopilot.getState().editDraft("d1", (draft) => renameNode(draft, "a", "Write the guide"));
+    useCopilot.getState().editDraft("d0", (draft) => renameNode(draft, "a", "Gone"));
+    useCopilot.getState().showFollowup({ id: "c1", mode: "default" } as never, [entry("d1"), entry("e9", "open")]);
+    expect(currentDraft(useCopilot.getState(), "d1")!.nodes[0].title).toBe("Write the guide");
+    expect(useCopilot.getState().drafts.d0).toBeUndefined();
+  });
+
+  it("knows which draft a running turn refines", () => {
+    useCopilot.getState().beginTurn("add a review", "text", "d1");
+    expect(useCopilot.getState().refining).toBe("d1");
+    useCopilot.getState().endTurn();
+    expect(useCopilot.getState().refining).toBeNull();
+    useCopilot.getState().beginTurn("hello", "text");
+    expect(useCopilot.getState().refining).toBeNull();
+  });
+
   it("records a new state on the item", () => {
     useCopilot.setState({ items: [entryToItem(entry("e1"))] });
     useCopilot.getState().setDraftData("e1", { state: "committed", batchId: "b1", createdIds: ["n1"] });
