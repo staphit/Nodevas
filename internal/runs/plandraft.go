@@ -13,6 +13,21 @@ import (
 // P6: a draft plan run (Record.Draft) does not write its create_subgraph to
 // the board; the hub records it here, one row per run in run_plan_drafts,
 // and the copilot's follow-up turns it into a draft card for the person.
+//
+// A table of its own, not a runs column: the draft is a blob of up to
+// runnerwire.MaxPlanDraftBytes (2 MiB), and runColumns is read on every
+// proxied request; a row of its own also gives concurrent calls of one run a
+// row lock (UpdatePlanDraft). Rows are kept as the record of what the agent
+// proposed and are never pruned, as runs are never pruned; that growth is
+// accepted. A capture whose follow-up is dropped on purpose (the person
+// deleted the conversation or lost write access to the project, so the plan
+// could not be created anyway) stays here with no reader.
+//
+// There is deliberately no read route (no GET /api/runs/:id/draft): the plan
+// reaches the person inside the conversation entry, and the follow-up reads
+// it through Options.PlanDraft with admin false. PlanDraftFor's admin path is
+// for a recovery route, should one ever be needed; it holds the visibility
+// rule (creator, runner owner, administrator) in one place for that route.
 
 // MergePlanDraft adds one call's nodes to what a draft holds: a key given
 // again replaces that node in place, a new key is appended, and every

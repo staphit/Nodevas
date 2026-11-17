@@ -1,6 +1,6 @@
 # Copilot: type (or say) what you want, get the nodes
 
-Base: master 21169dd6, branch `feat/copilot-drafts`. Design only; no code changed yet. This file is the work order for building it on another machine; delete it before the PR is merged (shipped plans are not kept in the repo).
+Base: master 21169dd6, branch `feat/copilot-drafts`. Built (P0-P7; see §17). This file is the work order for building it on another machine; delete it before the PR is merged (shipped plans are not kept in the repo).
 
 ## 0. Owner decisions (2026-11-17) and how to build
 
@@ -396,7 +396,7 @@ Shared-file notes:
 
 A read of this order against master 21169dd6 found about 18 stale claims; the owner then decided:
 
-1. **Check and commit live under `/api/graph`.** `/api/copilot/` is account-level (`internal/server/members.go:63`, `:127`), so the project write gate never runs there, and `internal/httpapi/copilot` holds no store. Routes: `POST /api/graph/subgraph/check` (dry run, its own path and abuse class, allowed for read-only members), the existing `POST /api/graph/subgraph` as the commit (gains `positions` and `batch`), `POST /api/graph/batches/{id}/undo` and `/redo`. `POST /api/copilot/drafts` only produces a draft. All copilot streams are NDJSON (`internal/httpapi/copilot/api.go:288-318`), not SSE.
+1. **Check and commit live under `/api/graph`.** `/api/copilot/` is account-level (`internal/server/members.go:63`, `:127`), so the project write gate never runs there, and `internal/httpapi/copilot` holds no store. Routes: `POST /api/graph/subgraph/check` (dry run, its own path and abuse class, allowed for read-only members), the existing `POST /api/graph/subgraph` as the commit (gains `positions` and `batch`), `POST /api/graph/batches/{id}/undo` and `/redo`. There is no `/api/copilot/drafts` route: a draft is a turn, `POST /api/copilot/conversations/:id/turns` with `intent: "draft"` (`previous` and `refineOf` to refine), and its state goes through `PUT /api/copilot/conversations/:id/entries/:entry/draft-state`. All copilot streams are NDJSON (`internal/httpapi/copilot/api.go:288-318`), not SSE.
 2. **Caps are fixed constants in v1**: 40 nodes per draft, 12k output tokens, 150 outline nodes. No per-user setting, no server ceiling, no 7-day expiry sweeper.
 3. ~~**P6 is deferred.**~~ Superseded: P6 built (2026-11-17) per the P6 decisions (owner said yes to Q2). The flag lives on the run (`runs.draft`, migration 0041) and the hub, not the sidecar, holds the writes (`internal/server/plan_draft.go`); the draft carries the goal tag, acceptance and priority as `extras`, and the web adds the goal link at Create.
 
@@ -420,11 +420,54 @@ Built and green on this branch: P0, P1, P2, P3, P4, P5, P7 (written). `gofmt`, `
 Not done yet:
 - **Real model, 2026-11-17: `opencode/deepseek-v4.1-flash-free`** (through `opencode run`; the free model is not served to other clients). Evals: 98% → 99% after widening one fixture's keywords (zh-TW 97%, en 100%); every case valid on the first call, no repair needed; 4–14 s per draft. The one real miss: `zh-after-selection` dropped the third step (「上線」) of three. Browser smoke test against a real server (copilot through a loopback OpenAI-compatible shim to `opencode run`): draft in 9 s, refine (「發布前加一個主管審查」) in 10 s with +/~ markers, Create placed the nodes where the ghosts were with their links, Undo removed them; nothing touched the board before Create. Observed: the model typed the approval step `task`, not `gate`. Still untested: Ollama / LM Studio themselves, and whether they honour `response_format` (the drafter retries without it on a 400 and validates either way).
 - §3.4 theme presentation: only the compact glyph row with a count; no picture-card ghosts, no character presenting the draft.
-- P6 built, Go half (2026-11-17): draft plan runs (`runs.draft`, `run_plan_drafts`), the hub's capture of `create_subgraph` and 409 `PLAN_RUN_DRAFTS` for other writes, the planner's draft prompt, the follow-up's draft card (`DraftData.origin`/`extras`), `copilot-plan:` commits (100 nodes), and the server-side guard on start_autopilot / start_breakdown / revise_goal while a plan is a draft. Web half merged too (card header, chips, Create with extras and goal edges). Review fixes: the hub records canonical kinds, a failed or cancelled draft run with a capture still delivers it, an open plan card stays live under a newer draft. Untested with a real coding agent yet.
-- Delete this file before merging; fold anything still needed into COPILOT.md or code comments.
+- P6 built, Go half (2026-11-17): draft plan runs (`runs.draft`, `run_plan_drafts`), the hub's capture of `create_subgraph` and 409 `PLAN_RUN_DRAFTS` for other writes, the planner's draft prompt, the follow-up's draft card (`DraftData.origin`/`extras`), `copilot-plan:` commits (100 nodes), and the server-side guard on start_autopilot / start_breakdown / revise_goal while a plan is a draft. Web half merged too (card header, chips, Create with extras and goal edges). Review fixes: the hub records canonical kinds, a failed or cancelled draft run with a capture still delivers it, an open plan card stays live under a newer draft. Tested with a real coding agent below.
+- Delete this file before merging; everything still needed is folded into COPILOT.md, docs and code comments (below).
 
 ### P6 with a real coding agent (2026-11-17)
 
 Single-user server with its built-in runner and a small Go repo; the copilot's chat model was DeepSeek (through a loopback shim to `opencode run` that turns its JSON answer into OpenAI tool calls). Asked to plan "add a hello command, with README and tests" with opencode and `opencode/deepseek-v4.1-flash-free`, the copilot called `start_breakdown` (agent and model passed), the run was a draft run, and opencode planned it in 20 s. The board then held only the goal node; the plan came back to the conversation as a draft card ("計畫完成：3 個任務（草稿）", origin naming the run, goal, agent and model; one `body_clipped` warning). Create in the browser added the three tasks with `goal:<id>` and the planner's own tags, the step order the planner gave, and the goal waiting for the two leaf tasks. The planner wrote no acceptance criteria (the run had no planner role, as before P6), so none were lost. `GET /api/runs/:id/draft` was deliberately not built (the draft reaches the web inside the conversation entry).
 
 Found while testing and fixed: with the Copilot panel open, the Agent button covered the composer's top row; it now moves left of the panel (and hides on a phone, where the panel is full width).
+
+### Folded (2026-11-17): where each item of §16, §17 and the P6 design now lives
+
+The fold is done; this file can be deleted without losing a decision. "Contributors" below means COPILOT.md's section [How drafts are built (for contributors)](../COPILOT.md#how-drafts-are-built-for-contributors).
+
+§16:
+- 1, routes under `/api/graph`, why, the check's abuse class, NDJSON, drafts as turns and the draft-state route: COPILOT.md, Contributors ("A draft is a turn", "Check and commit are project routes"); `internal/httpapi/graph/routes.go`.
+- 2, fixed caps, no setting, ceiling or sweeper: Contributors ("Caps are fixed constants"); `internal/copilot/draft_schema.go` (const block comment).
+- 3, P6 built, `runs.draft`, the hub holds the writes, extras, goal link at Create: COPILOT.md "Planning by voice" and Contributors ("A coding agent's plan as a draft"); migration `0041_plan_run_drafts` in `internal/db/postgres.go`; `internal/server/plan_draft.go`.
+- Positions are grid cells: Contributors; `internal/store/subgraph.go` (`SubgraphPosition`).
+- No node rev, the fingerprint, who may undo, redo re-applying links, `undoable: false`: Contributors ("Batches"); `internal/store/batch.go` (file comment, `UndoBatch`); `internal/httpapi/graph/subgraph.go`.
+- `withoutInputs` / dropped nested acceptance: `internal/copilot/toolbridge/bridge.go` (comments on both maps).
+- `normalizeCalls` and the `max_tokens` stop: `internal/copilot/turn.go`.
+- No global i18n parity test: `web/src/i18nCopilotParity.test.ts` (header).
+- Canvas selection mirrored into a slice: `web/src/state/documentSlice.ts`.
+- Package file lists: build-time only, not kept.
+- macOS `TMPDIR`: `docs/contributing.md` (Checks).
+- P7 runner and how to run it: `internal/copilot/draft_eval_test.go` (header); Contributors ("Evals").
+
+§17:
+- Build and test status, test counts: build-time only, not kept (the commits say it).
+- Real-model results (opencode/deepseek-v4.1-flash-free, 99%, zh-TW 97%, en 100%), the misses (zh-after-selection, approval typed `task`), Ollama / LM Studio never run: `internal/copilot/draft_eval_test.go` (header, "Baseline").
+- §3.4 theme presentation: being built in the final fixes (finding 2, its own group); nothing to fold.
+- P6 status and review fixes: COPILOT.md "Planning by voice"; Contributors.
+- P6 with a real coding agent: the test is in commit ffa1757's history; the decision it records, no `GET /api/runs/:id/draft`, is in `internal/runs/plandraft.go` (package comment) and Contributors.
+- Agent button clear of the panel: the code and its test (`web/src/copilot/copilotFabClearance.test.ts`).
+
+P6 design (scratchpad `p6-design.md`):
+- Draft runs only from the copilot's server tool (`auth.WithCopilotServerTool`), three layers of refusal, cancel when the follow-up is not recorded (R3, R20): Contributors; `internal/auth/servertool.go`; COPILOT.md "Planning by voice".
+- Interception at the hub, prefix-based refusal, context-only draft marker (§3, R4, R15): Contributors; `internal/server/plan_draft.go`.
+- Capture bounds, merge by key, goal edges dropped (§4.1, §4.2, R9, R10): Contributors; `internal/runnerwire/plandraft.go`; `internal/runs/plandraft.go` (`MergePlanDraft`).
+- Why a table, retention, no read route, the admin path (§2 "Not built", §4.3, R16): `internal/runs/plandraft.go` (package comment).
+- Front matter refused and stripped (R21): Contributors; `internal/server/plan_draft.go`; `internal/copilot/draft_schema.go` (`planDraftBody`).
+- Older runners (R1): Contributors.
+- 600-character bodies, extras kept whole, priority applied unseen (R5): COPILOT.md "Planning by voice".
+- Goal tag and goal edges at Create, `takesAcceptance` (R6, R7, §5.2): COPILOT.md "Planning by voice"; Contributors; `web/src/copilot/draft/draftStore.ts`.
+- No `planRunId` / `created_by_run` (§5.5, R8): Contributors.
+- Refining a plan refused (R12): COPILOT.md "Planning by voice".
+- 25-task autopilot cap, goal deleted before Create (R13, R14): COPILOT.md "Planning by voice".
+- The plan-draft guard and what it does not cover (R19): COPILOT.md "Planning by voice"; `internal/copilot/plan_draft.go`.
+- State note instead of a stored message, and the rejected alternative (§10): `internal/copilot/plan_draft.go` (`planDraftStateNote`).
+
+Final fixes (contracts C1-C6): `propose_nodes`, the person's final draft in draft-state, one live commit per via (`409 BATCH_VIA_TAKEN`), the model label in the history, temperature 0.2, and the kept-node list after a partial undo: COPILOT.md "Using it", "Permission modes", "Which model answers" and Contributors.

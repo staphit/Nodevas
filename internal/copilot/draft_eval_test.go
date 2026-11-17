@@ -19,6 +19,20 @@
 // case scores the share of its properties met; the run reports the mean per
 // language and overall, so a change to the prompt or the model can be
 // compared before and after. A low score does not fail the test.
+//
+// Baseline (2026-11-17, cases.json as of the P7 commit, the drafter prompt
+// before the final review fixes): opencode:opencode/deepseek-v4.1-flash-free
+// scored 99% overall (zh-TW 97%, en 100%) over 30 cases, every case valid on
+// the first call with no repair, 4-14 s per draft. The first run scored 98%;
+// zh-long-spec's keywords were then widened (租屋, 租約) because the model had
+// drafted those steps correctly in other words. Known misses:
+// zh-after-selection drops the third of three steps (上線); and while both
+// review-gate cases passed, in the browser smoke test a refine asking for a
+// manager's review (發布前加一個主管審查) added it as kind task, not gate.
+// Ollama and LM Studio were never run, nor whether they honour
+// response_format (the provider retries without it when refused, and the
+// drafter validates the answer either way). Re-run and replace
+// this paragraph when the prompt, the schema or the cases change.
 package copilot
 
 import (

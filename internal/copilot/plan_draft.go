@@ -213,6 +213,13 @@ func (s *Service) deliverPlanDraft(ctx context.Context, f Followup, conversation
 // planDraftStateNote is what the model reads, on every turn, of a coding
 // agent's plan draft: whether the person created it, discarded it, or not
 // yet. Rebuilt from the entry's data, so it follows undo and redo.
+//
+// SetDraftState stays a data-only write on purpose. Storing a Message on the
+// draft entry would put two assistant messages in a row (the draft, then the
+// follow-up's reply; appendMessage folds only user messages), and appending
+// an event entry from SetDraftState could land inside a running turn that
+// holds the conversation, between a tool call and its result. This user-role
+// note folds into the follow-up's event note right before it instead.
 func planDraftStateNote(data DraftData) string {
 	goal := ""
 	if data.Origin != nil {

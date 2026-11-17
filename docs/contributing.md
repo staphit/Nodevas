@@ -34,6 +34,8 @@ Database tests run on PostgreSQL. With nothing set, each test binary starts the 
 NODEVAS_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres?sslmode=disable go test ./...
 ```
 
+On macOS, run the Go tests with a real `TMPDIR`, for example `mkdir -p /private/tmp/nodevas-tmp && TMPDIR=/private/tmp/nodevas-tmp go test ./...`. The default temporary folder is under `/var`, a symlink to `/private/var`, and code that resolves symlinks on only one side of a path comparison (the runner's repository browser, for one) refuses paths there, so `TestPreviewEntry` (`internal/runner`) and `TestWarmNodeLinksFillsTheCacheBeforeTheFirstDrawer` (`internal/project`) fail there. CI runs on Linux and is not affected.
+
 `NODEVAS_PG_REAL=1` makes the embedded-server tests that need the real binaries fail instead of skipping when they are missing (CI's `embedded-pg` job).
 
 For end-to-end tests, install Playwright Chromium first. The run shares one PostgreSQL (`NODEVAS_E2E_DATABASE_URL`, or the embedded one `global-setup` starts) with a database per worker:
@@ -58,7 +60,7 @@ npm run e2e --prefix web
 - `internal/realtime/`: WebSocket presence and CRDT document sessions.
 - `internal/server/`: middleware and the route list (`routes.go`); the handlers are in `internal/httpapi/`.
 - `internal/runner/`: the runner; `internal/runs/`: the hub's run records and dispatch.
-- `internal/agents/`: agent sessions, Agent chat and `ask_user`; `internal/copilot/`: the voice copilot.
+- `internal/agents/`: agent sessions, Agent chat and `ask_user`; `internal/copilot/`: the copilot (chat, drafts, follow-ups).
 - `internal/db/` and `internal/embeddedpg/`: PostgreSQL and the embedded server.
 - `web/src/`: React and TypeScript interface.
 - `desktop/`: the Electron desktop app.
