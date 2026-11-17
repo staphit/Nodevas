@@ -3,8 +3,9 @@
  * the line; an IME composition (zhuyin, pinyin) keeps Enter for itself.
  */
 
-import { forwardRef, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { forwardRef, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useI18n } from "../i18n";
+import { useCopilot } from "./copilotStore";
 import { IconMic, IconSend, IconStop } from "./icons";
 import type { SpeechRecognitionState } from "./speech";
 
@@ -23,6 +24,12 @@ export const Composer = forwardRef<
   const { t } = useI18n();
   const [text, setText] = useState("");
   const pressRef = useRef<{ at: number; started: boolean } | null>(null);
+  // Text handed over from elsewhere (a draft's question chip) lands in the
+  // box, editable, and is not sent.
+  const fill = useCopilot((state) => state.composerFill);
+  useEffect(() => {
+    if (fill) setText(fill.text);
+  }, [fill]);
 
   const send = () => {
     const value = text.trim();

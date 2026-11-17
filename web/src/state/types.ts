@@ -253,6 +253,18 @@ export interface DocumentSlice {
   revealRequest: { nodeId: string; at: number } | null;
   revealNode: (nodeId: string) => void;
   clearRevealRequest: () => void;
+  /**
+   * The graph canvas's multi-selection, mirrored here by LaneView (which
+   * keeps the selection itself) so the copilot can send it. Stamped with the
+   * project it was made in: node ids repeat across projects, so read it
+   * through `canvasSelectionIds`, which gives none for another project.
+   */
+  canvasSelection: { project: string; ids: string[] };
+  setCanvasSelection: (ids: string[]) => void;
+  /** Nodes the graph canvas should select (a draft's Create); LaneView clears it. */
+  canvasSelectRequest: { ids: string[]; at: number } | null;
+  selectOnCanvas: (ids: string[]) => void;
+  clearCanvasSelectRequest: () => void;
   closeTab: (id: string) => void;
   /**
    * Saves dirty documents, parks failed writes as drafts, and closes only the

@@ -19,6 +19,7 @@ import { translate } from "../i18n";
 import { queues, sendGraphWrite } from "./internals";
 import {
   clearRedo,
+  notifyBatchRevert,
   peekRedo,
   peekUndo,
   popRedo,
@@ -96,7 +97,22 @@ async function applyEntry(
   }
 
   let inverse: UndoEntry | null = null;
-  if (entry.kind === "graph") {
+  if (entry.kind === "batch") {
+    // The server decides per node: what somebody changed since stays.
+    if (!entry.undone) {
+      const result = await api.undoBatch(entry.batchId);
+      attempt.applied = true;
+      const trashed = result.trashed ?? [];
+      for (const id of trashed) get().closeTab(id);
+      inverse = { ...entry, undone: true };
+      notifyBatchRevert({ direction: "undo", entry, trashed, refused: result.refused ?? [] });
+    } else {
+      const result = await api.redoBatch(entry.batchId);
+      attempt.applied = true;
+      inverse = { ...entry, undone: false };
+      notifyBatchRevert({ direction: "redo", entry, restored: result.restored ?? [] });
+    }
+  } else if (entry.kind === "graph") {
     const { graph, graphRev } = get();
     if (!graph) return null;
     const before = structuredClone(graph);

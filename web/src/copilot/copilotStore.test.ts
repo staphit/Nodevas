@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotEntry } from "../api";
 import { entryToItem, readCopilotPrefs, reduceTurnEvent, useCopilot, type TurnState } from "./copilotStore";
 
-const empty: TurnState = { items: [], pending: [], running: true, turnId: null, lastReply: null };
+const empty: TurnState = { items: [], pending: [], running: true, turnId: null, lastReply: null, draftStep: null };
 
 function apply(state: TurnState, ...events: Parameters<typeof reduceTurnEvent>[1][]): TurnState {
   return events.reduce((current, event) => ({ ...current, ...reduceTurnEvent(current, event) }), state);

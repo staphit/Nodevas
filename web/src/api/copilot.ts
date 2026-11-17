@@ -90,8 +90,11 @@ export interface CopilotConversation {
   unread?: boolean;
 }
 
-/** "event": written by the server, not the person (a plan run ended). */
-export type CopilotEntryKind = "user" | "assistant" | "tool" | "notice" | "event";
+/**
+ * "event": written by the server, not the person (a plan run ended).
+ * "draft": nodes the copilot proposes; `data` holds the CopilotDraftData JSON.
+ */
+export type CopilotEntryKind = "user" | "assistant" | "tool" | "notice" | "event" | "draft";
 
 /** One stored transcript row: the display columns of `copilot_entries`. */
 export interface CopilotEntry {
@@ -106,8 +109,66 @@ export interface CopilotEntry {
   toolInput?: string;
   toolOutput?: string;
   toolStatus?: "ok" | "error" | "denied" | "";
+  /** A kind's own JSON: a draft's CopilotDraftData. */
+  data?: string;
   createdAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// Drafts (internal/copilot/draft_schema.go, draft.go)
+// ---------------------------------------------------------------------------
+
+/** One proposed node. `after` and `refs` name draft keys or `existing:<nodeId>`. */
+export interface CopilotDraftNode {
+  key: string;
+  title: string;
+  kind: string;
+  body?: string;
+  after?: string[];
+  refs?: string[];
+}
+
+export interface CopilotDraft {
+  summary: string;
+  needsCodeKnowledge?: boolean;
+  questions?: string[];
+  nodes: CopilotDraftNode[];
+}
+
+/**
+ * What the server found wrong with a draft. `message` is English for the
+ * model and is never shown; the panel says it by `code`.
+ */
+export interface CopilotDraftIssue {
+  key?: string;
+  field?: string;
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  /** duplicate_existing: the node it may repeat. */
+  existingId?: string;
+  title?: string;
+}
+
+export type CopilotDraftState = "open" | "committed" | "discarded";
+
+export interface CopilotDraftData {
+  draft: CopilotDraft;
+  issues: CopilotDraftIssue[];
+  /** The model proposed more than MaxDraftNodes; the rest was cut. */
+  capped?: boolean;
+  provider: string;
+  model: string;
+  state: CopilotDraftState;
+  refineOf?: string;
+  batchId?: string;
+  createdIds?: string[];
+}
+
+/** Steps of a draft turn, as `draft_status` events name them. */
+export type CopilotDraftStep = "reading" | "drafting" | "checking";
+
+export type CopilotIntent = "ask" | "draft";
 
 export interface CopilotConversationDetail {
   conversation: CopilotConversation;
@@ -128,6 +189,12 @@ export interface CopilotTurnRequest {
   clientTools: CopilotClientTool[];
   /** This browser's built-in model; the server uses it only when "available". */
   browserModel?: CopilotBrowserModel;
+  /** "draft" proposes nodes instead of chatting; absent is "ask". */
+  intent?: CopilotIntent;
+  /** The draft being refined, as the person edited it (intent "draft" only). */
+  previous?: CopilotDraft;
+  /** That draft's entry id. */
+  refineOf?: string;
 }
 
 export interface CopilotSettings {
@@ -190,6 +257,8 @@ export type CopilotTurnEvent =
   | { type: "entry"; entry: CopilotEntry }
   | { type: "error"; message: string; code?: string }
   | { type: "turn_finished"; stop: string; usage?: Record<string, number> }
+  /** Which step a draft turn is on. */
+  | { type: "draft_status"; code: CopilotDraftStep }
   /** Keeps a quiet stream (a turn parked on a permission card) alive through proxies. */
   | { type: "ping" };
 
@@ -216,6 +285,7 @@ const EVENT_TYPES = new Set<string>([
   "entry",
   "error",
   "turn_finished",
+  "draft_status",
 ]);
 
 /** Parses one NDJSON line. Blank, malformed or unknown lines give null. */
@@ -455,6 +525,21 @@ export const copilotApi = {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
+
+  /**
+   * Records what the person did with a draft: committed (with the batch and
+   * the ids it made), discarded, or open again after an undo. Answers the
+   * updated entry.
+   */
+  putCopilotDraftState: (
+    conversationId: string,
+    entryId: string,
+    body: { state: CopilotDraftState; batchId?: string; ids?: string[] },
+  ) =>
+    req<CopilotEntry>(
+      `${conversationPath(conversationId)}/entries/${encodeURIComponent(entryId)}/draft-state`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
 
   streamCopilotTurn: streamTurn,
 };
