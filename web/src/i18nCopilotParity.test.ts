@@ -47,4 +47,28 @@ describe("copilot and draft keys in both catalogs", () => {
     const english = zh.filter((key) => /\bnodes?\b/i.test(translate(key, "zh-TW")));
     expect(english).toEqual([]);
   });
+
+  it("has the plan draft keys in both catalogs", () => {
+    const keys = [
+      "draft.plan.origin",
+      "draft.plan.agentUnknown",
+      "draft.plan.note",
+      "draft.plan.tags",
+      "draft.plan.acceptance",
+      "draft.plan.acceptanceUnused",
+      "draft.issue.body_clipped",
+      "copilot.planOpen",
+      "copilot.placeholder.planOpen",
+    ];
+    for (const key of keys) {
+      expect(hasMessage("en", key), key).toBe(true);
+      expect(hasMessage("zh-TW", key), key).toBe(true);
+    }
+    expect(translate("draft.plan.tags", "zh-TW", { n: 3 })).toBe("3 個標籤");
+    expect(translate("draft.plan.acceptance", "zh-TW", { n: 2 })).toBe("2 條驗收條件");
+    expect(translate("draft.plan.origin", "en", { agent: "claude", goal: "Login page" })).toBe(
+      "Planned by claude for “Login page”",
+    );
+    expect(translate("draft.plan.origin", "zh-TW", { agent: "claude", goal: "Login" })).toBe("由 claude 為「Login」規劃");
+  });
 });

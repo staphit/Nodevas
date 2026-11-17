@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { CopilotDraftData } from "../../api";
+import { BUILTIN_NODE_TYPES } from "../../domain/graph/nodeTypes";
+import type { NodeType } from "../../types";
 import {
   addAfter,
   changeKind,
@@ -10,10 +13,16 @@ import {
   mentionsCode,
   mergeMany,
   mergeNodes,
+  maxNodesOf,
+  MAX_DRAFT_NODES,
+  MAX_PLAN_DRAFT_NODES,
+  planDraftToSpec,
+  planVia,
   relink,
   removeAfter,
   removeNode,
   renameNode,
+  takesAcceptance,
   validateDraft,
   type Draft,
 } from "./draftStore";
@@ -177,5 +186,143 @@ describe("mentionsCode", () => {
     expect(mentionsCode("refactor session.ts")).toBe(true);
     expect(mentionsCode("rename sendTurn() please")).toBe(true);
     expect(mentionsCode("plan a product launch: docs, tests, release")).toBe(false);
+  });
+});
+
+describe("plan drafts (a coding agent's plan)", () => {
+  const types: NodeType[] = [
+    ...BUILTIN_NODE_TYPES,
+    {
+      id: "custom-type-memo",
+      label: "Memo",
+      builtin: false,
+      shape: "round",
+      agentMode: "none",
+      completion: "people",
+      countsInProgress: true,
+    },
+  ];
+  const plan: Draft = {
+    summary: "",
+    nodes: [
+      { key: "t1", title: "Add the users table", kind: "task", body: "Migration" },
+      { key: "t2", title: "Login form", kind: "task", after: ["t1"], refs: ["existing:n-9"] },
+      { key: "t3", title: "Auth notes", kind: "note" },
+      { key: "t4", title: "Docs", kind: "task" },
+    ],
+  };
+  const data: Pick<CopilotDraftData, "origin" | "extras"> = {
+    origin: { runId: "run-7", goalId: "n-12", goalTitle: "Login page", agent: "claude", model: "sonnet" },
+    extras: {
+      t1: { tags: ["goal:n-12", "db"], acceptance: ["Migration 0042 creates users"], priority: "high" },
+      t2: { acceptance: ["The form logs in"] },
+      t3: { tags: ["auth"], acceptance: ["ignored on a note"] },
+    },
+  };
+  const byKey = (spec: ReturnType<typeof planDraftToSpec>, key: string) =>
+    spec.nodes.find((item) => item.key === key)!;
+
+  it("planDraftToSpec merges extras by key and adds the goal tag", () => {
+    const spec = planDraftToSpec(plan, data, {
+      types,
+      positions: { t1: { col: 4, row: 2 } },
+      via: planVia("e1"),
+    });
+    expect(byKey(spec, "t1")).toEqual({
+      key: "t1",
+      title: "Add the users table",
+      kind: "task",
+      body: "Migration",
+      tags: ["goal:n-12", "db"],
+      acceptance: ["Migration 0042 creates users"],
+      priority: "high",
+    });
+    expect(byKey(spec, "t2")).toEqual({
+      key: "t2",
+      title: "Login form",
+      kind: "task",
+      dependsOn: ["t1"],
+      refs: ["n-9"],
+      tags: ["goal:n-12"],
+      acceptance: ["The form logs in"],
+    });
+    expect(byKey(spec, "t4").tags).toEqual(["goal:n-12"]);
+    expect(spec.positions).toEqual({ t1: { col: 4, row: 2 } });
+    expect(spec.batch).toEqual({ via: "copilot-plan:e1" });
+  });
+
+  it("links every non-note sink to the goal, and nothing else", () => {
+    const spec = planDraftToSpec(plan, data, { types });
+    expect(spec.edges).toEqual([
+      { from: "t2", to: "n-12" },
+      { from: "t4", to: "n-12" },
+    ]);
+    expect(spec.positions).toBeUndefined();
+    expect(spec.batch).toBeUndefined();
+  });
+
+  it("drops acceptance on a note", () => {
+    const spec = planDraftToSpec(plan, data, { types });
+    expect(byKey(spec, "t3")).toEqual({
+      key: "t3",
+      title: "Auth notes",
+      kind: "note",
+      tags: ["auth", "goal:n-12"],
+    });
+  });
+
+  it("drops acceptance on a node changed to gate (and on a custom type with agentMode none), keeps it on task and goal types", () => {
+    let edited = changeKind(plan, "t1", "gate");
+    edited = changeKind(edited, "t2", "custom-type-memo");
+    let spec = planDraftToSpec(edited, data, { types });
+    expect(byKey(spec, "t1").acceptance).toBeUndefined();
+    expect(byKey(spec, "t2").acceptance).toBeUndefined();
+    expect(byKey(spec, "t1").priority).toBe("high");
+    edited = changeKind(plan, "t1", "goal");
+    spec = planDraftToSpec(edited, data, { types });
+    expect(byKey(spec, "t1").acceptance).toEqual(["Migration 0042 creates users"]);
+    expect(byKey(spec, "t2").acceptance).toEqual(["The form logs in"]);
+  });
+
+  it("takesAcceptance follows agentMode, unknown kind false", () => {
+    expect(takesAcceptance("task", types)).toBe(true);
+    expect(takesAcceptance("goal", types)).toBe(true);
+    expect(takesAcceptance("gate", types)).toBe(false);
+    expect(takesAcceptance("note", types)).toBe(false);
+    expect(takesAcceptance("custom-type-memo", types)).toBe(false);
+    expect(takesAcceptance("custom-type-gone", types)).toBe(false);
+    expect(takesAcceptance("", types)).toBe(false);
+  });
+
+  it("recomputes goal edges after removeNode", () => {
+    // t2 is removed: t1 no longer has anything waiting for it.
+    const spec = planDraftToSpec(removeNode(plan, "t2"), data, { types });
+    expect(spec.edges).toEqual([
+      { from: "t1", to: "n-12" },
+      { from: "t4", to: "n-12" },
+    ]);
+  });
+
+  it("validateDraft refuses 101 nodes with maxNodes 100 and 41 by default", () => {
+    const many = (n: number): Draft => ({
+      summary: "",
+      nodes: Array.from({ length: n }, (_, index) => ({ key: `k${index}`, title: `T${index}`, kind: "task" })),
+    });
+    expect(MAX_DRAFT_NODES).toBe(40);
+    expect(MAX_PLAN_DRAFT_NODES).toBe(100);
+    expect(validateDraft(many(41)).map((issue) => issue.code)).toContain("too_many");
+    expect(validateDraft(many(100), undefined, undefined, MAX_PLAN_DRAFT_NODES)).toEqual([]);
+    expect(
+      validateDraft(many(101), undefined, undefined, MAX_PLAN_DRAFT_NODES).map((issue) => issue.code),
+    ).toContain("too_many");
+  });
+
+  it("maxNodesOf is 100 for a plan draft, 40 otherwise", () => {
+    expect(maxNodesOf(data)).toBe(100);
+    expect(maxNodesOf({})).toBe(40);
+  });
+
+  it("planVia(entryId) is copilot-plan:<id>", () => {
+    expect(planVia("e1")).toBe("copilot-plan:e1");
   });
 });

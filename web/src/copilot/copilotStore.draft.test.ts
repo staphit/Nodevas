@@ -5,7 +5,9 @@ import {
   currentDraft,
   entryToItem,
   makePlaceholderKey,
+  parseDraftData,
   reduceTurnEvent,
+  refinableDraftId,
   useCopilot,
   type TurnState,
 } from "./copilotStore";
@@ -96,5 +98,67 @@ describe("draft entries", () => {
     useCopilot.getState().setDraftData("e1", { state: "committed", batchId: "b1", createdIds: ["n1"] });
     const item = useCopilot.getState().items[0];
     expect(item.kind === "draft" && item.data).toMatchObject({ state: "committed", batchId: "b1" });
+  });
+});
+
+describe("plan drafts (a coding agent's plan)", () => {
+  const planEntry = (id: string, value: unknown): CopilotEntry => ({
+    id,
+    seq: 3,
+    kind: "draft",
+    text: "Plan ready: 2 tasks (draft)",
+    data: JSON.stringify(value),
+    createdAt: 1,
+  });
+  const plan = {
+    ...data(),
+    provider: "",
+    model: "",
+    draft: { ...data().draft, summary: "" },
+    origin: { runId: "run-7", goalId: "n-12", goalTitle: "Login page", agent: "claude", model: "sonnet" },
+    extras: {
+      a: { tags: ["goal:n-12", "db"], acceptance: ["Migration runs"], priority: "high" },
+      b: { acceptance: ["The form logs in"] },
+    },
+  };
+
+  it("parseDraftData keeps origin and extras", () => {
+    const parsed = parseDraftData(JSON.stringify(plan));
+    expect(parsed?.origin).toEqual(plan.origin);
+    expect(parsed?.extras).toEqual(plan.extras);
+    // A copilot draft has neither.
+    const own = parseDraftData(JSON.stringify(data()));
+    expect(own?.origin).toBeUndefined();
+    expect(own?.extras).toBeUndefined();
+  });
+
+  it("drops a malformed extras value without failing", () => {
+    const parsed = parseDraftData(
+      JSON.stringify({
+        ...plan,
+        origin: { ...plan.origin, agent: 7 },
+        extras: {
+          a: { tags: ["db", 3], acceptance: "not a list", priority: "high" },
+          b: "nope",
+          c: null,
+          d: { acceptance: ["Works"] },
+        },
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed?.origin).toEqual({ runId: "run-7", goalId: "n-12", goalTitle: "Login page", model: "sonnet" });
+    expect(parsed?.extras).toEqual({ a: { priority: "high" }, d: { acceptance: ["Works"] } });
+    expect(parseDraftData(JSON.stringify({ ...plan, extras: ["x"] }))?.extras).toBeUndefined();
+    expect(parseDraftData(JSON.stringify({ ...plan, origin: { goalId: "n-12" } }))?.origin).toBeUndefined();
+  });
+
+  it("refinableDraftId skips a plan draft", () => {
+    const own = entryToItem(entry("e1"));
+    const planned = entryToItem(planEntry("e2", plan));
+    expect(refinableDraftId({ items: [own] })).toBe("e1");
+    expect(activeDraftId({ items: [own, planned] })).toBe("e2");
+    expect(refinableDraftId({ items: [own, planned] })).toBeNull();
+    expect(makePlaceholderKey({ items: [own, planned] })).toBe("copilot.placeholder.planOpen");
+    expect(makePlaceholderKey({ items: [own] })).toBe("copilot.placeholder.refine");
   });
 });

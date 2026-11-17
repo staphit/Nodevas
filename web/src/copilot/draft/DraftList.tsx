@@ -5,10 +5,10 @@
  */
 
 import { useState, type KeyboardEvent } from "react";
-import type { CopilotDraft, CopilotDraftNode } from "../../api";
+import type { CopilotDraft, CopilotDraftExtras, CopilotDraftNode } from "../../api";
 import { safeCssColor } from "../../cssColor";
 import { nodeTypeById } from "../../domain/graph/nodeTypes";
-import { useI18n } from "../../i18n";
+import { formatList, useI18n } from "../../i18n";
 import { IconClose, IconWarning } from "../../icons";
 import { nodeTypeLabel } from "../../nodeTypeTheme";
 import type { Graph, NodeType } from "../../types";
@@ -20,8 +20,10 @@ import {
   isExistingRef,
   linkInsteadOfDuplicate,
   removeAfter,
+  MAX_DRAFT_NODES,
   removeNode,
   renameNode,
+  takesAcceptance,
   type DiffMark,
   type Draft,
 } from "./draftStore";
@@ -109,6 +111,48 @@ function TitleEditor({
   );
 }
 
+/**
+ * A plan step's read-only chips: the planner's tags (the goal tag, on every
+ * step, left out) and acceptance criteria, greyed when the step's type takes
+ * none and Create would leave them out.
+ */
+function PlanChips({
+  extras,
+  goalTag,
+  usesAcceptance,
+}: {
+  extras: CopilotDraftExtras | undefined;
+  goalTag?: string;
+  usesAcceptance: boolean;
+}) {
+  const { t, language } = useI18n();
+  const tags = (extras?.tags ?? []).filter((tag) => tag !== goalTag);
+  const acceptance = extras?.acceptance ?? [];
+  if (!tags.length && !acceptance.length) return null;
+  return (
+    <div className="draft-extras">
+      {tags.length > 0 && (
+        <span className="draft-chip" data-chip="tags" title={formatList(tags, language)}>
+          {t("draft.plan.tags", { n: tags.length })}
+        </span>
+      )}
+      {acceptance.length > 0 && (
+        <span
+          className={`draft-chip${usesAcceptance ? "" : " is-unused"}`}
+          data-chip="acceptance"
+          title={
+            usesAcceptance
+              ? acceptance.join("\n")
+              : `${t("draft.plan.acceptanceUnused")}\n${acceptance.join("\n")}`
+          }
+        >
+          {t("draft.plan.acceptance", { n: acceptance.length })}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function DraftList({
   draft,
   graph,
@@ -119,6 +163,9 @@ export function DraftList({
   selected,
   onToggleSelect,
   onEdit,
+  extras,
+  goalTag,
+  maxNodes = MAX_DRAFT_NODES,
 }: {
   draft: Draft;
   graph: Graph | null;
@@ -129,6 +176,12 @@ export function DraftList({
   selected: ReadonlySet<string>;
   onToggleSelect: (key: string) => void;
   onEdit: (update: (draft: CopilotDraft) => CopilotDraft) => void;
+  /** A coding agent's plan: what the planner wrote per step, by key. */
+  extras?: Record<string, CopilotDraftExtras>;
+  /** The plan's goal tag, which every step carries and the chips leave out. */
+  goalTag?: string;
+  /** The draft's node cap, for the issue texts. */
+  maxNodes?: number;
 }) {
   const { t } = useI18n();
   const boardNodes = graph?.nodes ?? [];
@@ -203,7 +256,7 @@ export function DraftList({
             </span>
           )}
           {nodeMarks.length > 0 && (
-            <span className="draft-node-warn" title={nodeMarks.map((item) => issueText(item, t)).join("\n")}>
+            <span className="draft-node-warn" title={nodeMarks.map((item) => issueText(item, t, maxNodes)).join("\n")}>
               <IconWarning size={14} />
             </span>
           )}
@@ -219,6 +272,13 @@ export function DraftList({
             </button>
           )}
         </div>
+        {extras && (
+          <PlanChips
+            extras={extras[node.key]}
+            goalTag={goalTag}
+            usesAcceptance={takesAcceptance(node.kind, nodeTypes)}
+          />
+        )}
         {(after.length > 0 || !readOnly) && (
           <div className="draft-after">
             {after.map((ref) => (
@@ -289,7 +349,7 @@ export function DraftList({
                     )}
                   </>
                 ) : (
-                  <span>{issueText(item, t)}</span>
+                  <span>{issueText(item, t, maxNodes)}</span>
                 )}
               </li>
             ))}
@@ -321,10 +381,15 @@ const KNOWN_ISSUES = new Set([
   "unknown_ref",
   "duplicate_existing",
   "duplicate_in_draft",
+  "body_clipped",
 ]);
 
-/** An issue in the reader's language, by its code. */
-export function issueText(issue: { code: string; title?: string }, t: Translate): string {
+/** An issue in the reader's language, by its code (`max`: the draft's node cap). */
+export function issueText(
+  issue: { code: string; title?: string },
+  t: Translate,
+  max: number = MAX_DRAFT_NODES,
+): string {
   if (!KNOWN_ISSUES.has(issue.code)) return t("draft.issue.other");
-  return t(`draft.issue.${issue.code}`, { title: issue.title ?? "", max: 40 });
+  return t(`draft.issue.${issue.code}`, { title: issue.title ?? "", max });
 }

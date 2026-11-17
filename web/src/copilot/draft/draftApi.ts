@@ -11,8 +11,10 @@ import {
   api,
   AuthError,
   type CopilotDraft,
+  type CopilotDraftData,
   type CopilotDraftIssue,
   type SubgraphResult,
+  type SubgraphSpec,
 } from "../../api";
 import { formatList, translate } from "../../i18n";
 import { nodeTypesForLayout } from "../../domain/graph/nodeTypes";
@@ -34,6 +36,10 @@ import {
   draftVia,
   existingIdOf,
   isExistingRef,
+  MAX_DRAFT_NODES,
+  maxNodesOf,
+  planDraftToSpec,
+  planVia,
   validateDraft,
   type ClientIssue,
   type ClientIssueCode,
@@ -64,10 +70,29 @@ function boardFacts(graph: Graph | null): { ids: Set<string>; kinds: Set<string>
   };
 }
 
-/** Client checks of a draft against the board on screen. */
-export function checkLocally(draft: CopilotDraft, graph: Graph | null = useApp.getState().graph): ClientIssue[] {
+/** Client checks of a draft against the board on screen (`maxNodes`: its cap, maxNodesOf). */
+export function checkLocally(
+  draft: CopilotDraft,
+  graph: Graph | null = useApp.getState().graph,
+  maxNodes: number = MAX_DRAFT_NODES,
+): ClientIssue[] {
   const { ids, kinds } = boardFacts(graph);
-  return validateDraft(draft, graph ? ids : undefined, graph ? kinds : undefined);
+  return validateDraft(draft, graph ? ids : undefined, graph ? kinds : undefined, maxNodes);
+}
+
+/**
+ * What a draft sends to the board: a coding agent's plan carries what the
+ * planner wrote (tags, acceptance, priority) and the goal's links; the
+ * copilot's own draft only what the card shows.
+ */
+export function specOf(
+  draft: CopilotDraft,
+  data: Pick<CopilotDraftData, "origin" | "extras"> | null | undefined,
+  options: { positions?: Record<string, Cell>; via?: string } = {},
+  graph: Graph | null = useApp.getState().graph,
+): SubgraphSpec {
+  if (data?.origin) return planDraftToSpec(draft, data, { ...options, types: nodeTypesForLayout(graph) });
+  return draftToSpec(draft, options);
 }
 
 /**
@@ -110,11 +135,13 @@ export function scheduleCheck(entryId: string): void {
 }
 
 export async function checkNow(entryId: string): Promise<void> {
-  const draft = currentDraft(useCopilot.getState(), entryId);
+  const copilot = useCopilot.getState();
+  const draft = currentDraft(copilot, entryId);
+  const data = draftItemOf(copilot, entryId)?.data;
   const ui = useDraftUi.getState();
   if (!draft) return;
   // The client already knows it would be refused: no round trip.
-  if (checkLocally(draft).some(isBlocking)) {
+  if (checkLocally(draft, undefined, data ? maxNodesOf(data) : MAX_DRAFT_NODES).some(isBlocking)) {
     ui.setCheck(entryId, null);
     return;
   }
@@ -122,7 +149,7 @@ export async function checkNow(entryId: string): Promise<void> {
   sequence.set(entryId, mine);
   ui.setCheck(entryId, { status: "checking" });
   try {
-    await api.checkSubgraph(draftToSpec(draft));
+    await api.checkSubgraph(specOf(draft, data));
     if (sequence.get(entryId) === mine) useDraftUi.getState().setCheck(entryId, { status: "ok" });
   } catch (error) {
     if (sequence.get(entryId) !== mine) return;
@@ -223,7 +250,7 @@ export function canCreate(entryId: string): boolean {
   if (app.graphUnreadable !== null) return false;
   if (ui.canWrite?.project === app.activeProject && !ui.canWrite.value) return false;
   if (ui.checks[entryId]?.status === "error") return false;
-  if (checkLocally(draft, app.graph).some(isBlocking)) return false;
+  if (checkLocally(draft, app.graph, maxNodesOf(item.data)).some(isBlocking)) return false;
   const edited = copilot.drafts[entryId] !== undefined;
   return !liveServerIssues(item.data.issues ?? [], draft, edited).some((issue) => issue.severity === "error");
 }
@@ -243,7 +270,8 @@ export async function createDraft(entryId: string): Promise<boolean> {
   let result: SubgraphResult;
   try {
     const positions = createPositions(entryId, draft);
-    result = await api.createSubgraph(draftToSpec(draft, { positions, via: draftVia(entryId) }));
+    const via = item.data.origin ? planVia(entryId) : draftVia(entryId);
+    result = await api.createSubgraph(specOf(draft, item.data, { positions, via }));
   } catch (error) {
     const project = useApp.getState().activeProject;
     if (error instanceof AuthError && error.status === 403) {

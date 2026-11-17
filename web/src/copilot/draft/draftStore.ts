@@ -10,13 +10,16 @@
  * `existing:<nodeId>`.
  */
 
-import type { CopilotDraft, CopilotDraftNode, SubgraphSpec } from "../../api";
+import type { CopilotDraft, CopilotDraftData, CopilotDraftNode, SubgraphSpec } from "../../api";
+import type { NodeType } from "../../types";
 
 export type Draft = CopilotDraft;
 export type DraftNode = CopilotDraftNode;
 
 /** The server's cap (internal/copilot/draft_schema.go MaxDraftNodes). */
 export const MAX_DRAFT_NODES = 40;
+/** A coding agent's plan (internal/copilot/draft_schema.go MaxPlanDraftNodes). */
+export const MAX_PLAN_DRAFT_NODES = 100;
 export const MAX_TITLE_CHARS = 60;
 export const MAX_BODY_CHARS = 600;
 
@@ -240,10 +243,11 @@ export function validateDraft(
   draft: Draft,
   existingIds?: ReadonlySet<string>,
   kinds?: ReadonlySet<string>,
+  maxNodes: number = MAX_DRAFT_NODES,
 ): ClientIssue[] {
   const issues: ClientIssue[] = [];
   if (draft.nodes.length === 0) issues.push({ code: "empty_draft" });
-  if (draft.nodes.length > MAX_DRAFT_NODES) issues.push({ code: "too_many" });
+  if (draft.nodes.length > maxNodes) issues.push({ code: "too_many" });
   const keys = new Set<string>();
   for (const node of draft.nodes) {
     if (keys.has(node.key)) issues.push({ code: "duplicate_key", key: node.key });
@@ -344,6 +348,76 @@ export function draftToSpec(
 /** The batch tag a draft's Create carries, so the undo can find it. */
 export function draftVia(entryId: string): string {
   return `copilot-draft:${entryId}`;
+}
+
+// ---------------------------------------------------------------------------
+// A coding agent's plan (a draft with an origin)
+// ---------------------------------------------------------------------------
+
+/** How many nodes a draft may hold: a coding agent's plan takes more. */
+export function maxNodesOf(data: Pick<CopilotDraftData, "origin">): number {
+  return data.origin ? MAX_PLAN_DRAFT_NODES : MAX_DRAFT_NODES;
+}
+
+/** The batch tag a plan draft's Create carries. */
+export function planVia(entryId: string): string {
+  return `copilot-plan:${entryId}`;
+}
+
+/**
+ * Whether a node of this kind takes acceptance criteria: its type hands work
+ * to an agent (engine.Graph.AcceptanceAllowed). An unknown kind does not.
+ */
+export function takesAcceptance(kind: string, types: readonly NodeType[]): boolean {
+  const type = types.find((item) => item.id === kind);
+  return type?.agentMode === "dispatch" || type?.agentMode === "autopilot";
+}
+
+/** The tag the planner puts on every node of a goal's plan. */
+export function goalTagOf(goalId: string): string {
+  return `goal:${goalId}`;
+}
+
+/**
+ * A plan draft as POST /api/graph/subgraph: the draft's nodes plus what the
+ * planner wrote that the card does not edit (tags with the goal tag,
+ * acceptance where the node's type takes it, priority), and the goal waiting
+ * for every non-note node that nothing else in the draft waits for.
+ * Recomputed from the draft as it stands, so removals and relinks count.
+ */
+export function planDraftToSpec(
+  draft: Draft,
+  data: Pick<CopilotDraftData, "origin" | "extras">,
+  options: {
+    types: readonly NodeType[];
+    positions?: Record<string, { col: number; row: number }>;
+    via?: string;
+  },
+): SubgraphSpec {
+  const spec = draftToSpec(draft, { positions: options.positions, via: options.via });
+  const goalId = data.origin?.goalId ?? "";
+  const kinds = new Map(draft.nodes.map((node) => [node.key, node.kind]));
+  spec.nodes = spec.nodes.map((node) => {
+    const extras = data.extras?.[node.key];
+    const tags = [...(extras?.tags ?? [])];
+    if (goalId && !tags.includes(goalTagOf(goalId))) tags.push(goalTagOf(goalId));
+    const acceptance = extras?.acceptance ?? [];
+    const keepAcceptance = acceptance.length > 0 && takesAcceptance(kinds.get(node.key) ?? "", options.types);
+    return {
+      ...node,
+      ...(tags.length ? { tags } : {}),
+      ...(keepAcceptance ? { acceptance: [...acceptance] } : {}),
+      ...(extras?.priority ? { priority: extras.priority } : {}),
+    };
+  });
+  if (goalId) {
+    const waitedFor = new Set(draft.nodes.flatMap((node) => node.after ?? []));
+    const edges = draft.nodes
+      .filter((node) => node.kind !== "note" && !waitedFor.has(node.key))
+      .map((node) => ({ from: node.key, to: goalId }));
+    if (edges.length) spec.edges = edges;
+  }
+  return spec;
 }
 
 /** Whether the person's words name code: repo paths, files or functions. */
