@@ -157,3 +157,36 @@ func TestRunnerProviderDistrustsMislabelledRaw(t *testing.T) {
 		t.Fatal("a user turn from the runner was accepted")
 	}
 }
+
+func TestRunnerProviderSendsTheResponseSchema(t *testing.T) {
+	message, _ := json.Marshal(provider.Message{Role: provider.RoleAssistant})
+	remote := &fakeRemote{answer: runnerwire.LLMDone{Message: message, Stop: "end_turn"}}
+	p := &runnerProvider{remote: remote, runnerID: "r1",
+		info: runnerwire.LLMInfo{Provider: "anthropic", Model: "claude-runner"}}
+	schema := json.RawMessage(`{"type":"object"}`)
+	if _, err := p.Stream(context.Background(), provider.Request{
+		ResponseSchema: &provider.ResponseSchema{Name: "draft_plan", Schema: schema}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Stream(context.Background(), provider.Request{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(remote.calls) != 2 {
+		t.Fatalf("calls = %d", len(remote.calls))
+	}
+	got := remote.calls[0].ResponseSchema
+	if got == nil || got.Name != "draft_plan" || string(got.Schema) != string(schema) {
+		t.Fatalf("schema on the wire = %+v", got)
+	}
+	if remote.calls[1].ResponseSchema != nil {
+		t.Fatalf("a schema was sent for a plain call: %+v", remote.calls[1].ResponseSchema)
+	}
+
+	// The schema counts against the size bound like the history does.
+	huge := json.RawMessage(`{"description":"` + strings.Repeat("x", runnerwire.MaxLLMRequestBytes) + `"}`)
+	_, err := p.Stream(context.Background(), provider.Request{
+		ResponseSchema: &provider.ResponseSchema{Name: "draft_plan", Schema: huge}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "too long") || len(remote.calls) != 2 {
+		t.Fatalf("an oversized schema was sent: %v (calls %d)", err, len(remote.calls))
+	}
+}

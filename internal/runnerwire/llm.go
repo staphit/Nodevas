@@ -61,6 +61,10 @@ const (
 	MaxLLMMaxTokens = 64000
 	// MaxLLMFieldBytes bounds provider, model and base URL strings.
 	MaxLLMFieldBytes = 2048
+	// MaxLLMResponseSchemaBytes bounds a request's response schema.
+	MaxLLMResponseSchemaBytes = 32 << 10
+	// MaxLLMResponseSchemaNameBytes bounds a response schema's name.
+	MaxLLMResponseSchemaNameBytes = 64
 )
 
 // LLMInfo is what a runner says about the model it calls for the copilot.
@@ -104,6 +108,20 @@ type LLMRequest struct {
 	Messages  json.RawMessage `json:"messages"`
 	Tools     json.RawMessage `json:"tools,omitempty"`
 	MaxTokens int             `json:"maxTokens,omitempty"`
+	// ResponseSchema, when set, asks for the answer as one JSON object
+	// matching it (provider.Request.ResponseSchema). It is optional both
+	// ways: an older hub sends none, and an older runner, whose envelopes
+	// decode without DisallowUnknownFields, ignores it and answers free
+	// text, which the copilot validates whatever it asked for.
+	ResponseSchema *LLMResponseSchema `json:"responseSchema,omitempty"`
+}
+
+// LLMResponseSchema is provider.ResponseSchema on the wire: Name matches
+// [a-zA-Z0-9_-]{1,64} and Schema is a JSON Schema object of at most
+// MaxLLMResponseSchemaBytes.
+type LLMResponseSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 // LLMDelta is a fragment of streamed answer text.
