@@ -43,9 +43,10 @@ func (a *API) postBatchUndo(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "trashed": result.Trashed, "refused": result.Refused})
 }
 
-// postBatchRedo restores what the undo trashed and the dependencies the batch
-// had put into existing nodes. Redoing a batch that is not undone answers an
-// empty result.
+// postBatchRedo restores what the undo trashed and the wiring the undo cut
+// from the nodes that stayed. Redoing a batch that is not undone answers an
+// empty result; one whose nodes are all back already answers them as skipped
+// and makes the batch undoable again.
 func (a *API) postBatchRedo(c *gin.Context) {
 	result, err := httpx.StoreFor(c.Request, a.pm).RedoBatch(auth.ActorFrom(c.Request), c.Param("id"))
 	if err != nil {

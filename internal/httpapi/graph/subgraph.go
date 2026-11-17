@@ -21,8 +21,12 @@ const maxSubgraphRequestBytes = 2 << 20
 // recorded for POST /api/graph/batches/:id/undo, and the answer carries
 // batchId and undoable (false when the record could not be written; the nodes
 // were made all the same). A via starting "copilot-draft:" is held to
-// store.MaxCopilotDraftNodes. A draft plan run's call (P6) is recorded
-// through planDraft instead, and answered 200 with draft true.
+// store.MaxCopilotDraftNodes. While a batch with the same via is recorded and
+// not undone, the call answers 409 BATCH_VIA_TAKEN with that batch's batchId
+// and creates nothing. An optional batch.label (the drafting model) is
+// recorded with the batch and named in the history. A draft plan run's call
+// (P6) is recorded through planDraft instead, and answered 200 with draft
+// true.
 func (a *API) postSubgraph(c *gin.Context) {
 	var spec store.SubgraphSpec
 	if !httpx.DecodeJSONLimit(c, &spec, maxSubgraphRequestBytes) {
@@ -99,6 +103,11 @@ func writeSubgraphError(c *gin.Context, err error) {
 	var tooLarge *store.ErrSubgraphTooLarge
 	if errors.As(err, &tooLarge) {
 		httpx.Coded(c, http.StatusRequestEntityTooLarge, "SUBGRAPH_TOO_LARGE", err, nil)
+		return
+	}
+	var taken *store.ErrBatchViaTaken
+	if errors.As(err, &taken) {
+		httpx.Coded(c, http.StatusConflict, "BATCH_VIA_TAKEN", err, map[string]any{"batchId": taken.BatchID})
 		return
 	}
 	var conflict *store.ErrConflict

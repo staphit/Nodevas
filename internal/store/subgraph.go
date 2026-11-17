@@ -66,8 +66,8 @@ type SubgraphNode struct {
 	Acceptance []string `json:"acceptance,omitempty"`
 }
 
-// SubgraphEdge makes an existing node (To) wait for From, a key or an id.
-// New-to-new wiring goes through DependsOn.
+// SubgraphEdge makes an existing node (To) wait for From, a key or an id (in
+// a call with a batch, a key only). New-to-new wiring goes through DependsOn.
 type SubgraphEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -204,6 +204,16 @@ func checkSubgraphShape(spec SubgraphSpec) error {
 		if strings.HasPrefix(spec.Batch.Via, CopilotDraftVia) && len(spec.Nodes) > MaxCopilotDraftNodes {
 			return &ErrSubgraphTooLarge{Msg: fmt.Sprintf("too many nodes in one Copilot draft (maximum %d)", MaxCopilotDraftNodes)}
 		}
+		// A batch's undo takes back what it made: its nodes and the wiring
+		// that touches them. A dependency between two existing nodes would
+		// outlive the undo, so a batch may not add one.
+		for i, edge := range spec.Edges {
+			if !keys[edge.From] {
+				return invalidSubgraph(fmt.Sprintf("edges[%d].from", i),
+					"%q is not a key of this call; a batch can only make existing nodes wait for its new nodes",
+					"「%s」不是這次呼叫的 key；一批節點只能讓既有節點等待這批新節點", edge.From)
+			}
+		}
 	}
 	return nil
 }
@@ -216,13 +226,20 @@ func checkSubgraphShape(spec SubgraphSpec) error {
 //
 // With spec.Batch set, the call is also recorded as a batch that UndoBatch
 // can take back. A record that cannot be written does not undo the commit:
-// the result then says Undoable false.
+// the result then says Undoable false. While a batch with the same via is
+// recorded and not undone, the call is refused with ErrBatchViaTaken and
+// writes nothing; the check and the commit are under one hold of the lock.
 func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (SubgraphResult, error) {
 	if err := checkSubgraphShape(spec); err != nil {
 		return SubgraphResult{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if spec.Batch != nil {
+		if live := s.liveBatchWithViaLocked(spec.Batch.Via); live != "" {
+			return SubgraphResult{}, batchViaTaken(spec.Batch.Via, live)
+		}
+	}
 	plan, err := s.prepareSubgraphLocked(actor, spec)
 	if err != nil {
 		return SubgraphResult{}, err
@@ -238,8 +255,8 @@ type preparedSubgraph struct {
 	files    []*engine.NodeFile
 	touched  map[string]bool
 	// links are the dependencies the call put into nodes that already
-	// existed (spec.Edges): a batch undo removes them with the new nodes,
-	// and a redo has to put them back.
+	// existed (spec.Edges; in a batch, always from a new node): a batch undo
+	// removes them with the new nodes, and a redo has to put them back.
 	links  []BatchLink
 	result SubgraphResult
 }
@@ -495,10 +512,11 @@ func (s *Store) commitSubgraphLocked(actor identity.Actor, spec SubgraphSpec, pl
 	result := plan.result
 	result.Rev = Rev(data)
 	if spec.Batch != nil {
-		if note := batchHistoryNote(spec.Batch.Via); note != "" {
+		label := cleanBatchLabel(spec.Batch.Label)
+		if note := batchHistoryNote(spec.Batch.Via, label); note != "" {
 			s.history().wrote(actor, note, nodePaths)
 		}
-		id, err := s.recordBatchLocked(actor, spec.Batch.Via, createdIDs, plan.links)
+		id, err := s.recordBatchLocked(actor, spec.Batch.Via, label, createdIDs, plan.links)
 		if err != nil {
 			log.Printf("subgraph committed, batch not recorded (not undoable): %v", err)
 		} else {
