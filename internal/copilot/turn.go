@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -106,6 +107,12 @@ type TurnRequest struct {
 	// BrowserModel is the browser's own Prompt API availability
 	// ("available", "downloadable", …; "" when it has none).
 	BrowserModel string
+	// Intent is IntentAsk (the chat tool loop; the default) or IntentDraft
+	// (draft.go). Previous is the draft being refined, as the person left
+	// it, and RefineOf its entry; both only with IntentDraft.
+	Intent   string
+	Previous *Draft
+	RefineOf string
 }
 
 // Turn runs one turn: it stores what the person said, lets the model answer
@@ -132,6 +139,22 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	}
 	if req.Mode != "" && !req.Mode.Valid() {
 		return fmt.Errorf("%w: unknown mode %q", ErrInvalid, req.Mode)
+	}
+	switch req.Intent {
+	case "":
+		req.Intent = IntentAsk
+	case IntentAsk, IntentDraft:
+	default:
+		return fmt.Errorf("%w: intent must be ask or draft", ErrInvalid)
+	}
+	if req.Intent != IntentDraft && (req.Previous != nil || req.RefineOf != "") {
+		return fmt.Errorf("%w: only a draft turn refines a draft", ErrInvalid)
+	}
+	if req.Previous != nil && len(req.Previous.Nodes) > MaxDraftNodes {
+		return fmt.Errorf("%w: the draft has more than %d nodes", ErrInvalid, MaxDraftNodes)
+	}
+	if req.RefineOf != "" && !nodeIDPattern.MatchString(req.RefineOf) {
+		return fmt.Errorf("%w: bad refineOf", ErrInvalid)
 	}
 
 	conversation, err := s.store.Conversation(ctx, req.Actor.ID, req.ConversationID)
@@ -265,21 +288,40 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
 		}
 	}
-	run := &turnRun{
-		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
-		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
-		tools: tools, info: info,
-		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
-		history: appendMessage(history, userMessage),
+	var (
+		stop  string
+		usage Usage
+	)
+	if req.Intent == IntentDraft {
+		// No tool loop: the drafter reads the board itself and stores a
+		// draft; nothing is written to the board on this path.
+		draft := &draftRun{
+			service: s, ctx: turnCtx, storeCtx: storeCtx, emit: emit, model: model, bridge: bridge,
+			plan: plan, request: req, conversationID: conversation.ID,
+		}
+		stop, usage, err = draft.run()
+	} else {
+		run := &turnRun{
+			service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
+			conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
+			tools: tools, info: info,
+			system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
+			history: appendMessage(history, userMessage),
+		}
+		stop, usage, err = run.loop()
 	}
-	stop, usage, err := run.loop()
 	// The turn's tokens count toward the usage report, partial ones too.
 	if usage.InputTokens+usage.OutputTokens > 0 {
 		_ = s.store.RecordUsage(storeCtx, conversation.ID, req.Actor.ID, conversation.Project,
 			string(plan.provider), plan.model, int(usage.InputTokens), int(usage.OutputTokens))
 	}
 	if err != nil {
-		emit(Event{Type: EventError, Message: err.Error(), Code: "provider_error"})
+		code := "provider_error"
+		var coded *codedError
+		if errors.As(err, &coded) {
+			code = coded.code
+		}
+		emit(Event{Type: EventError, Message: err.Error(), Code: code})
 		return nil
 	}
 	emit(Event{Type: EventTurnFinished, Stop: stop, Usage: &usage})

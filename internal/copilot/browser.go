@@ -97,6 +97,9 @@ func (p *browserProvider) Name() string  { return ProviderBrowser }
 func (p *browserProvider) Model() string { return BrowserModelName }
 
 func (p *browserProvider) Stream(ctx context.Context, req provider.Request, onDelta func(provider.Delta)) (provider.Response, error) {
+	if req.ResponseSchema != nil {
+		return p.structured(ctx, req)
+	}
 	names := make([]string, 0, len(req.Tools))
 	for _, tool := range req.Tools {
 		names = append(names, tool.Name)
@@ -134,6 +137,44 @@ func (p *browserProvider) Stream(ctx context.Context, req provider.Request, onDe
 	}
 	return provider.Response{}, fmt.Errorf("the browser's model gave an answer the copilot cannot read (%s)",
 		truncateUTF8(strings.Join(strings.Fields(lastRaw), " "), 120))
+}
+
+// maxBrowserStructuredMessageBytes bounds one message of a structured call
+// (a draft's board listing is most of it); the browser trims older ones to
+// its model's quota and never cuts the last.
+const maxBrowserStructuredMessageBytes = 12 << 10
+
+// structured is one structured call (a draft): the request's own system
+// prompt and schema, the answer returned as text for the caller to parse and
+// repair. One attempt; the caller decides whether to ask again.
+func (p *browserProvider) structured(ctx context.Context, req provider.Request) (provider.Response, error) {
+	payload := BrowserModelRequest{System: req.System, Schema: req.ResponseSchema.Schema, Attempt: 1}
+	for _, message := range req.Messages {
+		var parts []string
+		for _, block := range message.Blocks {
+			if block.Type == provider.BlockText && strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, strings.TrimSpace(block.Text))
+			}
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		role := "user"
+		if message.Role == provider.RoleAssistant {
+			role = "assistant"
+		}
+		payload.Messages = append(payload.Messages, BrowserMessage{
+			Role: role, Content: truncateUTF8(strings.Join(parts, "\n\n"), maxBrowserStructuredMessageBytes),
+		})
+	}
+	if len(payload.Messages) == 0 || payload.Messages[len(payload.Messages)-1].Role != "user" {
+		return provider.Response{}, errors.New("nothing to send to the browser's model")
+	}
+	raw, err := p.ask(ctx, payload)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	return provider.Response{Message: textMessage(strings.TrimSpace(raw)), Stop: provider.StopEndTurn}, nil
 }
 
 // ask emits one model_request and waits for the browser's answer.
