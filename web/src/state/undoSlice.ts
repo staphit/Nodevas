@@ -123,7 +123,7 @@ async function applyEntry(
       const result = await api.redoBatch(entry.batchId);
       attempt.applied = true;
       inverse = { ...entry, undone: false };
-      notifyBatchRevert({ direction: "redo", entry, restored: result.restored ?? [] });
+      notifyBatchRevert({ direction: "redo", entry, restored: result.restored ?? [], skipped: result.skipped ?? [] });
     }
   } else if (entry.kind === "graph") {
     const { graph, graphRev } = get();

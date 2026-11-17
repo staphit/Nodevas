@@ -136,6 +136,20 @@ describe("Composer", () => {
     expect(box).not.toHaveClass("is-from-voice");
   });
 
+  it("joins spoken Chinese to typed Chinese without a space", async () => {
+    const user = userEvent.setup();
+    const { box } = renderComposer();
+    await user.type(box, "幫我規劃發表會");
+    act(() => useCopilot.getState().fillComposer("然後寄信給團隊", true));
+    expect(box).toHaveValue("幫我規劃發表會然後寄信給團隊");
+    // Typed punctuation in full width needs no space either.
+    act(() => useCopilot.getState().fillComposer("，也做新聞稿", true));
+    expect(box).toHaveValue("幫我規劃發表會然後寄信給團隊，也做新聞稿");
+    // A space only where neither side of the join is Chinese.
+    act(() => useCopilot.getState().fillComposer("and a press kit", true));
+    expect(box).toHaveValue("幫我規劃發表會然後寄信給團隊，也做新聞稿and a press kit");
+  });
+
   it("names one selected node in the singular", () => {
     useApp.setState({ canvasSelection: { project: "main", ids: ["a"] } });
     renderComposer();

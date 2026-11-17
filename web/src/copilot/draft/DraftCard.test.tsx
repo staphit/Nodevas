@@ -368,11 +368,16 @@ describe("DraftCard for a coding agent's plan", () => {
     const first = within(row(container, "t1"));
     // The goal tag is on every step: only the others are counted.
     expect(first.getByText("2 tags")).toHaveAttribute("title", "db, schema");
-    expect(first.getByText("1 criteria")).toHaveAttribute("title", "Migration creates users");
+    expect(first.getByText("1 criterion")).toHaveAttribute("title", "Migration creates users");
     const second = within(row(container, "t2"));
-    expect(second.queryByText(/tags$/)).toBeNull();
+    expect(second.queryByText(/tags?$/)).toBeNull();
     expect(second.getByText("2 criteria")).toHaveAttribute("title", "The form logs in\nErrors are shown");
-    expect(within(row(container, "t3")).queryByText(/criteria$/)).toBeNull();
+    expect(within(row(container, "t3")).queryByText(/criteri(a|on)$/)).toBeNull();
+  });
+
+  it("says 1 tag, not 1 tags", () => {
+    const { container } = show({ ...plan, extras: { ...plan.extras, t2: { tags: ["goal:n-12", "ui"] } } });
+    expect(within(row(container, "t2")).getByText("1 tag")).toHaveAttribute("title", "ui");
   });
 
   it("greys the acceptance chip after the step's kind changes to Review, and Create leaves its acceptance out", async () => {
@@ -397,7 +402,7 @@ describe("DraftCard for a coding agent's plan", () => {
       "title",
       "Not used for this type: Create leaves these criteria out.\nThe form logs in\nErrors are shown",
     );
-    expect(within(row(container, "t1")).getByText("1 criteria")).not.toHaveClass("is-unused");
+    expect(within(row(container, "t1")).getByText("1 criterion")).not.toHaveClass("is-unused");
     fireEvent.click(createButton());
     await waitFor(() => expect(api.createSubgraph).toHaveBeenCalled());
     const spec = vi.mocked(api.createSubgraph).mock.calls[0][0];

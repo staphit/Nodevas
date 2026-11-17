@@ -22,6 +22,13 @@ export interface KeptNode {
   title: string;
   /** changed, status, claimed, busy or denied. */
   code: string;
+  /**
+   * The project the undo ran in: node ids repeat across projects, so
+   * "Delete anyway" deletes only while that project is the open one.
+   */
+  project: string;
+  /** The conversation holding the draft, so the last delete can reopen it. */
+  conversationId: string;
 }
 
 export type DraftToast =
@@ -35,7 +42,16 @@ export type DraftToast =
       batchId?: string;
       conversationId?: string;
     }
-  | { kind: "undone"; entryId: string; count: number; refused: KeptNode[]; at: number }
+  | {
+      kind: "undone";
+      entryId: string;
+      /** Nodes the undo trashed. */
+      count: number;
+      refused: KeptNode[];
+      at: number;
+      /** Kept nodes deleted anyway since: removed too, so counted with `count`. */
+      deleted?: number;
+    }
   | { kind: "error"; text: string; at: number };
 
 export interface DraftUiState {
@@ -64,6 +80,8 @@ export interface DraftUiState {
   setKept: (entryId: string, kept: KeptNode[] | null) => void;
   /** One kept node is gone (deleted anyway): off the card and the toast. */
   forgetKept: (nodeId: string) => void;
+  /** Every draft's kept nodes go (another project is open). */
+  clearKept: () => void;
 }
 
 const sameCells = (a: Record<string, Cell>, b: Record<string, Cell>) => {
@@ -119,12 +137,17 @@ export const useDraftUi = create<DraftUiState>((set, get) => ({
         const left = list.filter((node) => node.id !== nodeId);
         if (left.length) kept[entryId] = left;
       }
-      const toast =
-        state.toast?.kind === "undone"
-          ? { ...state.toast, refused: state.toast.refused.filter((node) => node.id !== nodeId) }
-          : state.toast;
+      let toast = state.toast;
+      if (toast?.kind === "undone" && toast.refused.some((node) => node.id === nodeId)) {
+        toast = {
+          ...toast,
+          refused: toast.refused.filter((node) => node.id !== nodeId),
+          deleted: (toast.deleted ?? 0) + 1,
+        };
+      }
       return { kept, toast };
     }),
+  clearKept: () => set({ kept: {} }),
 }));
 
 /** The board's extent the ghosts need, so it grows to show them. */

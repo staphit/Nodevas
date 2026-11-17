@@ -653,7 +653,10 @@ func (s *Service) SetDraftState(ctx context.Context, accountID, conversationID, 
 		data.Draft, data.Edited = mine, true
 	}
 	data.State = state
-	if state == DraftCommitted {
+	// A commit without ids for the batch already stored (another tab's Create
+	// met BATCH_VIA_TAKEN and only marks the card) keeps the ids the
+	// creating tab recorded.
+	if state == DraftCommitted && (ids != nil || batchID != data.BatchID) {
 		data.BatchID, data.CreatedIDs = batchID, ids
 	}
 	return s.store.SetEntryData(ctx, accountID, conversationID, entryID, EntryDraft, mustJSON(data))

@@ -24,6 +24,14 @@ export const COMPOSER_MAX_ROWS = 8;
 /** A press held longer than this is push-to-talk; shorter is a toggle click. */
 const HOLD_MS = 350;
 
+/** CJK ideographs, CJK punctuation and full-width forms. */
+const WIDE = /[\u3000-\u303f\u3400-\u9fff\uf900-\ufaff\uff00-\uffef]/;
+
+/** Whether typed and spoken text meet without a space: either side of the join is wide. */
+function wideJoin(typed: string, spoken: string): boolean {
+  return WIDE.test(typed.slice(-1)) || WIDE.test(spoken.slice(0, 1));
+}
+
 export const Composer = forwardRef<
   HTMLTextAreaElement,
   {
@@ -64,7 +72,10 @@ export const Composer = forwardRef<
     const voice = Boolean(fill.voice);
     setText((current) => {
       const typed = current.trimEnd();
-      return voice && typed ? `${typed} ${fill.text}` : fill.text;
+      if (!voice || !typed) return fill.text;
+      // Chinese is written without spaces between words: a join where
+      // either side is Chinese (or full-width punctuation) takes none.
+      return `${typed}${wideJoin(typed, fill.text) ? "" : " "}${fill.text}`;
     });
     setFromVoice(voice);
     boxRef.current?.focus();

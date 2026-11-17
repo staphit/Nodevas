@@ -213,6 +213,26 @@ describe("DraftOverlay", () => {
     expect(container.querySelector('.draft-ghost[data-draft-key="k1"]')).toHaveTextContent("Write the docs");
   });
 
+  it("takes no rename and offers no link handle while the draft is being refined, and says why", () => {
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    showDraft();
+    act(() => {
+      useCopilot.setState({ running: true, refining: "d1" });
+    });
+    const ghost = container.querySelector<HTMLElement>('.draft-ghost[data-draft-key="k1"]')!;
+    act(() => {
+      fireEvent.doubleClick(ghost);
+    });
+    expect(container.querySelector("input.draft-ghost-input")).toBeNull();
+    expect(ghost.querySelector(".draft-ghost-handle")).toBeNull();
+    expect(ghost).toHaveAttribute("title", "Updating this draft…");
+    expect(ghost).toHaveClass("is-refining");
+    act(() => {
+      useCopilot.setState({ running: false, refining: null });
+    });
+    expect(ghost.querySelector(".draft-ghost-handle")).not.toBeNull();
+  });
+
   it("leaves the title as it was when a ghost's rename is cancelled", () => {
     const { container } = render(<LaneView variant="graph" {...paneProps} />);
     showDraft();

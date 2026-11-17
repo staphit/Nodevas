@@ -489,13 +489,21 @@ function followBatch(revert: BatchRevert): void {
   const onScreen = copilot.activeId === conversationId;
   const ui = useDraftUi.getState();
   if (revert.direction === "undo") {
-    const kept: KeptNode[] = revert.refused.map((node) => ({ id: node.id, code: node.code, title: boardTitle(node.id) }));
+    const project = useApp.getState().activeProject;
+    const kept: KeptNode[] = revert.refused.map((node) => ({
+      id: node.id,
+      code: node.code,
+      title: boardTitle(node.id),
+      project,
+      conversationId,
+    }));
     if (revert.trashed.length === 0 && kept.length === 0) {
       undoNothing();
       return;
     }
     ui.showToast({ kind: "undone", entryId, count: revert.trashed.length, refused: kept, at: Date.now() });
     ui.setKept(entryId, kept);
+    deletedAnyway.delete(entryId);
     if (revert.trashed.length === 0) return;
     if (kept.length === 0) {
       if (onScreen) copilot.setDraftData(entryId, { state: "open", batchId: undefined, createdIds: undefined });
@@ -512,12 +520,15 @@ function followBatch(revert: BatchRevert): void {
     });
     return;
   }
-  // A redo that restored nothing changed nothing.
-  if (revert.restored.length === 0) return;
+  // Nodes already back on the board (restored from the Trash by hand) make
+  // the batch live again on the server, restored or not; a redo that found
+  // nothing at all changed nothing, and the batch stays undone.
+  const back = (revert.skipped ?? []).filter((node) => node.code === "exists").map((node) => node.id);
+  if (revert.restored.length === 0 && back.length === 0) return;
   const data = draftItemOf(copilot, entryId)?.data;
   const before =
     data?.state === "committed" ? (data.createdIds ?? []) : (ui.kept[entryId] ?? []).map((node) => node.id);
-  const ids = [...new Set([...before, ...revert.restored])];
+  const ids = [...new Set([...before, ...revert.restored, ...back])];
   ui.setKept(entryId, null);
   if (onScreen) copilot.setDraftData(entryId, { state: "committed", batchId: entry.batchId, createdIds: ids });
   void recordState(conversationId, entryId, {
@@ -528,14 +539,51 @@ function followBatch(revert: BatchRevert): void {
   });
 }
 
+/** By draft entry id: the created nodes deleted anyway since its undo. */
+const deletedAnyway = new Map<string, Set<string>>();
+
+/**
+ * The last kept node of a draft is gone (deleted anyway): when that leaves
+ * none of the draft's created nodes on the board, it is the full undo the
+ * person asked for, and the draft opens again with their edits. (The server
+ * frees the via of a batch with nothing left on the board, so it can be
+ * created again.)
+ */
+function reopenIfNothingLeft(entryId: string, conversationId: string): void {
+  if ((useDraftUi.getState().kept[entryId] ?? []).length > 0) return;
+  const copilot = useCopilot.getState();
+  const data = draftItemOf(copilot, entryId)?.data;
+  const deleted = deletedAnyway.get(entryId) ?? new Set<string>();
+  const created = data?.createdIds ?? [];
+  if (data?.state !== "committed" || created.length === 0 || !created.every((id) => deleted.has(id))) return;
+  deletedAnyway.delete(entryId);
+  if (copilot.activeId === conversationId) {
+    copilot.setDraftData(entryId, { state: "open", batchId: undefined, createdIds: undefined });
+  }
+  void recordState(conversationId, entryId, { state: "open", ...editedDraftBody(entryId) });
+}
+
 /**
  * "Delete anyway" on a node an undo kept: the normal delete, with its usual
- * checks (and its own undo step).
+ * checks (and its own undo step). Only in the project the undo ran in: node
+ * ids repeat across projects, and the delete goes to the open one.
  */
-export async function deleteKeptNode(nodeId: string): Promise<void> {
+export async function deleteKeptNode(node: KeptNode): Promise<void> {
+  const nodeId = node.id;
+  if (useApp.getState().activeProject !== node.project) {
+    useDraftUi.getState().forgetKept(nodeId);
+    return;
+  }
+  const holders = Object.entries(useDraftUi.getState().kept)
+    .filter(([, list]) => list.some((kept) => kept.id === nodeId))
+    .map(([entryId]) => entryId);
   try {
     await useApp.getState().deleteNode(nodeId);
     useDraftUi.getState().forgetKept(nodeId);
+    for (const entryId of holders) {
+      deletedAnyway.set(entryId, (deletedAnyway.get(entryId) ?? new Set<string>()).add(nodeId));
+      reopenIfNothingLeft(entryId, node.conversationId);
+    }
   } catch (error) {
     useDraftUi.getState().showToast({
       kind: "error",

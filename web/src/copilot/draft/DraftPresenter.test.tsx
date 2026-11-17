@@ -168,6 +168,19 @@ describe("DraftPresenter", () => {
     expect(presenter()!.querySelector(".draft-presenter-line")).toHaveTextContent("I've laid out 8 steps. Take a look?");
   });
 
+  it("says one step, not 1 steps, for a one-node draft", () => {
+    const { lines: _ignored, ...bare } = manifest;
+    themeOn({ ...bare, characters: { bob: manifest.characters.bob } });
+    render(<DraftPresenter data={data} count={1} model="claude-x" />);
+    expect(presenter()!.querySelector(".draft-presenter-line")).toHaveTextContent("I've laid out 1 step. Take a look?");
+  });
+
+  it("names a one-node draft in the singular inside the pack's line", () => {
+    themeOn();
+    render(<DraftPresenter data={{ ...data, provider: "ollama", model: "qwen3:8b" }} count={1} model="Ollama · qwen3:8b" />);
+    expect(presenter()!.querySelector(".draft-presenter-line")).toHaveTextContent("A word about “a draft of 1 step”.");
+  });
+
   it("shows nothing when the pack has nobody for the model and no fallback", () => {
     themeOn({ ...manifest, characters: { kit: manifest.characters.kit } });
     render(<DraftPresenter data={data} count={2} model="claude-x" />);

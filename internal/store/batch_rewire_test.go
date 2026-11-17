@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -436,5 +437,70 @@ func TestAnOversizedSidecarIsStartedOver(t *testing.T) {
 	undone, err := st.UndoBatch(batchBea, result.BatchID, BatchUndoOptions{})
 	if err != nil || len(undone.Trashed) != 1 {
 		t.Fatalf("undo = %+v %v", undone, err)
+	}
+}
+
+// A live batch none of whose nodes is on the board any more (the undo kept
+// them and the person deleted each by hand) holds no via: the draft it came
+// from reopens and may be created again.
+func TestABatchWithNothingOnTheBoardFreesItsVia(t *testing.T) {
+	st := subgraphStore(t)
+	spec := SubgraphSpec{
+		Nodes: []SubgraphNode{{Key: "a", Title: "A"}, {Key: "b", Title: "B"}},
+		Batch: &BatchSpec{Via: "copilot-draft:deleted"},
+	}
+	first, err := st.CreateSubgraph(batchBea, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteNode(batchBea, first.IDs["a"]); err != nil {
+		t.Fatal(err)
+	}
+	var taken *ErrBatchViaTaken
+	if _, err := st.CreateSubgraph(batchBea, spec); !errors.As(err, &taken) {
+		t.Fatalf("one node still on the board: %v", err)
+	}
+	if _, err := st.DeleteNode(batchBea, first.IDs["b"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateSubgraph(batchBea, spec); err != nil {
+		t.Fatalf("nothing of the batch on the board: %v", err)
+	}
+}
+
+// A redo that finds none of the batch anywhere (its trash copies are gone)
+// leaves the batch undone, so its via stays free and the draft can be created
+// again; only a node already back on the board makes the batch live again.
+func TestARedoThatFindsNothingInTheTrashKeepsTheBatchUndone(t *testing.T) {
+	st := subgraphStore(t)
+	spec := SubgraphSpec{
+		Nodes: []SubgraphNode{{Key: "a", Title: "A"}},
+		Batch: &BatchSpec{Via: "copilot-draft:gone"},
+	}
+	result, err := st.CreateSubgraph(batchBea, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := result.IDs["a"]
+	if _, err := st.UndoBatch(batchBea, result.BatchID, BatchUndoOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := st.ListTrash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.NodeID == a {
+			if err := os.Remove(filepath.Join(st.root, DataDir, "trash", item.File)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	redone, err := st.RedoBatch(batchBea, result.BatchID)
+	if err != nil || len(redone.Restored) != 0 || refusalCodes(redone.Skipped)[a] != BatchSkippedNotInTrash {
+		t.Fatalf("redo = %+v %v", redone, err)
+	}
+	if _, err := st.CreateSubgraph(batchBea, spec); err != nil {
+		t.Fatalf("the via stayed taken by a batch with nothing on the board: %v", err)
 	}
 }

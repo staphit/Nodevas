@@ -517,6 +517,9 @@ export function projectChanged(): void {
   // The draft toast's Undo names a batch of the project just left; the undo
   // stack it would replay through was cleared with the switch.
   useDraftUi.getState().showToast(null);
+  // So do the kept nodes the cards list: their ids name nodes of the project
+  // just left, and "Delete anyway" would delete in the new one.
+  useDraftUi.getState().clearKept();
   if (useCopilot.getState().running) {
     endAfterTurn = true;
     return;

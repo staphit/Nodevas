@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -350,18 +351,34 @@ func batchToEvict(file *batchFile, sizes map[string]int, keep string, bySize boo
 	return victim
 }
 
-// liveBatchWithViaLocked is the newest batch recorded with via and not undone,
-// or "". Records that cannot be read hold no live batch: they could not be
-// undone either, and the commit goes ahead as it would without them.
+// liveBatchWithViaLocked is the newest batch recorded with via and not undone
+// that still has a node on the board, or "". Records that cannot be read hold
+// no live batch: they could not be undone either, and the commit goes ahead
+// as it would without them. Nor does a batch whose nodes are all gone (an
+// undo kept them and the person deleted each by hand): its undo would find
+// nothing, so it could never free the via, and a new commit duplicates
+// nothing.
 func (s *Store) liveBatchWithViaLocked(via string) string {
 	file, err := s.loadBatchesLocked()
 	if err != nil {
 		log.Printf("batch records unreadable, via %s not checked: %v", via, err)
 		return ""
 	}
+	var g *engine.Graph
+	onBoard := func(record *batchRecord) bool {
+		if g == nil {
+			view, _, err := s.graphViewLocked()
+			if err != nil {
+				// Unknown: count the batch as live, the safe answer.
+				return true
+			}
+			g = view
+		}
+		return slices.ContainsFunc(record.IDs, func(id string) bool { return g.NodeByID(id) != nil })
+	}
 	live := ""
 	for id, record := range file.Batches {
-		if record.Via != via || record.Undone != nil {
+		if record.Via != via || record.Undone != nil || !onBoard(record) {
 			continue
 		}
 		if live == "" || record.CreatedAt > file.Batches[live].CreatedAt {
@@ -987,13 +1004,17 @@ func (s *Store) RedoBatch(actor identity.Actor, batchID string) (BatchRedoResult
 		restores = append(restores, restoring{node: &n, trashPath: path, data: data})
 	}
 	if len(restores) == 0 {
-		// Nothing is left for a redo to bring back: every node is on the
-		// board again (restored from the trash by hand) or gone for good.
-		// The batch is live again, so an undo works on what is there rather
-		// than answering nothing forever.
-		record.Undone = nil
-		if err := s.saveBatchesLocked(file, batchID); err != nil {
-			log.Printf("batch %s: nothing to redo, record not updated: %v", batchID, err)
+		// Nothing is left for a redo to bring back. When some of the batch
+		// is on the board again (restored from the trash by hand) the batch
+		// is live again, so an undo works on what is there rather than
+		// answering nothing forever. When every node is gone for good the
+		// batch stays undone: a live batch holds its via, and one with
+		// nothing on the board could never be undone to free it.
+		if slices.ContainsFunc(result.Skipped, func(r BatchRefusal) bool { return r.Code == BatchSkippedExists }) {
+			record.Undone = nil
+			if err := s.saveBatchesLocked(file, batchID); err != nil {
+				log.Printf("batch %s: nothing to redo, record not updated: %v", batchID, err)
+			}
 		}
 		return result, nil
 	}

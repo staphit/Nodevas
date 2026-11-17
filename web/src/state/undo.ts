@@ -75,7 +75,13 @@ export type BatchRevert =
       /** Kept: changed, status, claimed, busy or denied (api BatchRefusal). */
       refused: { id: string; code: string; reason?: string }[];
     }
-  | { direction: "redo"; entry: BatchUndoEntry; restored: string[] };
+  | {
+      direction: "redo";
+      entry: BatchUndoEntry;
+      restored: string[];
+      /** Not restored: "exists" (already back on the board), "not-in-trash", "link". */
+      skipped?: { id: string; code: string; reason?: string }[];
+    };
 
 const batchListeners = new Set<(revert: BatchRevert) => void>();
 

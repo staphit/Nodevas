@@ -6,7 +6,16 @@ import { clearUndo, peekUndo, pushUndo, redoDepth, undoDepth } from "../../state
 import { useApp } from "../../store";
 import { entryToItem, useCopilot, type DraftItem } from "../copilotStore";
 import { projectChanged } from "../session";
-import { canCreate, checkNow, createDraft, discardDraft, editDraft, undoDraftCreate } from "./draftApi";
+import {
+  canCreate,
+  checkNow,
+  createDraft,
+  deleteKeptNode,
+  discardDraft,
+  editDraft,
+  TOAST_MS,
+  undoDraftCreate,
+} from "./draftApi";
 import { DraftCard } from "./DraftCard";
 import { renameNode } from "./draftStore";
 import { DraftToast } from "./DraftToast";
@@ -181,6 +190,44 @@ describe("undo of a draft's Create (findings 3, 17, 24)", () => {
     expect(api.putCopilotDraftState).not.toHaveBeenCalled();
   });
 
+  it("a redo that finds the nodes back on the board already marks the draft created again", async () => {
+    vi.mocked(api.undoBatch).mockResolvedValue({ ok: true, trashed: ["n1", "n2"], refused: [] });
+    vi.mocked(api.redoBatch).mockResolvedValue({
+      ok: true,
+      restored: [],
+      skipped: [
+        { id: "n1", code: "exists", reason: "already on the board" },
+        { id: "n2", code: "not-in-trash", reason: "no longer in the trash" },
+      ],
+      links: 0,
+    });
+    pushCreate();
+    await useApp.getState().undoLast();
+    await useApp.getState().redoLast();
+    expect(draftData().data).toMatchObject({ state: "committed", batchId: "b1", createdIds: ["n1"] });
+    expect(api.putCopilotDraftState).toHaveBeenLastCalledWith("c1", "d1", {
+      state: "committed",
+      batchId: "b1",
+      ids: ["n1"],
+    });
+  });
+
+  it("a redo that finds every node gone for good leaves the draft open", async () => {
+    vi.mocked(api.undoBatch).mockResolvedValue({ ok: true, trashed: ["n1", "n2"], refused: [] });
+    vi.mocked(api.redoBatch).mockResolvedValue({
+      ok: true,
+      restored: [],
+      skipped: [{ id: "n1", code: "not-in-trash", reason: "gone" }],
+      links: 0,
+    });
+    pushCreate();
+    await useApp.getState().undoLast();
+    vi.mocked(api.putCopilotDraftState).mockClear();
+    await useApp.getState().redoLast();
+    expect(draftData().data?.state).toBe("open");
+    expect(api.putCopilotDraftState).not.toHaveBeenCalled();
+  });
+
   it("a redo after a partial undo adds the restored nodes back to the kept ones", async () => {
     vi.mocked(api.undoBatch).mockResolvedValue({
       ok: true,
@@ -194,6 +241,95 @@ describe("undo of a draft's Create (findings 3, 17, 24)", () => {
     expect(draftData().data).toMatchObject({ state: "committed", batchId: "b1" });
     expect([...(draftData().data?.createdIds ?? [])].sort()).toEqual(["n1", "n2"]);
     expect(useDraftUi.getState().kept.d1).toBeUndefined();
+  });
+});
+
+describe("Delete anyway on the nodes an undo kept", () => {
+  const keepAll = () =>
+    vi.mocked(api.undoBatch).mockResolvedValue({
+      ok: true,
+      trashed: [],
+      refused: [
+        { id: "n1", code: "claimed", reason: "claimed" },
+        { id: "n2", code: "changed", reason: "edited" },
+      ],
+    });
+  const keepOne = () =>
+    vi.mocked(api.undoBatch).mockResolvedValue({
+      ok: true,
+      trashed: ["n1"],
+      refused: [{ id: "n2", code: "changed", reason: "edited" }],
+    });
+
+  it("says nothing was removed when the undo kept every node, and the full count once they are deleted", async () => {
+    keepAll();
+    pushCreate();
+    render(<DraftToast />);
+    await act(async () => {
+      await useApp.getState().undoLast();
+    });
+    expect(screen.getByText("Nothing was removed; kept 2:")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Write docs anyway" }));
+    await waitFor(() => expect(screen.getByText("Removed 1 created node; kept 1:")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Delete Ship anyway" }));
+    await waitFor(() => expect(screen.getByText("Removed the 2 created nodes")).toBeInTheDocument());
+    expect(screen.queryByText(/Removed the 0/)).toBeNull();
+  });
+
+  it("reopens the draft once the last kept node is deleted: nothing of it is left on the board", async () => {
+    useCopilot.getState().editDraft("d1", (draft) => renameNode(draft, "docs", "Write the guide"));
+    keepOne();
+    pushCreate();
+    await useApp.getState().undoLast();
+    expect(draftData().data?.state).toBe("committed");
+    render(<DraftToast />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delete Ship anyway" }));
+    });
+    await waitFor(() => expect(draftData().data?.state).toBe("open"));
+    expect(draftData().data?.createdIds).toBeUndefined();
+    expect(api.putCopilotDraftState).toHaveBeenLastCalledWith("c1", "d1", {
+      state: "open",
+      draft: useCopilot.getState().drafts.d1,
+    });
+  });
+
+  it("does not delete a kept node once another project is open, and a project switch drops the list", async () => {
+    keepOne();
+    pushCreate();
+    await useApp.getState().undoLast();
+    const node = useDraftUi.getState().kept.d1[0];
+    expect(node).toMatchObject({ id: "n2", project: "main" });
+    useApp.setState({ activeProject: "other" });
+    await deleteKeptNode(node);
+    expect(api.deleteNode).not.toHaveBeenCalled();
+    useCopilot.setState({ running: true });
+    projectChanged();
+    expect(useDraftUi.getState().kept).toEqual({});
+  });
+
+  it("keeps the toast while it lists kept nodes, and moves focus to the next one after a delete", async () => {
+    keepAll();
+    pushCreate();
+    render(<DraftToast />);
+    await act(async () => {
+      await useApp.getState().undoLast();
+    });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        vi.advanceTimersByTime(TOAST_MS + 1000);
+      });
+      expect(useDraftUi.getState().toast).toMatchObject({ kind: "undone" });
+    } finally {
+      vi.useRealTimers();
+    }
+    const first = screen.getByRole("button", { name: "Delete Write docs anyway" });
+    first.focus();
+    fireEvent.click(first);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Delete Ship anyway" })));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Ship anyway" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Dismiss" })));
   });
 });
 

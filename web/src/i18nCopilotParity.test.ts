@@ -97,4 +97,24 @@ describe("copilot and draft keys in both catalogs", () => {
     expect(keys).toEqual([]);
     expect(translate("draft.rename", "zh-TW")).toBe("雙擊重新命名");
   });
+
+  it("says 點一下 or 點擊 for click, never 按一下", () => {
+    const keys = catalogKeys("zh-TW").filter((key) => translate(key, "zh-TW").includes("按一下"));
+    expect(keys).toEqual([]);
+  });
+
+  it("has a singular for every count a one-node draft or a one-tag plan shows", () => {
+    for (const key of [
+      "draft.presenter.lineOne",
+      "draft.presenter.nodeOne",
+      "draft.plan.tagsOne",
+      "draft.plan.acceptanceOne",
+      "draft.undoKeptNone",
+    ]) {
+      expect(catalogKeys("en")).toContain(key);
+      expect(catalogKeys("zh-TW")).toContain(key);
+    }
+    expect(translate("draft.presenter.lineOne", "en")).not.toMatch(/\b1 steps\b/);
+    expect(translate("draft.plan.tagsOne", "en")).toBe("1 tag");
+  });
 });

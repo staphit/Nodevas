@@ -65,9 +65,16 @@ export function DraftPresenter({
 
   const title = inLanguage(character.title, language);
   const name = title ?? (model || id);
-  const node = t("game.story.quoted", { text: t("draft.presenter.node", { n: count }) });
+  const one = count === 1;
+  const node = t("game.story.quoted", {
+    text: one ? t("draft.presenter.nodeOne") : t("draft.presenter.node", { n: count }),
+  });
   const own = inLanguage(character.lines?.["asking-user"] ?? manifest.lines?.["asking-user"], language);
-  const line = own ? fill(own, { node, n: count }) : t("draft.presenter.line", { n: count });
+  const line = own
+    ? fill(own, { node, n: count })
+    : one
+      ? t("draft.presenter.lineOne")
+      : t("draft.presenter.line", { n: count });
 
   const figure = figureFor(manifest, who, "speak");
   const picture = figure ? imageUrl(figure.scene.image) : "";

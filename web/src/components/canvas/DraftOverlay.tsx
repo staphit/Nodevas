@@ -25,7 +25,7 @@ import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import { useI18n } from "../../i18n";
 import { canvasSelectionIds } from "../../state/documentSlice";
 import { useApp } from "../../store";
-import { activeDraftId, currentDraft, isPlanDraft, useCopilot } from "../../copilot/copilotStore";
+import { activeDraftId, currentDraft, isPlanDraft, isRefining, useCopilot } from "../../copilot/copilotStore";
 import { editDraft } from "../../copilot/draft/draftApi";
 import { useThemeActive } from "../../copilot/draft/DraftCard";
 import { KindGlyph } from "../../copilot/draft/DraftList";
@@ -157,6 +157,10 @@ export function DraftOverlay({
   const draft = useCopilot((state) => (entryId ? currentDraft(state, entryId) : null));
   // A coding agent's plan keeps longer titles than the copilot's own draft.
   const maxTitle = useCopilot((state) => (isPlanDraft(state, entryId) ? MAX_PLAN_TITLE_CHARS : MAX_TITLE_CHARS));
+  // While a refine of it runs the draft takes no edits (what lands replaces
+  // it): the ghosts offer no rename and no link handle, and say why, as the
+  // card does.
+  const refining = useCopilot((state) => Boolean(entryId && isRefining(state, entryId)));
   const selection = useApp(canvasSelectionIds);
   const graph = useApp((state) => state.graph);
   const themed = useThemeActive();
@@ -235,6 +239,11 @@ export function DraftOverlay({
       window.removeEventListener("keydown", escape);
     };
   }, [detailKey]);
+
+  // A refine that starts mid-rename ends it: what lands replaces the draft.
+  useEffect(() => {
+    if (refining) setRenaming(null);
+  }, [refining]);
 
   if (!entryId || !draft || ghosts.length === 0) return null;
 
@@ -350,14 +359,19 @@ export function DraftOverlay({
         )}
       </svg>
       {ghosts.map((ghost) => {
-        const editing = renaming === ghost.key;
+        const editing = renaming === ghost.key && !refining;
+        const tip = refining
+          ? t("draft.refining")
+          : t(themed ? "draft.ghostTipThemed" : "draft.ghostTip", { title: ghost.title });
         return (
           <div
             key={ghost.key}
-            className={`draft-ghost${themed ? " is-picture" : ""}${detailKey === ghost.key ? " is-open" : ""}`}
+            className={`draft-ghost${themed ? " is-picture" : ""}${detailKey === ghost.key ? " is-open" : ""}${
+              refining ? " is-refining" : ""
+            }`}
             data-draft-key={ghost.key}
             data-kind={ghost.kind}
-            title={editing ? undefined : t(themed ? "draft.ghostTipThemed" : "draft.ghostTip", { title: ghost.title })}
+            title={editing ? undefined : tip}
             style={{
               left: ghost.rect.left,
               top: ghost.rect.top,
@@ -373,6 +387,7 @@ export function DraftOverlay({
             onDoubleClick={(event) => {
               if ((event.target as Element).closest(".draft-ghost-handle, .draft-ghost-input")) return;
               event.stopPropagation();
+              if (refining) return;
               setShown(null);
               setRenaming(ghost.key);
             }}
@@ -388,13 +403,15 @@ export function DraftOverlay({
             ) : (
               <span className="draft-ghost-title">{ghost.title}</span>
             )}
-            <button
-              type="button"
-              className="draft-ghost-handle"
-              aria-label={`${ghost.title} · ${t("draft.handle")}`}
-              title={t("draft.handle")}
-              onPointerDown={(event) => startLink(event, ghost.key)}
-            />
+            {!refining && (
+              <button
+                type="button"
+                className="draft-ghost-handle"
+                aria-label={`${ghost.title} · ${t("draft.handle")}`}
+                title={t("draft.handle")}
+                onPointerDown={(event) => startLink(event, ghost.key)}
+              />
+            )}
           </div>
         );
       })}

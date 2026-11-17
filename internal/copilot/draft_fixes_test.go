@@ -164,3 +164,39 @@ func TestBreakdownWordingMatchesTheDraftFlow(t *testing.T) {
 		t.Fatalf("plain note = %q", out.Note)
 	}
 }
+
+// A commit recorded a second time for the same batch without ids (the other
+// tab's Create met BATCH_VIA_TAKEN) keeps the ids the creating tab stored.
+func TestSetDraftStateKeepsTheCreatedIDsOfTheSameBatch(t *testing.T) {
+	h := draftHarness(t)
+	conversation := h.conversation(alice, ModeDefault)
+	h.model.steps = []step{answerJSON(goodDraft, provider.StopEndTurn, nil)}
+	h.start(draftTurn(conversation)).finish()
+	entry, _ := draftEntry(t, h, conversation)
+	ctx := context.Background()
+
+	if _, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, DraftCommitted, "b-1",
+		[]string{"x1", "x2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, DraftCommitted, "b-1", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data DraftData
+	_ = json.Unmarshal([]byte(again.Data), &data)
+	if data.BatchID != "b-1" || strings.Join(data.CreatedIDs, ",") != "x1,x2" {
+		t.Fatalf("data after an id-less commit of the same batch = %+v", data)
+	}
+
+	// A different batch replaces them, ids or not.
+	other, err := h.service.SetDraftState(ctx, alice.ID, conversation.ID, entry.ID, DraftCommitted, "b-2", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = DraftData{}
+	_ = json.Unmarshal([]byte(other.Data), &data)
+	if data.BatchID != "b-2" || len(data.CreatedIDs) != 0 {
+		t.Fatalf("data after another batch = %+v", data)
+	}
+}

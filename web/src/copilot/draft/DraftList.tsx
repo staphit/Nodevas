@@ -136,7 +136,7 @@ function PlanChips({
     <div className="draft-extras">
       {tags.length > 0 && (
         <span className="draft-chip" data-chip="tags" title={formatList(tags, language)}>
-          {t("draft.plan.tags", { n: tags.length })}
+          {tags.length === 1 ? t("draft.plan.tagsOne") : t("draft.plan.tags", { n: tags.length })}
         </span>
       )}
       {acceptance.length > 0 && (
@@ -149,7 +149,9 @@ function PlanChips({
               : `${t("draft.plan.acceptanceUnused")}\n${acceptance.join("\n")}`
           }
         >
-          {t("draft.plan.acceptance", { n: acceptance.length })}
+          {acceptance.length === 1
+            ? t("draft.plan.acceptanceOne")
+            : t("draft.plan.acceptance", { n: acceptance.length })}
         </span>
       )}
     </div>
