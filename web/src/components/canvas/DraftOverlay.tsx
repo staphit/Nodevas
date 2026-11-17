@@ -4,27 +4,137 @@
  *
  * Built like PeerOverlay: its own subscription to the copilot's draft, so an
  * edit in the panel redraws this layer and no card. Ghosts are never part of
- * the graph; they take no pointer events except their link handle, which is
+ * the graph. A ghost takes the pointer only for itself: a press on it starts
+ * no marquee and no pan, a double-click renames it, and its link handle is
  * dragged onto another ghost or a real card to make this step wait for it.
- * The cells it lays out are published (useDraftUi.ghost) so the Create sends
- * exactly them.
+ * With a theme pack on, a ghost is a picture card (the kind's glyph, large,
+ * in the skin's colours, and the title only); a click shows its body and what
+ * it waits for. The cells it lays out are published (useDraftUi.ghost) so the
+ * Create sends exactly them.
  */
 
-import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import { useI18n } from "../../i18n";
 import { canvasSelectionIds } from "../../state/documentSlice";
 import { useApp } from "../../store";
 import { activeDraftId, currentDraft, useCopilot } from "../../copilot/copilotStore";
 import { editDraft } from "../../copilot/draft/draftApi";
+import { useThemeActive } from "../../copilot/draft/DraftCard";
+import { KindGlyph } from "../../copilot/draft/DraftList";
 import { layoutDraft, occupiedOf, waitedForIds, type Cell } from "../../copilot/draft/draftLayout";
-import { addAfter, existingIdOf, existingRef, isExistingRef } from "../../copilot/draft/draftStore";
+import {
+  addAfter,
+  existingIdOf,
+  existingRef,
+  isExistingRef,
+  renameNode,
+} from "../../copilot/draft/draftStore";
 import { useDraftUi } from "../../copilot/draft/draftUi";
 import { CARD_H, CARD_W, ROW_H, contentPointFromClient, type Col, type Point, type Rect } from "./geometry";
 
 interface GhostBox {
   key: string;
   title: string;
+  kind: string;
+  body: string;
+  after: string[];
   rect: Rect;
+}
+
+/** The ghost's title as a text box: Enter or leaving it renames, Escape
+ * keeps the title. */
+function GhostRename({
+  title,
+  label,
+  onDone,
+}: {
+  title: string;
+  label: string;
+  onDone: (title: string | null) => void;
+}) {
+  const [value, setValue] = useState(title);
+  // Once: the blur that follows an Enter or an Escape is not a second answer.
+  const done = useRef(false);
+  const finish = (answer: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(answer);
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(value);
+    } else if (event.key === "Escape") {
+      // The board and the panel act on Escape; here it only ends the rename.
+      event.preventDefault();
+      event.stopPropagation();
+      finish(null);
+    }
+  };
+  return (
+    <input
+      className="draft-ghost-input"
+      aria-label={label}
+      value={value}
+      maxLength={60}
+      autoFocus
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => finish(value)}
+      onKeyDown={onKeyDown}
+    />
+  );
+}
+
+/** A picture card's body and what it waits for, under the card. */
+function GhostDetail({
+  ghost,
+  titleOf,
+  onClose,
+}: {
+  ghost: GhostBox;
+  titleOf: (ref: string) => string;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      className="draft-ghost-detail"
+      role="dialog"
+      aria-label={t("draft.ghostDetails", { title: ghost.title })}
+      data-draft-key={ghost.key}
+      style={{ left: ghost.rect.left, top: ghost.rect.bottom + 8, width: CARD_W + 40 }}
+      // Inside it, a press is not the board's either.
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <p className="draft-ghost-detail-title">{ghost.title}</p>
+      <p className={`draft-ghost-detail-body${ghost.body ? "" : " is-empty"}`}>
+        {ghost.body || t("draft.ghostNoBody")}
+      </p>
+      <div className="draft-after">
+        {ghost.after.length > 0 ? (
+          ghost.after.map((ref) => (
+            <span key={ref} className={`draft-chip${isExistingRef(ref) ? " is-existing" : ""}`}>
+              {t("draft.after", { title: titleOf(ref) })}
+            </span>
+          ))
+        ) : (
+          <span className="draft-ghost-detail-first">{t("draft.ghostFirst")}</span>
+        )}
+      </div>
+      <button type="button" className="draft-text-btn draft-ghost-detail-close" onClick={onClose}>
+        {t("draft.ghostClose")}
+      </button>
+    </div>
+  );
 }
 
 export function DraftOverlay({
@@ -42,6 +152,8 @@ export function DraftOverlay({
   const entryId = useCopilot((state) => activeDraftId(state));
   const draft = useCopilot((state) => (entryId ? currentDraft(state, entryId) : null));
   const selection = useApp(canvasSelectionIds);
+  const graph = useApp((state) => state.graph);
+  const themed = useThemeActive();
   // The draft goes where the selection was when it arrived (else beside
   // the cards it waits for then); clicking around or linking a ghost to a
   // card afterwards does not move it.
@@ -71,7 +183,16 @@ export function DraftOverlay({
       const column = { index: cell.col, row: cell.row, width: CARD_W, height: CARD_H } as Col;
       const left = centerX(column) - CARD_W / 2;
       const top = rowTop(cell.row) + ROW_H / 2 - CARD_H / 2;
-      return [{ key: node.key, title: node.title, rect: { left, top, right: left + CARD_W, bottom: top + CARD_H } }];
+      return [
+        {
+          key: node.key,
+          title: node.title,
+          kind: node.kind,
+          body: node.body ?? "",
+          after: node.after ?? [],
+          rect: { left, top, right: left + CARD_W, bottom: top + CARD_H },
+        },
+      ];
     });
   }, [draft, cells, centerX, rowTop]);
 
@@ -84,12 +205,59 @@ export function DraftOverlay({
   };
 
   const [link, setLink] = useState<{ from: string; start: Point; end: Point } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // The picture card whose body and chips show; none once it is gone.
+  const [shown, setShown] = useState<string | null>(null);
+  const detailKey = themed && shown && ghosts.some((ghost) => ghost.key === shown) ? shown : null;
+
+  // A press anywhere else, or Escape, puts the details away.
+  useEffect(() => {
+    if (!detailKey) return;
+    const away = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".draft-ghost-detail")) return;
+      if (target?.closest(".draft-ghost")?.getAttribute("data-draft-key") === detailKey) return;
+      setShown(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShown(null);
+    };
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [detailKey]);
 
   if (!entryId || !draft || ghosts.length === 0) return null;
 
   const ghostByKey = new Map(ghosts.map((ghost) => [ghost.key, ghost]));
   const rectOf = (ref: string): Rect | null =>
     isExistingRef(ref) ? realRect(existingIdOf(ref)) : (ghostByKey.get(ref)?.rect ?? null);
+
+  const titleOfRef = (ref: string) => {
+    if (isExistingRef(ref)) {
+      const id = existingIdOf(ref);
+      return graph?.nodes?.find((node) => node.id === id)?.title || id;
+    }
+    return ghostByKey.get(ref)?.title || ref;
+  };
+
+  /** A press on a ghost is the ghost's: the board would start a marquee or a
+   * pan, or clear its selection. Other buttons go on to the board. */
+  const holdPress = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.stopPropagation();
+  };
+
+  const finishRename = (key: string, title: string | null) => {
+    setRenaming(null);
+    const next = title?.trim();
+    if (next && next !== ghostByKey.get(key)?.title) {
+      editDraft(entryId, (current) => renameNode(current, key, next));
+    }
+  };
 
   /** The ghost or card under a board point, as a draft reference. */
   const targetAt = (point: Point, from: string): string | null => {
@@ -160,6 +328,8 @@ export function DraftOverlay({
     });
   });
 
+  const detail = detailKey ? ghostByKey.get(detailKey) : undefined;
+
   return (
     <>
       <svg className="draft-edges" width={1} height={1} aria-hidden>
@@ -173,29 +343,55 @@ export function DraftOverlay({
           />
         )}
       </svg>
-      {ghosts.map((ghost) => (
-        <div
-          key={ghost.key}
-          className="draft-ghost"
-          data-draft-key={ghost.key}
-          title={t("draft.ghost", { title: ghost.title })}
-          style={{
-            left: ghost.rect.left,
-            top: ghost.rect.top,
-            width: CARD_W,
-            height: CARD_H,
-          }}
-        >
-          <span className="draft-ghost-title">{ghost.title}</span>
-          <button
-            type="button"
-            className="draft-ghost-handle"
-            aria-label={`${ghost.title} · ${t("draft.handle")}`}
-            title={t("draft.handle")}
-            onPointerDown={(event) => startLink(event, ghost.key)}
-          />
-        </div>
-      ))}
+      {ghosts.map((ghost) => {
+        const editing = renaming === ghost.key;
+        return (
+          <div
+            key={ghost.key}
+            className={`draft-ghost${themed ? " is-picture" : ""}${detailKey === ghost.key ? " is-open" : ""}`}
+            data-draft-key={ghost.key}
+            data-kind={ghost.kind}
+            title={editing ? undefined : t(themed ? "draft.ghostTipThemed" : "draft.ghostTip", { title: ghost.title })}
+            style={{
+              left: ghost.rect.left,
+              top: ghost.rect.top,
+              width: CARD_W,
+              height: CARD_H,
+            }}
+            onPointerDown={holdPress}
+            onClick={(event) => {
+              if (!themed || editing) return;
+              if ((event.target as Element).closest(".draft-ghost-handle")) return;
+              setShown(detailKey === ghost.key ? null : ghost.key);
+            }}
+            onDoubleClick={(event) => {
+              if ((event.target as Element).closest(".draft-ghost-handle, .draft-ghost-input")) return;
+              event.stopPropagation();
+              setShown(null);
+              setRenaming(ghost.key);
+            }}
+          >
+            {themed && <KindGlyph type={nodeTypeById(graph, ghost.kind)} large />}
+            {editing ? (
+              <GhostRename
+                title={ghost.title}
+                label={t("draft.ghostRename", { title: ghost.title })}
+                onDone={(title) => finishRename(ghost.key, title)}
+              />
+            ) : (
+              <span className="draft-ghost-title">{ghost.title}</span>
+            )}
+            <button
+              type="button"
+              className="draft-ghost-handle"
+              aria-label={`${ghost.title} · ${t("draft.handle")}`}
+              title={t("draft.handle")}
+              onPointerDown={(event) => startLink(event, ghost.key)}
+            />
+          </div>
+        );
+      })}
+      {detail && <GhostDetail ghost={detail} titleOf={titleOfRef} onClose={() => setShown(null)} />}
     </>
   );
 }

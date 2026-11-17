@@ -771,15 +771,20 @@
 
 /* ---- Copilot draft preview (DraftOverlay) --------------------------------
    Ghosts of the nodes a draft would create, where the Create puts them. They
-   sit over the cards like the peers' ghosts, take no pointer events (the
-   board keeps its marquee and pan), and only their link handle can be
-   grabbed. Never part of the graph. */
+   sit over the cards like the peers' ghosts and are never part of the graph.
+   A ghost takes the pointer for itself (DraftOverlay stops a press there, so
+   the board starts no marquee and no pan from it): a double-click renames
+   it, its link handle is dragged, and a picture card opens on a click. They
+   sit only in empty cells, so they hide no card. */
 .draft-ghost {
   position: absolute;
   z-index: 28;
-  pointer-events: none;
+  pointer-events: auto;
+  user-select: none;
+  cursor: default;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 6px 10px 6px 16px;
   border: 2px dashed color-mix(in srgb, var(--accent) 70%, var(--border-strong));
   border-radius: 8px;
@@ -795,6 +800,92 @@
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.draft-ghost-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+}
+/* With a theme pack on: a picture card. The kind's glyph, large and tinted
+   with the skin's accent (a skin sets --accent, --surface-2 and the rest on
+   the root), and the title only; the body and chips open on a click. */
+.draft-ghost.is-picture {
+  cursor: pointer;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 22%, var(--surface-2)),
+    color-mix(in srgb, var(--accent) 6%, var(--surface))
+  );
+  font-weight: 600;
+}
+.draft-ghost.is-picture.is-open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.draft-ghost.is-picture .draft-kind-glyph {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  --draft-kind-color: color-mix(in srgb, var(--accent) 45%, var(--text-2));
+  border-width: 3px;
+}
+.draft-ghost.is-picture .draft-kind-glyph[style] {
+  /* The kind's own colour, leaning to the skin's accent. */
+  border-color: color-mix(in srgb, var(--draft-kind-color) 65%, var(--accent));
+  background: color-mix(in srgb, var(--draft-kind-color) 30%, color-mix(in srgb, var(--accent) 20%, transparent));
+}
+.draft-ghost.is-picture .draft-ghost-title {
+  -webkit-line-clamp: 2;
+}
+/* A picture card's body and what it waits for, under the card. */
+.draft-ghost-detail {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--text) 18%, transparent);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+.draft-ghost-detail p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.draft-ghost-detail-title {
+  font-weight: 600;
+}
+.draft-ghost-detail-body {
+  white-space: pre-wrap;
+  max-height: 12em;
+  overflow: auto;
+}
+.draft-ghost-detail-body.is-empty,
+.draft-ghost-detail-first {
+  color: var(--text-2);
+}
+.draft-ghost-detail .draft-after {
+  margin: 0;
+}
+.draft-ghost-detail .draft-chip {
+  padding-right: 8px;
+}
+.draft-ghost-detail-close {
+  align-self: flex-end;
+  margin: 0;
 }
 /* Drag it onto a ghost or a card: this step waits for that one. */
 .draft-ghost-handle {

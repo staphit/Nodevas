@@ -1395,3 +1395,75 @@
 .copilot-toast-close:hover {
   background: var(--hover);
 }
+
+/* ---- A theme character presents the draft (DraftPresenter) ----------------
+   A small visual-novel dialogue box: her picture, a name plate, her line.
+   warroom.css is not loaded in the copilot panel, so the box is drawn here,
+   in the skin's colours (a skin sets --accent, --surface-2 and the rest on
+   the root). */
+.draft-presenter {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 6px;
+}
+.draft-presenter-face {
+  flex: none;
+  height: 88px;
+  max-width: 35%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+.draft-presenter-face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  object-position: left top;
+}
+.draft-presenter-talk {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 16px 12px 10px;
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border-strong));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  color: var(--text);
+}
+.draft-presenter-plate {
+  position: absolute;
+  top: -11px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  margin: 0;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.draft-presenter-plate small {
+  font-weight: 400;
+  opacity: 0.85;
+}
+.draft-presenter-sign {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.draft-presenter-line {
+  margin: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
