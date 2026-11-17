@@ -412,3 +412,13 @@ Other corrections the build follows:
 - Package files widened: P0 also owns `servertools_test.go`, `copilot_test.go` and COPILOT.md's tool list; P4 also owns `web/src/api/copilot.ts`, `copilotStore.ts`, `state/undoSlice.ts`; P5 follows P4 in `Composer.tsx`.
 - macOS: run Go tests with a real `TMPDIR` (e.g. `/private/tmp/...`); `/var` is a symlink and two existing tests fail otherwise.
 - P7's runner is `internal/copilot/draft_eval_test.go` (build tag `copilot_eval`, package-internal so nothing is exported for it); the cases are `internal/copilot/evals/cases.json`. Run: `go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model ollama:qwen3:8b -v`.
+
+## 17. Build status (2026-11-17)
+
+Built and green on this branch: P0, P1, P2, P3, P4, P5, P7 (written). `gofmt`, `go build`, `go vet`, `go test ./...` (with a real `TMPDIR` on macOS), `tsc -b`, `check:api-imports`, vitest (407 files / 3834 tests), the desktop tests and the e2e suite (121; `copilot-draft.spec.ts` drives type → draft → remove → Create → Undo against the real server with only the model stubbed; `editor.spec.ts:765` and `search.spec.ts:95` failed once under parallel load and pass alone).
+
+Not done yet:
+- **No real model has drafted anything.** The P7 evals and the smoke test with a local model (plan §0) still need Ollama or LM Studio, e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`, `ollama pull qwen3:8b`, then `go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model ollama:qwen3:8b -v`. Whether a given local server honours `response_format` is untested; the drafter retries without it on a 400 and validates either way.
+- §3.4 theme presentation: only the compact glyph row with a count; no picture-card ghosts, no character presenting the draft.
+- P6 is deferred (§16). The "Plan with my coding agent" button sends an Ask turn that offers `start_breakdown`.
+- Delete this file before merging; fold anything still needed into COPILOT.md or code comments.
