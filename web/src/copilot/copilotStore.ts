@@ -9,8 +9,12 @@
 
 import { create } from "zustand";
 import { readPreference, subscribePreferences, writePreference } from "../preferences";
+import { translate } from "../i18n";
 import type {
   CopilotConversation,
+  CopilotDraft,
+  CopilotDraftData,
+  CopilotDraftStep,
   CopilotEntry,
   CopilotMode,
   CopilotSource,
@@ -52,7 +56,15 @@ export type TranscriptItem =
       status: ToolStatus;
       live?: boolean;
     }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+  | { kind: "notice"; id: string; text: string; tone: "info" | "error" }
+  /**
+   * Nodes the copilot proposes. `data` is the draft as the server stored it
+   * (null when it could not be read); the person's edits live in
+   * `CopilotState.drafts`, so editing never changes `items`.
+   */
+  | { kind: "draft"; id: string; text: string; data: CopilotDraftData | null };
+
+export type DraftItem = Extract<TranscriptItem, { kind: "draft" }>;
 
 export interface PermissionRequest {
   requestId: string;
@@ -101,6 +113,8 @@ export interface TurnState {
   turnId: string | null;
   /** Final assistant text of the newest finished turn, for spoken replies. */
   lastReply: { turnId: string; text: string } | null;
+  /** The step a running draft turn is on. */
+  draftStep: CopilotDraftStep | null;
 }
 
 export interface CopilotPrefs {
@@ -121,6 +135,14 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   /** Transient line under the header (load failures, speech errors). */
   notice: string | null;
   download: BrowserModelDownload;
+  /**
+   * The person's edits of a draft, by entry id; a draft not here is as the
+   * copilot proposed it. Kept apart from `items` so an edit does not move the
+   * transcript.
+   */
+  drafts: Record<string, CopilotDraft>;
+  /** Text for the composer to take (a question chip); `at` tells two apart. */
+  composerFill: { text: string; at: number } | null;
 
   setStatus: (status: CopilotStatus | null) => void;
   setOpen: (open: boolean) => void;
@@ -144,6 +166,12 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   /** Ends the turn on the client side (finished, aborted or failed). */
   endTurn: (error?: string) => void;
   markDecisionSubmitting: (requestId: string, submitting: boolean) => void;
+  /** Applies one edit to a draft (on top of earlier edits). */
+  editDraft: (entryId: string, update: (draft: CopilotDraft) => CopilotDraft) => void;
+  /** The server's new word on a draft: its state, batch, created ids. */
+  setDraftData: (entryId: string, patch: Partial<CopilotDraftData>) => void;
+  /** Puts text into the composer, as if typed. */
+  fillComposer: (text: string) => void;
 }
 
 /** The panel's choices: preferences that follow the account. */
@@ -183,8 +211,37 @@ export function formatToolValue(value: unknown): string {
   }
 }
 
+/** A draft entry's data; null when it is missing or not a draft. */
+export function parseDraftData(raw: string | undefined): CopilotDraftData | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<CopilotDraftData> | null;
+    if (!value || typeof value !== "object" || !value.draft || !Array.isArray(value.draft.nodes)) {
+      return null;
+    }
+    return {
+      ...value,
+      draft: {
+        ...value.draft,
+        summary: value.draft.summary ?? "",
+        nodes: value.draft.nodes.filter(
+          (node) => node && typeof node.key === "string" && typeof node.title === "string",
+        ),
+      },
+      issues: Array.isArray(value.issues) ? value.issues : [],
+      provider: value.provider ?? "",
+      model: value.model ?? "",
+      state: value.state === "committed" || value.state === "discarded" ? value.state : "open",
+    } as CopilotDraftData;
+  } catch {
+    return null;
+  }
+}
+
 export function entryToItem(entry: CopilotEntry): TranscriptItem {
   switch (entry.kind) {
+    case "draft":
+      return { kind: "draft", id: entry.id, text: entry.text ?? "", data: parseDraftData(entry.data) };
     case "user":
       return {
         kind: "user",
@@ -243,6 +300,15 @@ function isSilentAssistant(entry: CopilotEntry): boolean {
 }
 
 function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptItem[] {
+  if (entry.kind === "draft") {
+    // A draft entry can come again with a new state (draft-state answers).
+    const stored = entryToItem(entry);
+    const index = items.findIndex((item) => item.id === entry.id);
+    if (index < 0) return [...items, stored];
+    const next = items.slice();
+    next[index] = stored;
+    return next;
+  }
   if (items.some((item) => item.id === entry.id)) return items;
   if (isSilentAssistant(entry)) return items;
   const stored = entryToItem(entry);
@@ -270,6 +336,44 @@ function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptIte
   const next = items.slice();
   next[index] = merged;
   return next;
+}
+
+/** Draft turns fail with a code the panel says in the reader's language. */
+const DRAFT_ERROR_CODES = new Set(["draft_unreadable", "draft_board", "provider_error"]);
+
+function turnErrorText(event: { message: string; code?: string }): string {
+  if (event.code && DRAFT_ERROR_CODES.has(event.code)) {
+    const text = translate(`draft.error.${event.code}`);
+    // provider_error carries the provider's own words, which help.
+    return event.code === "provider_error" && event.message ? `${text} ${event.message}` : text;
+  }
+  return event.message || event.code || "error";
+}
+
+/** The draft the overlay shows and a refine sends: the newest one, while open. */
+export function activeDraftId(state: { items: TranscriptItem[] }): string | null {
+  for (let index = state.items.length - 1; index >= 0; index--) {
+    const item = state.items[index];
+    if (item.kind === "draft") return item.data?.state === "open" ? item.id : null;
+  }
+  return null;
+}
+
+/** The composer's placeholder in "Make nodes": refining while a draft is open. */
+export function makePlaceholderKey(state: { items: TranscriptItem[] }): string {
+  return activeDraftId(state) ? "copilot.placeholder.refine" : "copilot.placeholder.make";
+}
+
+export function draftItemOf(state: { items: TranscriptItem[] }, entryId: string): DraftItem | undefined {
+  return state.items.find((item): item is DraftItem => item.kind === "draft" && item.id === entryId);
+}
+
+/** A draft as it stands now: the person's edits, else as proposed. */
+export function currentDraft(
+  state: { items: TranscriptItem[]; drafts: Record<string, CopilotDraft> },
+  entryId: string,
+): CopilotDraft | null {
+  return state.drafts[entryId] ?? draftItemOf(state, entryId)?.data?.draft ?? null;
 }
 
 /** Applies one stream event. Pure: returns the changed fields only. */
@@ -375,11 +479,14 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
       return event.entry ? { items: adoptEntry(state.items, event.entry) } : {};
     case "error":
       return {
+        draftStep: null,
         items: [
           ...finishStreaming(state.items),
-          { kind: "notice", id: liveId("error"), text: event.message || event.code || "error", tone: "error" },
+          { kind: "notice", id: liveId("error"), text: turnErrorText(event), tone: "error" },
         ],
       };
+    case "draft_status":
+      return { draftStep: event.code };
     case "turn_finished": {
       const items = finishStreaming(state.items);
       // The reply to speak is the assistant text after this turn's user bubble.
@@ -396,6 +503,7 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
       return {
         items,
         running: false,
+        draftStep: null,
         pending: [],
         lastReply: reply ? { turnId: state.turnId ?? liveId("turn"), text: reply } : state.lastReply,
         turnId: null,
@@ -426,6 +534,9 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   lastSource: "text",
   notice: null,
   download: { active: false, progress: null, error: null },
+  drafts: {},
+  composerFill: null,
+  draftStep: null,
   items: [],
   pending: [],
   running: false,
@@ -443,6 +554,8 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       items: entries.filter((entry) => !isSilentAssistant(entry)).map(entryToItem),
       pending: [],
       lastReply: null,
+      drafts: {},
+      draftStep: null,
     }),
   showFollowup: (conversation, entries) => {
     const reply = [...entries].reverse().find((entry) => entry.kind === "assistant");
@@ -452,6 +565,8 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       items: entries.map(entryToItem),
       pending: [],
       lastReply: reply?.text ? { turnId: `followup-${reply.id}`, text: reply.text } : null,
+      drafts: {},
+      draftStep: null,
     });
   },
   markRead: (id) =>
@@ -474,6 +589,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     set((state) => ({
       running: true,
       turnId: null,
+      draftStep: null,
       lastSource: source,
       notice: null,
       items: [...state.items, { kind: "user", id: liveId("user"), text, source, live: true }],
@@ -483,6 +599,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     set((state) => ({
       running: false,
       turnId: null,
+      draftStep: null,
       pending: [],
       items: [
         ...finishStreaming(state.items).map((item) =>
@@ -501,6 +618,23 @@ export const useCopilot = create<CopilotState>((set, get) => ({
         request.requestId === requestId ? { ...request, submitting } : request,
       ),
     })),
+  editDraft: (entryId, update) =>
+    set((state) => {
+      const current = currentDraft(state, entryId);
+      if (!current) return {};
+      const next = update(current);
+      if (next === current) return {};
+      return { drafts: { ...state.drafts, [entryId]: next } };
+    }),
+  setDraftData: (entryId, patch) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.kind === "draft" && item.id === entryId && item.data
+          ? { ...item, data: { ...item.data, ...patch } }
+          : item,
+      ),
+    })),
+  fillComposer: (text) => set({ composerFill: { text, at: Date.now() } }),
 }));
 
 // The choices follow the account: one made in another tab, browser or device

@@ -11,6 +11,7 @@ import { lazyWithRetry } from "../lazyWithRetry";
 import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
+import { DraftToast } from "./draft/DraftToast";
 import { IconMic } from "./icons";
 import { OPEN_KEYS, RunnerHelp } from "./RunnerHelp";
 import { decide, openUnread, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
@@ -220,6 +221,8 @@ export function CopilotRoot() {
           />
         </Suspense>
       )}
+      {/* A draft's Create and its undo; shown with the panel open or closed. */}
+      <DraftToast />
     </>
   );
 }

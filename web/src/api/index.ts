@@ -38,7 +38,17 @@ export {
   UnauthorizedError,
 } from "./http";
 export { ApiShapeError } from "./verify";
-export type { GraphOp, GraphOpsResponse, GraphResponse } from "./graph";
+export type {
+  BatchRedoResult,
+  BatchRefusal,
+  BatchUndoResult,
+  GraphOp,
+  GraphOpsResponse,
+  GraphResponse,
+  SubgraphNodeSpec,
+  SubgraphResult,
+  SubgraphSpec,
+} from "./graph";
 export type {
   NodePageInfo,
   NodeTransferMode,
@@ -76,6 +86,13 @@ export type {
   CopilotConversation,
   CopilotConversationDetail,
   CopilotDecision,
+  CopilotDraft,
+  CopilotDraftData,
+  CopilotDraftIssue,
+  CopilotDraftNode,
+  CopilotDraftState,
+  CopilotDraftStep,
+  CopilotIntent,
   CopilotEntry,
   CopilotEntryKind,
   CopilotMode,

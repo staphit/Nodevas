@@ -844,3 +844,450 @@
 .copilot-runner-steps code {
   font-family: var(--mono);
 }
+
+/* ---- drafts: what a "Make nodes" turn proposes ---------------------------- */
+
+.copilot-draft-status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.copilot-draft-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: copilot-draft-spin 0.9s linear infinite;
+}
+@keyframes copilot-draft-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .copilot-draft-spinner {
+    animation: none;
+  }
+}
+
+.draft-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.draft-card.is-folded {
+  gap: 4px;
+  background: var(--surface-2);
+}
+.draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+.draft-heading {
+  font-weight: 600;
+}
+.draft-model,
+.draft-state {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-state {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.draft-state.is-committed {
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.draft-summary {
+  margin: 0;
+  color: var(--text-2);
+}
+.draft-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-note.is-warn {
+  color: var(--st-failed-fg);
+}
+.draft-questions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.draft-questions-label {
+  width: 100%;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-question {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.draft-question:hover {
+  background: var(--hover);
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-node {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.draft-node.is-added {
+  border-color: var(--st-done-fg);
+}
+.draft-node.is-changed {
+  border-color: var(--st-progress-fg);
+}
+.draft-node.has-error {
+  border-color: var(--st-failed-fg);
+}
+.draft-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.draft-node-select {
+  margin: 0;
+}
+.draft-node-index {
+  min-width: 1.4em;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  text-align: right;
+}
+.draft-kind {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+/* The kind picker sits invisibly over its glyph: the glyph is the button. */
+.draft-kind-select {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  opacity: 0;
+  cursor: pointer;
+}
+.draft-kind-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--draft-kind-color, var(--text-2));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--draft-kind-color, var(--text-2)) 18%, transparent);
+}
+.draft-kind-glyph[data-shape="round"],
+.draft-kind-glyph[data-shape="ellipse"] {
+  border-radius: 50%;
+}
+.draft-kind-glyph[data-shape="pill"] {
+  width: 20px;
+  border-radius: 999px;
+}
+.draft-kind-glyph[data-shape="diamond"] {
+  transform: rotate(45deg) scale(0.82);
+  border-radius: 2px;
+}
+.draft-kind-glyph[data-shape="hexagon"] {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border-radius: 0;
+  background: var(--draft-kind-color, var(--text-2));
+}
+.draft-kind-glyph[data-shape="dashed"] {
+  border-style: dashed;
+}
+.draft-kind-glyph[data-shape="thick"] {
+  border-width: 3px;
+}
+.draft-kind-glyph.is-large {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+.draft-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.draft-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.draft-diff {
+  flex: none;
+  min-width: 1.2em;
+  font-weight: 700;
+  text-align: center;
+}
+.draft-diff-added {
+  color: var(--st-done-fg);
+}
+.draft-diff-changed {
+  color: var(--st-progress-fg);
+}
+.draft-diff-removed {
+  color: var(--st-failed-fg);
+}
+.draft-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.draft-node-warn {
+  display: inline-flex;
+  color: var(--st-failed-fg);
+}
+.draft-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.draft-icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.draft-after {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0 calc(1.4em + 26px);
+}
+.draft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-chip.is-existing {
+  border: 1px dashed var(--border-strong);
+}
+.draft-chip-x {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.draft-chip-x:hover {
+  background: var(--hover);
+}
+.draft-after-picker {
+  max-width: 11em;
+  padding: 1px 4px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-issues {
+  margin: 4px 0 0 calc(1.4em + 26px);
+  padding: 0;
+  list-style: none;
+}
+.draft-issue {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-issue.is-error {
+  color: var(--st-failed-fg);
+}
+.draft-link-btn,
+.draft-text-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.draft-text-btn {
+  align-self: flex-start;
+  margin-left: 0;
+}
+.draft-removed,
+.draft-checking {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.draft-glyph-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.draft-glyph-count {
+  color: var(--text-2);
+}
+.draft-merge-bar,
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.draft-primary,
+.draft-secondary,
+.draft-deeper {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.draft-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.draft-secondary,
+.draft-deeper {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+.draft-primary:disabled,
+.draft-secondary:disabled,
+.draft-deeper:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.draft-deeper {
+  align-self: flex-start;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+}
+.draft-deeper.is-suggested {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.draft-deeper-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+
+/* After a Create: above the copilot's button (its 48px and 18px inset, and
+   room between), never over it; with the panel open, left of the panel. */
+.copilot-toast {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right, 0px));
+  bottom: calc(max(18px, env(safe-area-inset-bottom, 0px)) + 48px + 12px);
+  z-index: calc(var(--copilot-z) + 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 36px));
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.app:has(> .copilot-panel) .copilot-toast {
+  right: calc(var(--copilot-width) + 18px);
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 640px) {
+  .app:has(> .copilot-panel) .copilot-toast {
+    right: max(18px, env(safe-area-inset-right, 0px));
+    bottom: calc(max(18px, env(safe-area-inset-bottom, 0px)) + 120px);
+  }
+}
+.copilot-toast.is-error {
+  border-color: var(--st-failed-fg);
+}
+.copilot-toast-sep {
+  color: var(--text-2);
+}
+.copilot-toast-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copilot-toast-close {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.copilot-toast-close:hover {
+  background: var(--hover);
+}

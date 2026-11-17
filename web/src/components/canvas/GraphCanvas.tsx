@@ -28,6 +28,7 @@ import { CanvasDecoration } from "./CanvasDecoration";
 import { SnapGuides } from "./SnapGuides";
 import type { SnapBox, SnapGuide } from "./snapping";
 import { GraphCard, type CardDetail, type CardEvents } from "./GraphCard";
+import { DraftOverlay } from "./DraftOverlay";
 import { PeerOverlay } from "./PeerOverlay";
 import { GateWiring, gateLayout, type Gate, type GateLayout } from "./GateWiring";
 import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
@@ -925,6 +926,9 @@ export function GraphCanvas({
         offsetX={graphOffsetX}
         offsetY={graphOffsetY}
       />
+      {/* The copilot's open draft: ghosts and dashed links, on their own
+          subscription like the peers above. */}
+      <DraftOverlay colOf={colOf} centerX={centerX} rowTop={rowTop} zoom={zoom} />
     </>
   );
 }

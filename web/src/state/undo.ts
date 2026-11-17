@@ -37,7 +37,24 @@ export type UndoEntry =
       eventId: string;
       previousTimestamp: string;
       label?: string;
+    }
+  /**
+   * A recorded subgraph batch (a Copilot draft's Create). Reverting it while
+   * its nodes exist calls the batch's undo (the server trashes what nobody
+   * changed since); with `undone` set, reverting calls its redo.
+   */
+  | {
+      kind: "batch";
+      batchId: string;
+      ids: string[];
+      undone?: boolean;
+      /** The draft entry it came from, so the panel can follow. */
+      entryId?: string;
+      conversationId?: string;
+      label?: string;
     };
+
+export type BatchUndoEntry = Extract<UndoEntry, { kind: "batch" }>;
 
 /** Catalog keys, read when the label is shown so it follows the language. */
 const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
@@ -46,7 +63,27 @@ const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
   "delete-node": "undo.label.deleteNode",
   "lifecycle-status": "undo.label.lifecycleStatus",
   "lifecycle-move": "undo.label.lifecycleMove",
+  batch: "undo.label.batch",
 };
+
+/** What a batch undo or redo did, for whoever made the batch (the copilot). */
+export type BatchRevert =
+  | { direction: "undo"; entry: BatchUndoEntry; trashed: string[]; refused: { id: string; code: string }[] }
+  | { direction: "redo"; entry: BatchUndoEntry; restored: string[] };
+
+const batchListeners = new Set<(revert: BatchRevert) => void>();
+
+/** Hears every batch undo and redo; returns the unsubscribe. */
+export function observeBatchRevert(listener: (revert: BatchRevert) => void): () => void {
+  batchListeners.add(listener);
+  return () => {
+    batchListeners.delete(listener);
+  };
+}
+
+export function notifyBatchRevert(revert: BatchRevert): void {
+  for (const listener of batchListeners) listener(revert);
+}
 
 let stack: UndoEntry[] = [];
 let redoStack: UndoEntry[] = [];

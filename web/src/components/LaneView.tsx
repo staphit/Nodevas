@@ -74,8 +74,11 @@ import { withRequiresProjection } from "./canvas/requiresProjection";
 import { useCanvasDecorations } from "./canvas/useCanvasDecorations";
 import { useGraphViews } from "./canvas/useGraphViews";
 import { useBoardColumns } from "./canvas/useBoardColumns";
+import { ghostExtent, useDraftUi } from "../copilot/draft/draftUi";
 import {
   COL_W,
+  CARD_H,
+  CARD_W,
   cardCenter,
   centerX as getCenterX,
   clampZoom,
@@ -331,6 +334,27 @@ export function LaneView({
     [graphSelection],
   );
   const selectedIDs = [...selectedGraphNodeIDs];
+  // The copilot sends the canvas selection with a turn; the selection itself
+  // stays here, the store only hears it (graph pane only, per project).
+  const setCanvasSelection = useApp((s) => s.setCanvasSelection);
+  useEffect(() => {
+    if (!isGraph) return;
+    setCanvasSelection([...selectedGraphNodeIDs]);
+  }, [isGraph, selectedGraphNodeIDs, setCanvasSelection]);
+  useEffect(() => {
+    if (!isGraph) return;
+    return () => setCanvasSelection([]);
+  }, [isGraph, setCanvasSelection]);
+  // A draft's Create asks the board to select the nodes it made.
+  const canvasSelectRequest = useApp((s) => s.canvasSelectRequest);
+  useEffect(() => {
+    if (!isGraph || !canvasSelectRequest) return;
+    const { ids } = canvasSelectRequest;
+    useApp.getState().clearCanvasSelectRequest();
+    setGraphSelection(ids.length ? { kind: "nodes", ids } : null);
+    onSelectedNodeChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- answers the request only
+  }, [isGraph, canvasSelectRequest]);
   /** One destructive action at a time: shared by the shortcuts and the batch toolbar. */
   const [shortcutBusy, setShortcutBusy] = useState(false);
 
@@ -526,8 +550,14 @@ export function LaneView({
 
   // ----- graph layout: stored positions use continuous grid units so
   // integer coordinates remain compatible while dragging is fully free-form.
-  const { cols, colOf, maxCol, maxRow, timelineCols, timelineColOf } =
-    useBoardColumns({
+  const {
+    cols,
+    colOf,
+    maxCol: contentMaxCol,
+    maxRow: contentMaxRow,
+    timelineCols,
+    timelineColOf,
+  } = useBoardColumns({
       graph,
       statuses,
       timelineSort: viewFilter.sort,
@@ -535,6 +565,14 @@ export function LaneView({
       timelineCellWidth,
       timelineCellHeight,
     });
+  // The copilot's draft ghosts may sit past the content: the board grows to
+  // show them. Two numbers, so a draft edit re-renders the board only when
+  // the ghosts reach further.
+  const ghostMaxCol = useDraftUi((state) => (isGraph ? (ghostExtent(state)?.col ?? -1) : -1));
+  const ghostMaxRow = useDraftUi((state) => (isGraph ? (ghostExtent(state)?.row ?? -1) : -1));
+  const ghostEntry = useDraftUi((state) => (isGraph ? (state.ghost?.entryId ?? null) : null));
+  const maxCol = Math.max(contentMaxCol, ghostMaxCol);
+  const maxRow = Math.max(contentMaxRow, ghostMaxRow);
   // A large graph mounts only the cards near the view. Read after
   // useBoardViewport's opening scroll, which lands in the same commit.
   // A large timeline does the same with its lanes (timelineCulling).
@@ -885,7 +923,7 @@ export function LaneView({
     const target = event.target as Element;
     if (
       target.closest(
-        "button, input, select, textarea, a, .col-card, .plan-card, .snap-card, .gate-handle, .lane-context-menu, .board-gap",
+        "button, input, select, textarea, a, .col-card, .plan-card, .snap-card, .gate-handle, .lane-context-menu, .board-gap, .draft-ghost-handle",
       )
     ) {
       return;
@@ -1381,12 +1419,14 @@ export function LaneView({
   // (openingScroll) — on the card nearest its top-left corner — rather than
   // centred on the middle of its bounds, which on a wide, mostly shallow
   // board is empty grid with the top card row cut off.
-  const fitGraph = (selectionOnly: boolean, opening = false) => {
+  const fitGraph = (selectionOnly: boolean, opening = false, only?: Col[]) => {
     const board = boardRef.current;
     if (!board) return;
-    const candidates = selectionOnly
-      ? cols.filter((column) => selectedGraphNodeIDs.has(column.node.id))
-      : cols;
+    const candidates = only
+      ? only
+      : selectionOnly
+        ? cols.filter((column) => selectedGraphNodeIDs.has(column.node.id))
+        : cols;
     const view = fitViewToCards(candidates, centerX, rowTop, {
       width: board.clientWidth,
       height: board.clientHeight,
@@ -1395,7 +1435,9 @@ export function LaneView({
     // What comes back is the scale the board has to be drawn at, which the node
     // scale already contributes to — so the user's zoom is what is left over,
     // and the scroll has to be written in terms of the two together.
-    const nextZoom = clampZoom(view.zoom / graphNodeScale);
+    // Framing a few ghosts should not blow them up: only ever zoom out then.
+    const fitted = clampZoom(view.zoom / graphNodeScale);
+    const nextZoom = only ? Math.min(fitted, zoom) : fitted;
     const nextViewScale = nextZoom * graphNodeScale;
     // A graph narrower than the view is drawn centred in it, and how much
     // room that leaves depends on the zoom: the focus moves with the origin,
@@ -1469,6 +1511,30 @@ export function LaneView({
     activeProject,
     graphReady,
   ]);
+
+  // A copilot draft arrived: bring its ghosts (and the cards they hang
+  // from) into view, once per draft.
+  const fittedDraftRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isGraph || collapsed || !ghostEntry) return;
+    if (fittedDraftRef.current === ghostEntry) return;
+    const ghost = useDraftUi.getState().ghost;
+    if (!ghost || ghost.entryId !== ghostEntry) return;
+    fittedDraftRef.current = ghostEntry;
+    const ghostCols = Object.entries(ghost.cells).map(
+      ([key, cell]) =>
+        ({
+          node: { id: `draft:${key}` },
+          index: cell.col,
+          row: cell.row,
+          width: CARD_W,
+          height: CARD_H,
+        }) as Col,
+    );
+    const anchors = cols.filter((column) => selectedGraphNodeIDs.has(column.node.id));
+    fitGraph(false, false, [...anchors, ...ghostCols]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per draft
+  }, [isGraph, collapsed, ghostEntry, ghostMaxCol, ghostMaxRow]);
 
   // How far out the board is drawn decides how much a card can say. Below these
   // effective scales the secondary lines go before their words shrink past

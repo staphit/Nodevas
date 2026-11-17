@@ -7,7 +7,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type MouseEvent } from "re
 import { useI18n } from "../i18n";
 import { renderMarkdown } from "../markdown";
 import { reportError, useApp } from "../store";
-import type { PermissionRequest, TranscriptItem } from "./copilotStore";
+import { activeDraftId, useCopilot, type PermissionRequest, type TranscriptItem } from "./copilotStore";
+import { DraftCard } from "./draft/DraftCard";
 import { PermissionCard } from "./PermissionCard";
 
 type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
@@ -60,9 +61,20 @@ export function ToolCard({ item }: { item: ToolItem }) {
   );
 }
 
-function Item({ item }: { item: TranscriptItem }) {
+function Item({
+  item,
+  activeDraft,
+  prompt,
+}: {
+  item: TranscriptItem;
+  activeDraft: string | null;
+  /** The person's words just before this item (a draft's request). */
+  prompt: string;
+}) {
   const { t } = useI18n();
   switch (item.kind) {
+    case "draft":
+      return <DraftCard item={item} active={item.id === activeDraft} prompt={prompt} />;
     case "user":
       return (
         <div className="copilot-bubble copilot-bubble-user">
@@ -110,6 +122,19 @@ export function Transcript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
+  const draftStep = useCopilot((state) => state.draftStep);
+  const activeDraft = useMemo(() => activeDraftId({ items }), [items]);
+  // Each item's preceding user words: what a draft was asked for.
+  const prompts = useMemo(() => {
+    const map = new Map<string, string>();
+    let last = "";
+    for (const item of items) {
+      if (item.kind === "user") last = item.text;
+      else map.set(item.id, last);
+    }
+    return map;
+  }, [items]);
+
   const onScroll = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -121,7 +146,7 @@ export function Transcript({
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (element && stickRef.current) element.scrollTop = element.scrollHeight;
-  }, [items, pending, interim]);
+  }, [items, pending, interim, draftStep]);
 
   // A new permission request is something to answer now: bring it into view.
   const firstPending = pending[0]?.requestId;
@@ -161,8 +186,14 @@ export function Transcript({
     >
       {empty && <p className="copilot-empty">{t("copilot.empty")}</p>}
       {items.map((item) => (
-        <Item key={item.id} item={item} />
+        <Item key={item.id} item={item} activeDraft={activeDraft} prompt={prompts.get(item.id) ?? ""} />
       ))}
+      {draftStep && (
+        <div className="copilot-draft-status" role="status" data-step={draftStep}>
+          <span className="copilot-draft-spinner" aria-hidden />
+          {t(`draft.status.${draftStep}`)}
+        </div>
+      )}
       {pending.map((request, index) => (
         <PermissionCard
           key={request.requestId}
