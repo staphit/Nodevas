@@ -7,6 +7,11 @@
 //	go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model ollama:qwen3:8b -v
 //	go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model lmstudio:qwen3-8b -v
 //	NODEVAS_EVAL_API_KEY=… go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model openai:<model> -base https://…/v1 -v
+//	go test -tags copilot_eval ./internal/copilot -run TestDraftEval -model opencode:opencode/deepseek-v4.1-flash-free -v
+//
+// opencode:<provider/model> drives the opencode CLI (`opencode run`), which
+// reaches OpenCode's free models that are not served to other clients; it
+// runs in an empty folder and approves no tool, so it can only answer.
 //
 // Ollama's default context is small for a board listing; start it with
 // OLLAMA_CONTEXT_LENGTH=16384. The cases are internal/copilot/evals/cases.json:
@@ -17,11 +22,15 @@
 package copilot
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -31,7 +40,7 @@ import (
 )
 
 var (
-	evalModel = flag.String("model", "", "model to evaluate: ollama:<model>, lmstudio:<model>, openai:<model> (needs -base) or anthropic:<model>")
+	evalModel = flag.String("model", "", "model to evaluate: ollama:<model>, lmstudio:<model>, opencode:<provider/model>, openai:<model> (needs -base) or anthropic:<model>")
 	evalBase  = flag.String("base", "", "base URL for openai:<model>")
 	evalCase  = flag.String("case", "", "run only cases whose name contains this")
 )
@@ -84,6 +93,11 @@ func evalProvider(t *testing.T) provider.Provider {
 	}
 	config := provider.Config{Model: model}
 	switch kind {
+	case "opencode":
+		if _, err := exec.LookPath("opencode"); err != nil {
+			t.Skip("opencode is not installed")
+		}
+		return &opencodeProvider{model: model, dir: t.TempDir()}
 	case "ollama":
 		config.Kind, config.BaseURL = "openai", "http://127.0.0.1:11434/v1"
 	case "lmstudio":
@@ -311,4 +325,81 @@ func TestDraftEvalScoring(t *testing.T) {
 	if score, _ := scoreDraft(draftOutcome{draft: Draft{Questions: []string{"?"}}}, evalExpect{QuestionsOK: true}, b); score != 1 {
 		t.Errorf("questions-ok case scored %v", score)
 	}
+}
+
+// opencodeProvider answers through `opencode run`: the system prompt and the
+// conversation go in as one message, the model's text comes back from the
+// JSON event stream. No structured output; the drafter validates anyway.
+type opencodeProvider struct {
+	model string
+	dir   string
+}
+
+func (p *opencodeProvider) Name() string  { return "opencode" }
+func (p *opencodeProvider) Model() string { return p.model }
+
+func (p *opencodeProvider) Stream(ctx context.Context, req provider.Request, _ func(provider.Delta)) (provider.Response, error) {
+	var prompt strings.Builder
+	prompt.WriteString("Follow these instructions exactly. Do not use any tools; answer directly.\n\n")
+	prompt.WriteString(req.System)
+	for _, message := range req.Messages {
+		for _, block := range message.Blocks {
+			if block.Type != provider.BlockText {
+				continue
+			}
+			if message.Role == provider.RoleAssistant {
+				prompt.WriteString("\n\nYour previous answer:\n")
+			} else {
+				prompt.WriteString("\n\n")
+			}
+			prompt.WriteString(block.Text)
+		}
+	}
+	prompt.WriteString("\n\nAnswer with the JSON object only.")
+	cmd := exec.CommandContext(ctx, "opencode", "run", "--pure", "--format", "json", "-m", p.model, prompt.String())
+	cmd.Dir = p.dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("opencode run: %v: %s", err, truncateUTF8(stderr.String(), 400))
+	}
+	var text strings.Builder
+	var response provider.Response
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	for scanner.Scan() {
+		var event struct {
+			Type  string `json:"type"`
+			Error *struct {
+				Data struct {
+					Message string `json:"message"`
+				} `json:"data"`
+			} `json:"error"`
+			Part struct {
+				Text   string `json:"text"`
+				Tokens struct {
+					Input  int `json:"input"`
+					Output int `json:"output"`
+				} `json:"tokens"`
+			} `json:"part"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			continue
+		}
+		switch event.Type {
+		case "text":
+			text.WriteString(event.Part.Text)
+		case "step_finish":
+			response.InputTokens += event.Part.Tokens.Input
+			response.OutputTokens += event.Part.Tokens.Output
+		case "error":
+			if event.Error != nil {
+				return provider.Response{}, errors.New("opencode: " + event.Error.Data.Message)
+			}
+		}
+	}
+	response.Message = textMessage(strings.TrimSpace(text.String()))
+	response.Stop = provider.StopEndTurn
+	return response, nil
 }
