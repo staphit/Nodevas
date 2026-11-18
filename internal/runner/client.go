@@ -51,11 +51,14 @@ type Client struct {
 	BackoffMin       time.Duration
 	BackoffMax       time.Duration
 	// versionTimeout and catalogTimeout bound the commands that look at the
-	// agent CLIs (detect.go) and checkAgainWait a "check again" from the app
-	// (detector.go); zero means the defaults. Tests shorten them.
+	// agent CLIs (detect.go), checkAgainWait a "check again" from the app
+	// and signInRecheck how often a signed-out agent is asked whether it is
+	// signed in again (detector.go); zero means the defaults. Tests shorten
+	// them.
 	versionTimeout time.Duration
 	catalogTimeout time.Duration
 	checkAgainWait time.Duration
+	signInRecheck  time.Duration
 	// HTTPClient dials the hub and carries the MCP proxy's requests; nil uses
 	// http.DefaultClient for the socket and a client without a timeout for
 	// the proxy.
@@ -641,6 +644,13 @@ func (c *Client) redetectInterval() time.Duration {
 		return c.RedetectInterval
 	}
 	return defaultRedetect
+}
+
+func (c *Client) signInRecheckInterval() time.Duration {
+	if c.signInRecheck > 0 {
+		return c.signInRecheck
+	}
+	return defaultSignInRecheck
 }
 
 func (c *Client) checkAgainTimeout() time.Duration {

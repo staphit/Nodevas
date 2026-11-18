@@ -327,3 +327,27 @@ describe("StationWaiting", () => {
     });
   });
 });
+
+// Simple (single-user edition): the empty card says what will show up in
+// plain words, with no pull request in it; full mode and a team hub keep it.
+describe("StationWaiting's empty card in Simple", () => {
+  function mountAs(edition: Edition, experience: "simple" | "full", language: "en" | "zh-TW" = "en") {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language, experience } });
+    return mount(edition);
+  }
+
+  it.each(["en", "zh-TW"] as const)("names asks and finished work, not PRs (%s)", (language) => {
+    const { container } = mountAs("single", "simple", language);
+    const empty = container.querySelector(".station-empty") as HTMLElement;
+    expect(empty.textContent).not.toMatch(/\bPR\b|merge|合併/i);
+    expect(empty.textContent).toMatch(language === "en" ? /finishes/ : /做好/);
+  });
+
+  it.each([
+    ["single", "full"],
+    ["team", "simple"],
+  ] as const)("keeps the PR wording in %s with %s", (edition, experience) => {
+    mountAs(edition, experience);
+    expect(screen.getByText(/a PR is ready/)).toBeInTheDocument();
+  });
+});

@@ -187,6 +187,8 @@ const (
 	DeclineGlobalOff      = "global_off"
 	DeclineBusy           = "busy"
 	DeclineOther          = "other"
+	// DeclineAgentSignedOut: the agent's CLI is there but not signed in.
+	DeclineAgentSignedOut = "agent_signed_out"
 )
 
 // Accept reports an accepted job: the worktree and branch it runs in.
@@ -236,6 +238,9 @@ type RunResult struct {
 	// FailureKind classifies a failed run (W5, routing.go): whether another
 	// model might succeed where this one could not.
 	FailureKind string `json:"failureKind,omitempty"`
+	// FailureCode says more about a FailureKind for the app's words, "" for
+	// nothing more: FailureSignedOut. An older runner sends none.
+	FailureCode string `json:"failureCode,omitempty"`
 	// Verdict is a review job's verdict (VerdictApprove / VerdictChanges).
 	Verdict string `json:"verdict,omitempty"`
 	// Handoff (handoff.go): on a HandoffWorthy failure, the local branch the
@@ -299,6 +304,8 @@ type Run struct {
 	// from, and the pipeline it belongs to.
 	Kind        string `json:"kind,omitempty"`
 	FailureKind string `json:"failureKind,omitempty"`
+	// FailureCode is RunResult.FailureCode as the hub kept it.
+	FailureCode string `json:"failureCode,omitempty"`
 	Verdict     string `json:"verdict,omitempty"`
 	RetryOf     string `json:"retryOf,omitempty"`
 	PipelineID  string `json:"pipelineId,omitempty"`

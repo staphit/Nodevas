@@ -187,6 +187,36 @@ describe("RunnersPanel", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
+  // Claude Code there but signed out: not one of its usable agents, and its
+  // row says what signs it in, in the reader's language.
+  it("says an agent is there but not signed in", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    const signedOut: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        agents: [
+          {
+            kind: "claude",
+            installed: false,
+            signedOut: true,
+            version: "2.1.327 (Claude Code)",
+            models: [],
+            error: "claude: not signed in on this computer; run `claude` in a terminal here and log in",
+          },
+        ],
+      },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [signedOut] });
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    expect(screen.queryByText(/claude/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /desktop/ }));
+    const details = document.querySelector(".runner-details") as HTMLElement;
+    expect(details).toHaveTextContent("還沒登入：請在那台電腦執行 claude");
+    expect(details.textContent).not.toMatch(/not signed in|log in/);
+  });
+
   it("opens the add form when asked from outside, once", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
     const opened = vi.fn();

@@ -135,11 +135,40 @@ describe("SimpleAgentBox", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
+  // A run this box starts is offered to the built-in runner for a moment
+  // before it runs: the person's click was the OK, so nothing waits on them
+  // (the same rule as waiting.ts). Only an offer that asks says so.
+  it("does not say it waits for an OK while a built-in offer is just starting", async () => {
+    renderBox();
+    fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Started. The agent is working on it.");
+
+    act(() => useRuns.getState().putRun(startedRun({ global: true, status: "offered" })));
+    expect(screen.getByRole("status")).toHaveTextContent("Started. The agent is working on it.");
+    expect(screen.queryByText(t("simple.box.waitingOk"))).not.toBeInTheDocument();
+
+    const ask = { runId: "g1", where: "app", reasons: null, expiresAt: "2026-11-17T08:10:00Z" };
+    act(() => useRuns.getState().putRun(startedRun({ global: true, status: "offered", ask })));
+    expect(screen.getByRole("status")).toHaveTextContent(t("simple.box.waitingOk"));
+    expect(screen.getByRole("button", { name: "Watch it work" })).toBeInTheDocument();
+  });
+
   it.each([
     [{ status: "succeeded" as const }, "Done, but the agent did not change any files."],
     [{ status: "failed" as const, error: "exit status 1" }, "The agent could not finish this. Nothing in your folder was changed."],
     [{ status: "cancelled" as const }, "Stopped. Nothing in your folder was changed."],
     [{ status: "declined" as const }, "It did not start. Nothing in your folder was changed."],
+    // Claude Code installed but signed out: how to sign in, not its English.
+    [
+      {
+        status: "failed" as const,
+        error: "Not logged in · Please run /login",
+        failureKind: "agent_unavailable",
+        failureCode: "signed_out",
+      },
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in. Nodevas notices within a minute; then try again.",
+    ],
   ])("says how the run ended in plain words (%o)", async (end, text) => {
     renderBox();
     fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });
@@ -149,6 +178,38 @@ describe("SimpleAgentBox", () => {
     const line = screen.getByRole("status");
     expect(line).toHaveTextContent(text);
     expect(line.textContent).not.toMatch(/working on it|exit status|runner/i);
+  });
+
+  // After a signed-out run the runner looks again and reports Claude signed
+  // out (not installed). With it the only agent, the box says how to sign
+  // in, as the run's line did, not that no agent is here; once a hello says
+  // it is signed in, the box is back.
+  it("keeps saying how to sign in once the runner reports the agent signed out", async () => {
+    const base = localRunner();
+    const claude = base.info!.agents![0];
+    hold([{ ...base, info: { ...base.info!, agents: [claude] } }]);
+    renderBox();
+    fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Started. The agent is working on it.");
+    act(() =>
+      useRuns.getState().putRun(
+        startedRun({ global: true, status: "failed", error: "Not logged in · Please run /login", failureCode: "signed_out" }),
+      ),
+    );
+
+    const signedOut = { ...claude, installed: false, signedOut: true, error: "claude: not signed in on this computer" };
+    act(() => hold([{ ...base, info: { ...base.info!, agents: [signedOut] } }]));
+    const sentence =
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in. Nodevas notices within a minute; then try again.";
+    expect(screen.getByText(sentence)).toBeInTheDocument();
+    expect(screen.queryByText("No agent is ready on this computer yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not logged in/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "What do you want done?" })).not.toBeInTheDocument();
+
+    act(() => hold([{ ...base, info: { ...base.info!, agents: [claude] } }]));
+    expect(screen.getByRole("textbox", { name: "What do you want done?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
   it("lets the person pick the agent right in the box", async () => {

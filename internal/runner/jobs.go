@@ -353,6 +353,9 @@ func (j *jobs) checkLocked(job *runnerwire.Job, cfg *Config) (runnerwire.Repo, s
 			agent = &j.agents[i]
 		}
 	}
+	if agent != nil && agent.SignedOut {
+		return repo, runnerwire.DeclineAgentSignedOut, fmt.Sprintf("agent %q is not signed in on this runner", job.Agent)
+	}
 	if agent == nil || !agent.Installed {
 		return repo, runnerwire.DeclineAgentMissing, fmt.Sprintf("agent %q is not installed on this runner", job.Agent)
 	}
@@ -858,6 +861,12 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		// What the CLI said, then its stderr: a login problem often shows only
 		// on stderr while the stream says something generic.
 		result.FailureKind = ad.Classify(outcome.Error + "\n" + errText)
+		// A CLI that is there but signed out: the app says how to sign in,
+		// and a look now has it stop offering the agent.
+		if result.FailureKind == runnerwire.FailureAgentAbsent && adapter.SignedOut(job.Agent, outcome.Error+"\n"+errText) {
+			result.FailureCode = runnerwire.FailureSignedOut
+			j.c.lookSoon()
+		}
 		// When a limit lifts, in this machine's zone: "resets 3pm" is the
 		// owner's 3pm, which only the runner knows.
 		if runnerwire.HandoffWorthy(result.FailureKind) {
@@ -1119,6 +1128,9 @@ func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwi
 		result.FailureKind = ""
 	case result.FailureKind == "":
 		result.FailureKind = runnerwire.FailureTask
+	}
+	if result.FailureKind != runnerwire.FailureAgentAbsent {
+		result.FailureCode = ""
 	}
 	j.mu.Lock()
 	r.changes, r.pr = changes, pr

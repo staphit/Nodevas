@@ -14,6 +14,7 @@ import { IconMore } from "../icons";
 import { formatList, useI18n } from "../i18n";
 import { RunStatusBadge } from "../runs/NodeRuns";
 import { useRuns } from "../runs/runStore";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useApp } from "../store";
 import { canSteer, type ControlRow } from "./control";
 import { waitingOnPrerequisites } from "./prerequisites";
@@ -154,6 +155,7 @@ function WaitingTasks({ titleOf }: { titleOf: TitleOf }) {
 /** Ended in the last hour: folded away, as tiles with the same menu. */
 function EndedRuns({ ended, now, titleOf }: { ended: ControlRow[]; now: number; titleOf: TitleOf }) {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const [open, setOpen] = useState(false);
   if (ended.length === 0) return null;
   const label = t("station.control.ended", { count: ended.length });
@@ -171,7 +173,7 @@ function EndedRuns({ ended, now, titleOf }: { ended: ControlRow[]; now: number; 
                 dot={row.run.status}
                 title={title}
                 nodeId={row.run.nodeId}
-                meta={runMeta(t, row.run, now, goal)}
+                meta={runMeta(t, row.run, now, goal, simple)}
                 badge={<RunStatusBadge status={row.run.status} />}
                 action={
                   <RunMenu

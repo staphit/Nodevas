@@ -28,6 +28,7 @@ import { useBuilding } from "./buildingStore";
 import { GlobalAgentsPanel } from "./GlobalAgentsPanel";
 import { useGlobalAgents } from "./globalAgentsStore";
 import { forgetKeptResults } from "./keptResults";
+import { openGlobalAgents } from "./openGlobalAgents";
 import { SimpleAgentBox } from "./SimpleAgentBox";
 import { StationControlReport, StationPauseButton } from "./StationControl";
 import { StationSide } from "./StationSide";
@@ -220,13 +221,24 @@ function ActivityLegend() {
 function ActivityLanes() {
   const { t } = useI18n();
   const runs = useStation((s) => s.runs);
+  // The viewer's global agents work outside any project, but they are
+  // agents at work in the last hour all the same.
+  const globalRuns = useGlobalAgents((s) => s.runs);
   const asks = useAgents((s) => s.asks);
   const messages = useAgents((s) => s.messages);
   const graph = useApp((s) => s.graph);
   const lanes: ActivityLane[] = useMemo(() => {
     const titles = new Map((graph?.nodes ?? []).map((node) => [node.id, node.title]));
-    return buildActivity({ runs, asks, messages, now: Date.now(), titleOf: (id) => titles.get(id) ?? "", t });
-  }, [runs, asks, messages, graph, t]);
+    return buildActivity({
+      runs,
+      globalRuns,
+      asks,
+      messages,
+      now: Date.now(),
+      titleOf: (id) => titles.get(id) ?? "",
+      t,
+    });
+  }, [runs, globalRuns, asks, messages, graph, t]);
 
   if (lanes.length === 0) return <p className="station-empty">{t("station.activity.empty")}</p>;
   return (
@@ -242,7 +254,7 @@ function ActivityLanes() {
                 className={`station-bar is-${bar.kind} status-${bar.status}${bar.open ? " is-open" : ""}`}
                 style={{ left: `${bar.start * 100}%`, width: `${Math.max(bar.end - bar.start, 0.012) * 100}%` }}
                 title={`${bar.label} · ${t(`runs.status.${bar.status}`)}`}
-                onClick={() => openNodeRuns(bar.nodeId, bar.runId)}
+                onClick={() => (bar.global ? openGlobalAgents(bar.runId) : openNodeRuns(bar.nodeId, bar.runId))}
               >
                 <span>{bar.label}</span>
               </button>

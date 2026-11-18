@@ -43,9 +43,9 @@ const MAX_CHOICES = 4;
 const NO_ITEMS: StationMenuItem[] = [];
 
 /** One sentence that names a person, as a button's accessible name. */
-export function personLabel(t: Translate, person: StoryPerson): string {
+export function personLabel(t: Translate, person: StoryPerson, simple = false): string {
   return person.kind === "actor"
-    ? actorLabel(t, person.actor, placeOf(t, person.actor))
+    ? actorLabel(t, person.actor, placeOf(t, person.actor, simple), simple)
     : visitorLabel(t, person.visitor);
 }
 
@@ -305,7 +305,7 @@ export function StoryTalk({
             key={member.id}
             type="button"
             className={`px-story-member${alert ? ` is-${alert}` : ""}`}
-            aria-label={personLabel(t, member)}
+            aria-label={personLabel(t, member, simple)}
             aria-pressed={member.id === person.id}
             onClick={() => onPick(member.id)}
           >

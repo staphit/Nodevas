@@ -70,8 +70,10 @@ func TestRunToolsetListsOnlyWhatRunsUse(t *testing.T) {
 	url, _ := liveServer(t)
 	run := toolsetSession(t, url, ToolsetRun)
 	names, defs := listedTools(t, run)
+	// list_team and save_attachment: a run that is told it has mail must be
+	// able to find who sent it and open what was attached.
 	want := []string{"approve_tool", "ask_user", "check_inbox", "claim_task", "create_node", "create_subgraph", "get_node",
-		"link_nodes", "release_task", "send_message", "set_node_status", "submit_verdict"}
+		"link_nodes", "list_team", "release_task", "save_attachment", "send_message", "set_node_status", "submit_verdict"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("run toolset lists %q, want %q", names, want)
 	}

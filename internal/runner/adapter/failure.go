@@ -120,3 +120,24 @@ func (OpenCode) Classify(text string) string { return classify(openCodeFailures,
 
 // Classify sorts a failed Antigravity CLI run.
 func (Antigravity) Classify(text string) string { return classify(antigravityFailures, text) }
+
+// signedOutText is, per agent kind, what its CLI says when it is installed
+// but not signed in: the part of its FailureAgentAbsent rule that a sign-in
+// fixes, as opposed to a CLI that is not there. Claude Code's is recorded
+// (testdata/claude_signed_out.jsonl); the others are the sign-in phrases of
+// their tables above. OpenCode has none: its auth errors are about a
+// provider's key, which no sign-in to OpenCode itself fixes.
+var signedOutText = map[string]*regexp.Regexp{
+	"claude": regexp.MustCompile(`(?i)not logged in|please run /login|oauth token has expired`),
+	"codex": regexp.MustCompile(`(?i)not logged in|not signed in|codex login|` +
+		`refresh token.{0,80}(expired|revoked)|sign in again`),
+	"gemini":      regexp.MustCompile(`(?i)please set an auth method|login required|failed to login`),
+	"antigravity": regexp.MustCompile(`(?i)not authenticated|unauthenticated|log ?in required`),
+}
+
+// SignedOut reports whether a failed run's error text says kind's CLI is
+// installed but not signed in on this machine (runnerwire.FailureSignedOut).
+func SignedOut(kind, text string) bool {
+	re, ok := signedOutText[kind]
+	return ok && text != "" && re.MatchString(text)
+}

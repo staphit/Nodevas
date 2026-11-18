@@ -171,6 +171,41 @@ describe("AgentScanStep", () => {
     expect(within(row(name)).queryByRole("button", { name: "I already have it" })).not.toBeInTheDocument();
   });
 
+  // Claude Code installed but signed out: not ready, and how to sign in, in
+  // plain words; nothing to get, and not the runner's English.
+  it("says an agent that is here but signed out needs signing in", () => {
+    const base = localRunner();
+    hold([
+      {
+        ...base,
+        info: {
+          ...base.info!,
+          agents: [
+            {
+              kind: "claude",
+              installed: false,
+              signedOut: true,
+              version: "2.1.327 (Claude Code)",
+              models: [],
+              error: "claude: not signed in on this computer; run `claude` in a terminal here and log in",
+            },
+          ],
+        },
+      },
+    ]);
+    const onReadyChange = vi.fn();
+    const { container } = renderStep({ variant: "step", onReadyChange });
+    expect(row("Claude")).toHaveTextContent("Found, but not signed in yet");
+    expect(row("Claude")).toHaveTextContent(
+      "Open the Terminal app on this computer, type claude, press Enter and sign in. Then press Check again.",
+    );
+    expect(visibleText(container)).not.toMatch(/log in|`|runner/i);
+    expect(within(row("Claude")).queryByRole("button", { name: "How to get Claude" })).not.toBeInTheDocument();
+    expect(within(row("Claude")).queryByRole("button", { name: "I already have it" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No agent is ready yet.");
+    expect(onReadyChange).toHaveBeenLastCalledWith(false, []);
+  });
+
   it("never says runner", () => {
     const { container } = renderStep();
     fireEvent.click(within(row("Gemini")).getByRole("button", { name: "How to get Gemini" }));

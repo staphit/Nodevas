@@ -119,8 +119,9 @@ function roleSentence(t: Translate, role: string): string {
   return t("game.label.role", { role: BUILTIN_ROLES.has(role) ? t(`roles.name.${role}`) : role });
 }
 
-/** One sentence for a character: who, where, doing what, on which node. */
-export function actorLabel(t: Translate, actor: Actor, room: string): string {
+/** One sentence for a character: who, where, doing what, on which node.
+ * Simple (single-user edition) leaves out its tokens: a developer's count. */
+export function actorLabel(t: Translate, actor: Actor, room: string, simple = false): string {
   const who = agentWho(actor.agent, actor.model);
   const parts = [
     actor.nodeTitle
@@ -150,7 +151,7 @@ export function actorLabel(t: Translate, actor: Actor, room: string): string {
       }),
     );
   }
-  if (actor.energy) parts.push(energyLabel(t, actor.energy.used, actor.energy.cap));
+  if (actor.energy && !simple) parts.push(energyLabel(t, actor.energy.used, actor.energy.cap));
   return parts.join(" ");
 }
 

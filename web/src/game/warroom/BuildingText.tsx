@@ -20,7 +20,7 @@ export function BuildingText({ building }: { building: Building }) {
   const global = building.global;
   if (!office && !global) return null;
   const actors = (ids: string[]) => ids.map((id) => actorsById.get(id)).filter((actor): actor is Actor => Boolean(actor));
-  const say = (actor: Actor) => <li key={actor.id}>{actorLabel(t, actor, placeOf(t, actor, simple))}</li>;
+  const say = (actor: Actor) => <li key={actor.id}>{actorLabel(t, actor, placeOf(t, actor, simple), simple)}</li>;
   // The runners' free slots, as the office's header says: the drawing pads
   // the floor to two desks, which are not free slots.
   const free = office?.freeDesks ?? 0;

@@ -317,6 +317,38 @@ describe("ThisComputerPanel", () => {
     expect(visibleText(container)).not.toMatch(/\brepos?\b|test command/i);
   });
 
+  // Simple: the help under "ask me before commands" names no protocol, and
+  // the folded command lines say first, in plain words, who they are for.
+  it.each(["en", "zh-TW"] as const)("explains asking before commands without ACP in Simple (%s)", (language) => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language, experience: "simple" } });
+    const { container } = renderPanel();
+    const relay = screen.getByRole("checkbox", { name: translate("local.permissionRelay", language) });
+    const help = relay.closest("section")?.querySelector(".run-hint")?.textContent ?? "";
+    expect(help).toMatch(/OpenCode/);
+    expect(help).not.toMatch(/\bACP\b/);
+    expect(container.textContent).not.toMatch(/\bACP\b/);
+  });
+
+  it.each(["en", "zh-TW"] as const)("says who the command lines are for in Simple (%s)", (language) => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language, experience: "simple" } });
+    const { container } = renderPanel();
+    const advanced = container.querySelector("details.this-computer-advanced") as HTMLElement;
+    const summary = advanced.querySelector("summary")?.textContent ?? "";
+    expect(summary).toBe(translate("simple.local.advanced", language));
+    expect(summary).toMatch(language === "en" ? /type commands/ : /指令/);
+    // The lines stay, behind the fold, after a plain note that nothing there is needed.
+    expect(advanced).toHaveTextContent(translate("simple.local.cliHint", language));
+    expect(advanced).toHaveTextContent("nodevas runner set codexSandbox workspace-write");
+    expect(advanced).not.toHaveAttribute("open");
+  });
+
+  it("keeps ACP and Advanced in full mode", () => {
+    const { container } = renderPanel();
+    expect(container.textContent).toMatch(/OpenCode in ACP mode/);
+    expect(screen.getByText("Advanced", { selector: "summary" })).toBeInTheDocument();
+    expect(container.textContent).toContain("The same settings from a command line:");
+  });
+
   it("says no folder yet in Simple", () => {
     useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
     const base = localRunner();
