@@ -147,7 +147,7 @@ func (r Record) Job() runnerwire.Job {
 		HandoffBranch: r.JobHandoffBranch, HandoffNote: r.JobHandoffNote,
 		Role: r.Role, Tools: r.Tools, TestFiles: r.TestFiles, Acceptance: r.Acceptance, Verify: r.VerifySpec,
 		Global: r.Global, Slug: r.BranchSlug, NoPR: r.NoPR,
-		Origin: r.Origin,
+		Origin: r.Origin, Draft: r.Draft,
 	}
 }
 
@@ -266,6 +266,9 @@ type New struct {
 	// a run it starts, OriginPipeline or OriginHandoff for a follow-up. ""
 	// is unknown, which a runner treats as automatic.
 	Origin string
+	// Draft (P6): a plain plan run whose create_subgraph is held as a draft
+	// for the person (run_plan_drafts) instead of written.
+	Draft bool
 }
 
 // validOrigins are the origins a run may be recorded with.
@@ -321,6 +324,9 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if !validOrigins[in.Origin] {
 		return Record{}, locale.Errorf("%w: origin %q", "%w：來源「%s」", ErrInvalid, in.Origin)
 	}
+	if in.Draft && (in.Kind != runnerwire.JobPlan || in.Review != "" || in.Global) {
+		return Record{}, locale.Errorf("%w: only a plain plan run may be a draft", "%w：只有一般計畫執行可以是草稿", ErrInvalid)
+	}
 	fallbacks, err := encodeChain(in.Fallbacks)
 	if err != nil {
 		return Record{}, err
@@ -363,8 +369,8 @@ INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
                   stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
                   role, override, job_roles, node_type, acceptance_count,
-                  is_global, branch_slug, no_pr, origin)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  is_global, branch_slug, no_pr, origin, draft)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
@@ -373,7 +379,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
 		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
 		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)),
-		in.Global, in.BranchSlug, in.NoPR, in.Origin)
+		in.Global, in.BranchSlug, in.NoPR, in.Origin, in.Draft)
 	if err != nil {
 		return Record{}, err
 	}
@@ -389,7 +395,7 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
        retry_at, limit_waits, role, verify, checks, override, job_roles,
        cost_usd, cost_estimated, node_type, acceptance_count, workspace, workspace_commit,
-       is_global, branch_slug, no_pr, origin, decline_code`
+       is_global, branch_slug, no_pr, origin, decline_code, draft`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -405,7 +411,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
 		&r.Role, &verify, &checks, &r.Override, &jobRoles,
 		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount, &r.Workspace, &r.WorkspaceCommit,
-		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode); err != nil {
+		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode, &r.Draft); err != nil {
 		return Record{}, err
 	}
 	r.AcceptanceCount = int(acceptanceCount)

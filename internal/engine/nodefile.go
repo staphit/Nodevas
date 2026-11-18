@@ -83,6 +83,14 @@ func ComposeNodeFile(nf *NodeFile) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// OpensFrontMatter reports whether text, leading whitespace trimmed, starts
+// with a front-matter delimiter line ("---" then a newline, or "---" alone).
+func OpensFrontMatter(text string) bool {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	return strings.TrimRight(trimmed, " \t\r\n") == fmDelim ||
+		strings.HasPrefix(trimmed, fmDelim+"\n") || strings.HasPrefix(trimmed, fmDelim+"\r\n")
+}
+
 // SyncFrontmatter refreshes the snapshot fields in a node file's Meta from
 // the authoritative graph definition.
 func SyncFrontmatter(nf *NodeFile, n *Node) {

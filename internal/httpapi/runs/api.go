@@ -219,6 +219,9 @@ func (a *API) create(c *gin.Context) {
 		LoadNode: func() (runs.NodeInfo, bool, error) {
 			return LoadNodeInfo(st, body.NodeID)
 		},
+		// P6: only the copilot's own start_breakdown, replayed in-process,
+		// may ask for a draft plan run; Start refuses draft otherwise.
+		FromCopilot: auth.CopilotServerTool(c.Request.Context()),
 	})
 	if err != nil {
 		startFailed(c, err)

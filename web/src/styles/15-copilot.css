@@ -635,19 +635,105 @@
 
 /* ---- composer --------------------------------------------------------------- */
 
+/* The switch row and the box: typing first (Make nodes or Ask), then send. */
+.copilot-composer-wrap {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.copilot-composer-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 12px 0;
+}
+.copilot-intent {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.copilot-intent-option {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.copilot-intent-option.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+.copilot-intent-option:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 1px;
+}
+.copilot-selection-chip,
+.copilot-voice-review {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+}
+.copilot-selection-chip {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.copilot-voice-review {
+  background: var(--st-progress-bg, var(--surface-2));
+  color: var(--st-progress-fg, var(--text));
+}
+.copilot-autosend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.copilot-input.is-from-voice {
+  border-color: var(--st-progress-fg);
+}
+.copilot-examples {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+}
+.copilot-example {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12.5px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.copilot-example:hover {
+  background: var(--surface-2);
+}
 .copilot-composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 12px max(10px, env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  padding: 8px 12px max(10px, env(safe-area-inset-bottom, 0px));
 }
 .copilot-input {
   flex: 1;
   min-width: 0;
   min-height: 40px;
-  max-height: 160px;
+  /* Grows with its text (Composer) to eight lines, then scrolls. In em, so the
+     limit follows the font size the phone rule below raises to 16px; 18px is
+     the padding and the border, top and bottom. */
+  max-height: calc(1em * 1.45 * 8 + 18px);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -843,4 +929,598 @@
 }
 .copilot-runner-steps code {
   font-family: var(--mono);
+}
+
+/* ---- drafts: what a "Make nodes" turn proposes ---------------------------- */
+
+.copilot-draft-status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.copilot-draft-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: copilot-draft-spin 0.9s linear infinite;
+}
+@keyframes copilot-draft-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .copilot-draft-spinner {
+    animation: none;
+  }
+}
+
+.draft-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.draft-card.is-folded {
+  gap: 4px;
+  background: var(--surface-2);
+}
+.draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+.draft-heading {
+  font-weight: 600;
+}
+.draft-model,
+.draft-state {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-state {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.draft-state.is-committed {
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.draft-summary {
+  margin: 0;
+  color: var(--text-2);
+}
+.draft-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-note.is-warn {
+  color: var(--st-failed-fg);
+}
+.draft-questions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.draft-questions-label {
+  width: 100%;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-question {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.draft-question:hover {
+  background: var(--hover);
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-node {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.draft-node.is-added {
+  border-color: var(--st-done-fg);
+}
+.draft-node.is-changed {
+  border-color: var(--st-progress-fg);
+}
+.draft-node.has-error {
+  border-color: var(--st-failed-fg);
+}
+.draft-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.draft-node-select {
+  margin: 0;
+}
+.draft-node-index {
+  min-width: 1.4em;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  text-align: right;
+}
+.draft-kind {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+/* The kind picker sits invisibly over its glyph: the glyph is the button. */
+.draft-kind-select {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  opacity: 0;
+  cursor: pointer;
+}
+.draft-kind-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--draft-kind-color, var(--text-2));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--draft-kind-color, var(--text-2)) 18%, transparent);
+}
+.draft-kind-glyph[data-shape="round"],
+.draft-kind-glyph[data-shape="ellipse"] {
+  border-radius: 50%;
+}
+.draft-kind-glyph[data-shape="pill"] {
+  width: 20px;
+  border-radius: 999px;
+}
+.draft-kind-glyph[data-shape="diamond"] {
+  transform: rotate(45deg) scale(0.82);
+  border-radius: 2px;
+}
+.draft-kind-glyph[data-shape="hexagon"] {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border-radius: 0;
+  background: var(--draft-kind-color, var(--text-2));
+}
+.draft-kind-glyph[data-shape="dashed"] {
+  border-style: dashed;
+}
+.draft-kind-glyph[data-shape="thick"] {
+  border-width: 3px;
+}
+.draft-kind-glyph.is-large {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+.draft-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.draft-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.draft-diff {
+  flex: none;
+  min-width: 1.2em;
+  font-weight: 700;
+  text-align: center;
+}
+.draft-diff-added {
+  color: var(--st-done-fg);
+}
+.draft-diff-changed {
+  color: var(--st-progress-fg);
+}
+.draft-diff-removed {
+  color: var(--st-failed-fg);
+}
+.draft-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.draft-node-warn {
+  display: inline-flex;
+  color: var(--st-failed-fg);
+}
+.draft-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.draft-icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.draft-after {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0 calc(1.4em + 26px);
+}
+.draft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-chip.is-existing {
+  border: 1px dashed var(--border-strong);
+}
+/* A coding agent's plan: who planned it, and what each step carries. */
+.draft-origin {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0 calc(1.4em + 26px);
+}
+.draft-extras .draft-chip {
+  padding-right: 8px;
+  cursor: default;
+}
+.draft-chip.is-unused {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.draft-chip-x {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.draft-chip-x:hover {
+  background: var(--hover);
+}
+.draft-after-picker {
+  max-width: 11em;
+  padding: 1px 4px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.draft-issues {
+  margin: 4px 0 0 calc(1.4em + 26px);
+  padding: 0;
+  list-style: none;
+}
+.draft-issue {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-issue.is-error {
+  color: var(--st-failed-fg);
+}
+.draft-link-btn,
+.draft-text-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.draft-text-btn {
+  align-self: flex-start;
+  margin-left: 0;
+}
+.draft-removed,
+.draft-checking {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.draft-glyph-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.draft-glyph-count {
+  color: var(--text-2);
+}
+.draft-merge-bar,
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.draft-primary,
+.draft-secondary,
+.draft-deeper {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.draft-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.draft-secondary,
+.draft-deeper {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+.draft-primary:disabled,
+.draft-secondary:disabled,
+.draft-deeper:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.draft-deeper {
+  align-self: flex-start;
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+}
+.draft-deeper.is-suggested {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.draft-deeper-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+
+/* After a Create: above the copilot's button (its 48px and 18px inset, and
+   room between), never over it; with the panel open, left of the panel. */
+.copilot-toast {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right, 0px));
+  bottom: calc(max(18px, env(safe-area-inset-bottom, 0px)) + 48px + 12px);
+  z-index: calc(var(--copilot-z) + 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 36px));
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.app:has(> .copilot-panel) .copilot-toast {
+  right: calc(var(--copilot-width) + 18px);
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 640px) {
+  .app:has(> .copilot-panel) .copilot-toast {
+    right: max(18px, env(safe-area-inset-right, 0px));
+    bottom: calc(max(18px, env(safe-area-inset-bottom, 0px)) + 120px);
+  }
+}
+.copilot-toast.is-error {
+  border-color: var(--st-failed-fg);
+}
+.copilot-toast-sep {
+  color: var(--text-2);
+}
+.copilot-toast-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copilot-toast-close {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.copilot-toast-close:hover {
+  background: var(--hover);
+}
+
+/* What an undo kept (KeptList): one line per node, title, why, and
+   "Delete anyway". In the toast it goes under the text, full width, with
+   the close button still on the first line. */
+.copilot-toast:has(> .draft-kept-list) {
+  flex-wrap: wrap;
+}
+.copilot-toast > .copilot-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.copilot-toast > .draft-kept-list {
+  order: 1;
+  flex-basis: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.draft-kept-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.draft-kept-title {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.draft-kept-reason {
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-kept-delete {
+  align-self: baseline;
+  margin-left: auto;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.draft-kept-delete:disabled {
+  color: var(--text-2);
+  cursor: default;
+}
+.draft-kept-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ---- A theme character presents the draft (DraftPresenter) ----------------
+   A small visual-novel dialogue box: her picture, a name plate, her line.
+   warroom.css is not loaded in the copilot panel, so the box is drawn here,
+   in the skin's colours (a skin sets --accent, --surface-2 and the rest on
+   the root). */
+.draft-presenter {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 6px;
+}
+.draft-presenter-face {
+  flex: none;
+  height: 88px;
+  max-width: 35%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+.draft-presenter-face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  object-position: left top;
+}
+.draft-presenter-talk {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 16px 12px 10px;
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border-strong));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  color: var(--text);
+}
+.draft-presenter-plate {
+  position: absolute;
+  top: -11px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  margin: 0;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.draft-presenter-plate small {
+  font-weight: 400;
+  opacity: 0.85;
+}
+.draft-presenter-sign {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.draft-presenter-line {
+  margin: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }

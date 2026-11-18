@@ -56,11 +56,12 @@ func TestReviseGoalPausesRecordsAndDispatches(t *testing.T) {
 	api := revisingAPI()
 	env := toolEnv(api)
 	var recorded *Revision
-	env.followup = func(goal, runID string, revision *Revision) {
+	env.followup = func(goal, runID string, revision *Revision) error {
 		if goal != "node-0042" || runID != "run-7" {
 			t.Errorf("follow-up for %s/%s", goal, runID)
 		}
 		recorded = revision
+		return nil
 	}
 	result := runReviseGoal(context.Background(), env,
 		json.RawMessage(`{"goalNodeId":"node-0042","change":"Drop the PDF export; add a sign-in with SSO button."}`))
@@ -115,7 +116,7 @@ func TestReviseGoalPausesRecordsAndDispatches(t *testing.T) {
 	api = revisingAPI()
 	api.latest = `{"run":{"id":"ap-0","status":"succeeded","createdBy":"u-alice"},"tasks":[]}`
 	env = toolEnv(api)
-	env.followup = func(_, _ string, revision *Revision) { recorded = revision }
+	env.followup = func(_, _ string, revision *Revision) error { recorded = revision; return nil }
 	if result := runReviseGoal(context.Background(), env, json.RawMessage(`{"goalNodeId":"node-0042","change":"x"}`)); result.IsError {
 		t.Fatal(result.Output)
 	}
@@ -156,7 +157,7 @@ func TestReviseGoalRefusals(t *testing.T) {
 				tc.api(api)
 			}
 			env := toolEnv(api)
-			env.followup = func(string, string, *Revision) { t.Error("a follow-up was recorded") }
+			env.followup = func(string, string, *Revision) error { t.Error("a follow-up was recorded"); return nil }
 			result := runReviseGoal(context.Background(), env, json.RawMessage(tc.input))
 			if !result.IsError || !strings.Contains(result.Output, tc.want) {
 				t.Fatalf("result = %+v, want an error with %q", result, tc.want)

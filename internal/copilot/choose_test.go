@@ -58,7 +58,15 @@ func TestFreeModelOrder(t *testing.T) {
 		browser string
 		want    func(Status) bool
 	}{
-		{"browser first", &fakeRemote{runner: autoRunnerFor(alice.ID)}, true, BrowserAvailable, func(s Status) bool {
+		// The browser's model is the smallest and declared for English: it
+		// answers only when no runner or local model can.
+		{"runner's local model before the browser", &fakeRemote{runner: autoRunnerFor(alice.ID)}, true, BrowserAvailable, func(s Status) bool {
+			return s.Enabled && s.ModelHost == ModelHostRunner && s.Model == "llama3.1:8b" && s.Automatic
+		}},
+		{"server's local model before the browser", &fakeRemote{}, true, BrowserAvailable, func(s Status) bool {
+			return s.Enabled && s.ModelHost == ModelHostServer && s.Model == "qwen3:8b"
+		}},
+		{"browser when nothing else", &fakeRemote{}, false, BrowserAvailable, func(s Status) bool {
 			return s.Enabled && s.ModelHost == ModelHostBrowser && s.Provider == ProviderBrowser &&
 				s.Model == BrowserModelName && s.Automatic && !s.AllowBypass
 		}},

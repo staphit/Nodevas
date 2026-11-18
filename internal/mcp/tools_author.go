@@ -335,12 +335,12 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 		if err != nil {
 			return nil, createSubgraphOutput{}, guide(err)
 		}
-		return nil, createSubgraphOutput{
-			IDs:     result.IDs,
-			Created: result.Created,
-			Note: fmt.Sprintf("Created %d nodes, %d dependencies and %d references.",
-				len(result.Created), result.Dependencies, result.References),
-		}, nil
+		note := fmt.Sprintf("Created %d nodes, %d dependencies and %d references.",
+			len(result.Created), result.Dependencies, result.References)
+		if result.Draft {
+			note = result.Note
+		}
+		return nil, createSubgraphOutput{IDs: result.IDs, Created: result.Created, Note: note}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

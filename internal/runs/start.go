@@ -45,6 +45,11 @@ type StartRequest struct {
 	// is dispatched (store.LockAcceptance). Roles nil is the built-ins.
 	Roles          []engine.AgentRole
 	LockAcceptance func() error
+	// FromCopilot is set only by the runs HTTP API when
+	// auth.CopilotServerTool marks the request: a copilot server tool
+	// replayed it in-process, after the person confirmed. Only such a request
+	// may ask for a draft plan run (P6).
+	FromCopilot bool
 }
 
 // NodeInfo is what a run needs to know about its node. Type is the node
@@ -197,6 +202,15 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if len(body.Revision) > runnerwire.MaxRevisionBytes || !utf8.ValidString(body.Revision) {
 		return Record{}, refuse(StartInvalid, "revision must be valid text of at most 16384 bytes", "revision 須為最多 16384 位元組的有效文字")
 	}
+	// P6: a draft plan run's create_subgraph is held for the person, and only
+	// the copilot's start_breakdown delivers it back to them; any other shape
+	// would leave a plan nobody can reach. (Kind plan already excludes
+	// pipelines and interactive mode above.)
+	if body.Draft && (body.Kind != runnerwire.JobPlan || body.Revision != "" || req.Origin != runnerwire.OriginPerson ||
+		!req.FromCopilot) {
+		return Record{}, refuse(StartInvalid, "draft is only for a plain plan run the copilot starts",
+			"草稿只用於 Copilot 啟動的一般計畫執行")
+	}
 	if err := ValidateChain(body.Fallbacks, false); err != nil {
 		return Record{}, refused(StartInvalid, err)
 	}
@@ -292,6 +306,9 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	slot := ""
 	if role != nil {
 		slot = role.Slot()
+	}
+	if body.Draft && role != nil && slot != engine.RolePlanner {
+		return Record{}, refuse(StartInvalid, "a draft plan run acts as the planner", "草稿計畫執行須以 planner 身分執行")
 	}
 	worker := slot == engine.RoleExecutor || slot == engine.RoleTester
 	if body.Override == "" && engine.RequiresAcceptance(wf) && node.Acceptance.Empty() && (staged || worker) {
@@ -411,7 +428,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
 		Role: first.role, Override: body.Override, JobRoles: jobRoles,
 		NodeType: node.Type, AcceptanceCount: len(acceptance),
-		Origin: req.Origin,
+		Origin: req.Origin, Draft: body.Draft,
 	})
 	if err != nil {
 		if pipelineID != "" {

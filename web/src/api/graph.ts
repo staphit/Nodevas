@@ -1,5 +1,5 @@
 import type { Acceptance, AgentRoleDef, DSLCheckResult, Graph, Issue, Status, Workflow } from "../types";
-import { req } from "./http";
+import { ConflictError, req } from "./http";
 import { verifyGraphResponse } from "./verify";
 
 export interface GraphResponse {
@@ -66,6 +66,86 @@ export interface GraphOpsResponse {
   issues: Issue[] | null;
 }
 
+/** One node of POST /api/graph/subgraph (store.SubgraphNode). */
+export interface SubgraphNodeSpec {
+  key: string;
+  title: string;
+  kind?: string;
+  body?: string;
+  /** Keys of this call, or existing node ids, that finish first. */
+  dependsOn?: string[];
+  /** Keys or node ids of Notes it uses as context. */
+  refs?: string[];
+  tags?: string[];
+  /** Acceptance criteria; only for a type that hands work to an agent. */
+  acceptance?: string[];
+  priority?: string;
+}
+
+/** POST /api/graph/subgraph and its dry run /subgraph/check. */
+export interface SubgraphSpec {
+  nodes: SubgraphNodeSpec[];
+  /** An existing node (to) waiting for one of this call's (from). */
+  edges?: { from: string; to: string }[];
+  /** Grid cells by key (graph.ui.positions units): col 0..499, row 0..200. */
+  positions?: Record<string, { col: number; row: number }>;
+  /**
+   * Records the call for /api/graph/batches/:id/undo. `via` names what made
+   * it, and one live batch holds a via: a second commit with it is refused
+   * (409 BATCH_VIA_TAKEN) until that batch is undone. `label` (≤ 80 bytes)
+   * goes into the history note; a Copilot draft sends the model that drafted
+   * it.
+   */
+  batch?: { via: string; label?: string };
+}
+
+/**
+ * The live batch a refused commit names: 409 BATCH_VIA_TAKEN means a batch
+ * with the same via is recorded and not undone (the draft was created
+ * already, in another tab say), and nothing was created. Null for any other
+ * failure.
+ */
+export function batchViaTaken(error: unknown): string | null {
+  if (!(error instanceof ConflictError) || error.code !== "BATCH_VIA_TAKEN") return null;
+  const batchId = error.details.batchId;
+  return typeof batchId === "string" && batchId ? batchId : null;
+}
+
+export interface SubgraphResult {
+  ok: boolean;
+  /** Key → node id (provisional on a dry run). */
+  ids: Record<string, string>;
+  created: { key: string; id: string; title: string; kind: string }[];
+  rev: string;
+  issues: Issue[] | null;
+  dependencies: number;
+  references: number;
+  /** Commit with `batch` only. */
+  batchId?: string;
+  /** False: the nodes exist but no batch record was written (no undo). */
+  undoable?: boolean;
+}
+
+export interface BatchRefusal {
+  id: string;
+  /** changed, status, claimed, busy or denied. */
+  code: string;
+  reason: string;
+}
+
+export interface BatchUndoResult {
+  ok: boolean;
+  trashed: string[] | null;
+  refused: BatchRefusal[] | null;
+}
+
+export interface BatchRedoResult {
+  ok: boolean;
+  restored: string[] | null;
+  skipped: BatchRefusal[] | null;
+  links: number;
+}
+
 export const graphApi = {
   getGraph: () => req<GraphResponse>("/api/graph", undefined, verifyGraphResponse),
   putGraph: (graph: Graph, baseRev: string) =>
@@ -82,6 +162,27 @@ export const graphApi = {
       // to the rest of the room without bouncing them back here.
       headers: peerId ? { "X-Nodevas-Peer": peerId } : undefined,
       body: JSON.stringify({ ops }),
+    }),
+  /** Dry run: the answer a commit would give now; writes nothing. */
+  checkSubgraph: (spec: SubgraphSpec) =>
+    req<SubgraphResult>("/api/graph/subgraph/check", {
+      method: "POST",
+      body: JSON.stringify(spec),
+    }),
+  createSubgraph: (spec: SubgraphSpec) =>
+    req<SubgraphResult>("/api/graph/subgraph", {
+      method: "POST",
+      body: JSON.stringify(spec),
+    }),
+  /** Trashes the batch's nodes nobody changed since; lists the ones it kept. */
+  undoBatch: (batchId: string) =>
+    req<BatchUndoResult>(`/api/graph/batches/${encodeURIComponent(batchId)}/undo`, {
+      method: "POST",
+    }),
+  /** Restores what the undo trashed, and the links into existing nodes. */
+  redoBatch: (batchId: string) =>
+    req<BatchRedoResult>(`/api/graph/batches/${encodeURIComponent(batchId)}/redo`, {
+      method: "POST",
     }),
   checkDSL: (expr: string) =>
     req<DSLCheckResult>("/api/dsl/check", {

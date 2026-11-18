@@ -17,9 +17,11 @@ import {
   type CopilotStatus,
   type CopilotTurnContext,
   type CopilotTurnEvent,
+  type CopilotTurnRequest,
 } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
+import { canvasSelectionIds } from "../state/documentSlice";
 import { useApp } from "../store";
 import {
   browserModelAvailability,
@@ -27,7 +29,8 @@ import {
   runBrowserModel,
 } from "./browserModel";
 import { runClientTool, SUPPORTED_CLIENT_TOOLS } from "./clientTools";
-import { useCopilot } from "./copilotStore";
+import { activeDraftId, currentDraft, isPlanDraft, refinableDraftId, useCopilot } from "./copilotStore";
+import { useDraftUi } from "./draft/draftUi";
 import { cancelSpeech } from "./speech";
 
 let controller: AbortController | null = null;
@@ -39,12 +42,24 @@ let followupAfterTurn: string | null = null;
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : translate("copilot.error.generic");
 
+/** The server reads at most this many selected ids (maxContextNodeIDs). */
+export const MAX_CONTEXT_SELECTION = 50;
+
+/**
+ * The nodes the person means: the graph canvas's selection (LaneView mirrors
+ * it into the store), else the open document's node.
+ */
+export function selectedNodeIds(): string[] {
+  const app = useApp.getState();
+  const canvas = app.paneOpen.graph ? canvasSelectionIds(app) : [];
+  if (canvas.length > 0) return canvas.slice(0, MAX_CONTEXT_SELECTION);
+  return app.activeTab ? [app.activeTab] : [];
+}
+
 export function turnContext(): CopilotTurnContext {
   const app = useApp.getState();
   return {
-    // The canvas selection is LaneView-local state; the open document is the
-    // node the person is looking at, which is what the store knows.
-    selectedNodeIds: app.activeTab ? [app.activeTab] : [],
+    selectedNodeIds: selectedNodeIds(),
     view: app.paneOpen.graph ? "graph" : "timeline",
     language: app.preferences.language,
   };
@@ -346,12 +361,54 @@ function finishConversationIfEnded(): void {
   useCopilot.getState().setConversations([]);
 }
 
-export async function sendTurn(raw: string, source: CopilotSource): Promise<void> {
+/** A chat turn ("Ask"): the copilot's tool loop. */
+export function sendTurn(raw: string, source: CopilotSource): Promise<void> {
+  return runTurn(raw, source, {});
+}
+
+/**
+ * A "Make nodes" turn: the copilot drafts nodes and nothing is written. With
+ * an open draft on screen it refines that one, sending it as the person
+ * edited it. A coding agent's plan is not refined: the person creates or
+ * discards it first (or asks in "Ask"), and their words go back into the box.
+ */
+export function sendDraft(raw: string, source: CopilotSource): Promise<void> {
+  const state = useCopilot.getState();
+  if (isPlanDraft(state, activeDraftId(state))) {
+    state.setNotice(translate("copilot.planOpen"));
+    state.fillComposer(raw, source === "voice");
+    return Promise.resolve();
+  }
+  const active = refinableDraftId(state);
+  if (active) return refineDraft(raw, source, active);
+  return runTurn(raw, source, { intent: "draft" });
+}
+
+/**
+ * What the text box sends: a draft in "Make nodes" (the default), a chat
+ * turn in "Ask". The switch decides, never a model guessing the intent.
+ */
+export function submitText(raw: string, source: CopilotSource): Promise<void> {
+  return useCopilot.getState().intent === "ask" ? sendTurn(raw, source) : sendDraft(raw, source);
+}
+
+/** Refines one draft: the drafter gets it with the person's edits, plus the instruction. */
+export function refineDraft(raw: string, source: CopilotSource, entryId: string): Promise<void> {
+  const previous = currentDraft(useCopilot.getState(), entryId);
+  if (!previous) return runTurn(raw, source, { intent: "draft" });
+  return runTurn(raw, source, { intent: "draft", previous, refineOf: entryId });
+}
+
+async function runTurn(
+  raw: string,
+  source: CopilotSource,
+  draft: Pick<CopilotTurnRequest, "intent" | "previous" | "refineOf">,
+): Promise<void> {
   const text = raw.trim();
   const copilot = useCopilot.getState();
   if (!text || copilot.running) return;
   cancelSpeech();
-  copilot.beginTurn(text, source);
+  copilot.beginTurn(text, source, draft.refineOf);
   const project = useApp.getState().activeProject;
   let id = copilot.activeId;
   let finished = false;
@@ -380,6 +437,9 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
         context: turnContext(),
         clientTools: SUPPORTED_CLIENT_TOOLS,
         ...(onDevice ? { browserModel: onDevice } : {}),
+        ...(draft.intent ? { intent: draft.intent } : {}),
+        ...(draft.previous ? { previous: draft.previous } : {}),
+        ...(draft.refineOf ? { refineOf: draft.refineOf } : {}),
       },
       abort.signal,
     )) {
@@ -454,6 +514,12 @@ export async function decide(
  * `ui_switch_project` call is itself a running turn).
  */
 export function projectChanged(): void {
+  // The draft toast's Undo names a batch of the project just left; the undo
+  // stack it would replay through was cleared with the switch.
+  useDraftUi.getState().showToast(null);
+  // So do the kept nodes the cards list: their ids name nodes of the project
+  // just left, and "Delete anyway" would delete in the new one.
+  useDraftUi.getState().clearKept();
   if (useCopilot.getState().running) {
     endAfterTurn = true;
     return;

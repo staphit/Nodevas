@@ -276,6 +276,10 @@ func runReviseGoal(ctx context.Context, env *serverToolEnv, input json.RawMessag
 	case env.followup == nil:
 		return toolError("Not revised: this server cannot follow up on a replan run")
 	}
+	// Not over a new plan that is still a draft (P6).
+	if refused, ok := planDraftRefusal(ctx, env, goal, "Not revised"); !ok {
+		return refused
+	}
 	target, err := pickTarget(ctx, env, strings.TrimSpace(in.RunnerID), strings.TrimSpace(in.Agent),
 		strings.TrimSpace(in.Model), strings.TrimSpace(in.RepoID))
 	if err != nil {
@@ -340,7 +344,7 @@ func runReviseGoal(ctx context.Context, env *serverToolEnv, input json.RawMessag
 			"revise_goal again with the same change does not record it twice.%s", err, stillPaused)
 	}
 	if run.ID != "" {
-		env.followup(goal, run.ID, revision)
+		_ = env.followup(goal, run.ID, revision) // its replan writes directly: nothing is lost
 	}
 	note := "The replan run reads the goal and the code, adds the tasks the change needs, and says which existing " +
 		"tasks to keep, change or skip; done tasks stay done and tasks in progress are only flagged. It may take a " +

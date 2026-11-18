@@ -9,6 +9,8 @@
  * `{"type":"tool_call","name":…,"input":{…}}` to use one of the offered tools.
  */
 
+import { currentLanguage } from "../i18n";
+
 export type BrowserModelAvailability =
   | "available"
   | "downloadable"
@@ -76,11 +78,57 @@ interface LanguageModelStatic {
   create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>;
 }
 
-/** Gemini Nano is offered for English text in and out; asking for more makes it unavailable. */
-const OPTIONS: LanguageModelOptions = {
-  expectedInputs: [{ type: "text", languages: ["en"] }],
-  expectedOutputs: [{ type: "text", languages: ["en"] }],
-};
+const ENGLISH = ["en"] as const;
+
+function optionsFor(languages: readonly string[]): LanguageModelOptions {
+  return {
+    expectedInputs: [{ type: "text", languages: [...languages] }],
+    expectedOutputs: [{ type: "text", languages: [...languages] }],
+  };
+}
+
+/**
+ * The languages to declare: the interface language (as the Prompt API's
+ * base code) plus English. Declaring only English made the model answer a
+ * Chinese request in English, or worse.
+ */
+function interfaceLanguages(): readonly string[] {
+  return currentLanguage() === "zh-TW" ? ["zh", "en"] : ENGLISH;
+}
+
+/** What the model accepted for the interface language, once asked. */
+let accepted: { key: string; languages: readonly string[] } | null = null;
+
+/**
+ * The interface language plus English when the model takes it, else
+ * English alone: asking for a language the model does not offer makes it
+ * unavailable altogether (Chrome's model has no Chinese today).
+ */
+async function acceptedLanguages(api: LanguageModelStatic): Promise<readonly string[]> {
+  const wanted = interfaceLanguages();
+  if (wanted.length === 1) return wanted;
+  const key = wanted.join(",");
+  if (accepted?.key === key) return accepted.languages;
+  let languages: readonly string[] = ENGLISH;
+  try {
+    const answer = await api.availability(optionsFor(wanted));
+    if (answer === "available" || answer === "downloadable" || answer === "downloading") languages = wanted;
+  } catch {
+    // English, below.
+  }
+  accepted = { key, languages };
+  return languages;
+}
+
+/**
+ * The languages the on-device model was last asked to use. ["en"] alone
+ * while the interface is another language means its answers in that
+ * language may be weak, which the panel says.
+ */
+export function browserModelLanguages(): readonly string[] {
+  const wanted = interfaceLanguages();
+  return accepted?.key === wanted.join(",") ? accepted.languages : ENGLISH;
+}
 
 /** Without a way to measure tokens, a conservative character budget for the whole input. */
 const CHAR_BUDGET = 6000;
@@ -98,6 +146,7 @@ let cached: { value: BrowserModelAvailability; at: number } | null = null;
 /** Forgets the cached availability (after a download, or in tests). */
 export function resetBrowserModelCache(): void {
   cached = null;
+  accepted = null;
 }
 
 /**
@@ -111,7 +160,7 @@ export async function browserModelAvailability(refresh = false): Promise<Browser
   if (!refresh && cached && Date.now() - cached.at < AVAILABILITY_TTL_MS) return cached.value;
   let value: BrowserModelAvailability;
   try {
-    const answer = await api.availability(OPTIONS);
+    const answer = await api.availability(optionsFor(await acceptedLanguages(api)));
     value =
       answer === "available" || answer === "downloadable" || answer === "downloading"
         ? answer
@@ -134,8 +183,10 @@ export async function downloadBrowserModel(
 ): Promise<void> {
   const api = languageModel();
   if (!api) throw new Error("This browser has no built-in model.");
+  // No await before create: the download needs the click's user activation.
+  // The languages were settled by the availability check that offered it.
   const session = await api.create({
-    ...OPTIONS,
+    ...optionsFor(browserModelLanguages()),
     signal,
     monitor(monitor) {
       monitor.addEventListener("downloadprogress", (event) => {
@@ -222,7 +273,7 @@ async function fitHistory(
   signal?: AbortSignal,
 ): Promise<BrowserModelMessage[]> {
   const probe = await api.create({
-    ...OPTIONS,
+    ...optionsFor(await acceptedLanguages(api)),
     signal,
     initialPrompts: [{ role: "system", content: request.system }],
   });
@@ -267,7 +318,7 @@ export async function runBrowserModel(request: BrowserModelRequest, signal?: Abo
     // A fresh session each attempt: a retry in the same one would see the
     // malformed answer as part of the conversation.
     const session = await api.create({
-      ...OPTIONS,
+      ...optionsFor(await acceptedLanguages(api)),
       signal,
       initialPrompts: [{ role: "system", content: request.system }, ...history],
     });

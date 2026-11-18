@@ -141,11 +141,9 @@ func (s *Service) planFree(ctx context.Context, actor identity.Actor, browser st
 		return
 	}
 
+	// The browser's model comes last: it is the smallest, declared for
+	// English, and the least precise at turning a description into nodes.
 	p.automatic = true
-	if browser == BrowserAvailable {
-		p.host, p.provider, p.model, p.baseURL = ModelHostBrowser, ProviderBrowser, BrowserModelName, ""
-		return
-	}
 	if autoRunner != nil {
 		p.useRunner(*autoRunner, autoInfo)
 		return
@@ -156,6 +154,10 @@ func (s *Service) planFree(ctx context.Context, actor identity.Actor, browser st
 			p.local = found.Server
 			return
 		}
+	}
+	if browser == BrowserAvailable {
+		p.host, p.provider, p.model, p.baseURL = ModelHostBrowser, ProviderBrowser, BrowserModelName, ""
+		return
 	}
 	if browser == BrowserDownloadable || browser == BrowserDownloading {
 		p.host, p.provider, p.model, p.baseURL = ModelHostBrowser, ProviderBrowser, BrowserModelName, ""

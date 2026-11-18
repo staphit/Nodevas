@@ -31,8 +31,13 @@ import (
 // Request body caps. A turn carries one utterance plus a little context; the
 // answers carry an id and a short value, or a client tool's output.
 const (
-	maxSmallBody        = 8 << 10
-	maxTurnBody         = 64 << 10
+	maxSmallBody = 8 << 10
+	// maxTurnBody fits the text plus a draft being refined (40 nodes with
+	// up to 600-character bodies, mostly CJK).
+	maxTurnBody = 160 << 10
+	// maxDraftStateBody fits a coding agent's plan draft (100 nodes with
+	// up to 600-character bodies, mostly CJK, JSON-escaped) plus the ids.
+	maxDraftStateBody   = 400 << 10
 	maxClientResultBody = 256 << 10
 	// A browser model answer is at most copilot.MaxBrowserOutputBytes of
 	// text, JSON-escaped, plus an id.
@@ -76,6 +81,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	group.POST("/conversations/:id/turns/:turn/client-results", a.postClientResult)
 	group.POST("/conversations/:id/turns/:turn/model-results", a.postModelResult)
 	group.POST("/conversations/:id/turns/:turn/cancel", a.postCancel)
+	group.PUT("/conversations/:id/entries/:entry/draft-state", a.putDraftState)
 
 	admin := group.Group("")
 	admin.Use(httpx.RequireAdmin)
@@ -199,6 +205,11 @@ func (a *API) postTurn(c *gin.Context) {
 		ClientTools []string            `json:"clientTools"`
 		// BrowserModel is the browser's Prompt API availability.
 		BrowserModel string `json:"browserModel"`
+		// Intent "draft" proposes nodes instead of chatting; previous and
+		// refineOf refine an earlier draft.
+		Intent   string         `json:"intent"`
+		Previous *copilot.Draft `json:"previous"`
+		RefineOf string         `json:"refineOf"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxTurnBody) {
 		return
@@ -221,6 +232,9 @@ func (a *API) postTurn(c *gin.Context) {
 		RemoteAddr:     auth.ClientIP(c.Request),
 		Session:        sessionFingerprint(c.Request),
 		BrowserModel:   browserModel(body.BrowserModel),
+		Intent:         body.Intent,
+		Previous:       body.Previous,
+		RefineOf:       body.RefineOf,
 	}, stream.send)
 	stopHeartbeat()
 	if err != nil && !stream.started {
@@ -397,6 +411,30 @@ func (a *API) postCancel(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// putDraftState records what the person did with a draft: created it
+// (through /api/graph, as themselves), discarded it, or undid the creation.
+// The board itself is never written here.
+func (a *API) putDraftState(c *gin.Context) {
+	var body struct {
+		State   string   `json:"state"`
+		BatchID string   `json:"batchId"`
+		IDs     []string `json:"ids"`
+		// Draft is the person's own version (C2), sent on Create and on
+		// reopening after an undo, so a reload shows what they had.
+		Draft *copilot.Draft `json:"draft"`
+	}
+	if !httpx.DecodeJSONLimit(c, &body, maxDraftStateBody) {
+		return
+	}
+	entry, err := a.service.SetDraftState(c.Request.Context(), auth.ActorFrom(c.Request).ID,
+		c.Param("id"), c.Param("entry"), body.State, body.BatchID, body.IDs, body.Draft)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entry)
 }
 
 func (a *API) getSettings(c *gin.Context) {

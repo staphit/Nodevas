@@ -91,9 +91,14 @@ func (p *runnerProvider) Stream(ctx context.Context, req provider.Request, onDel
 		AccountID: p.accountID,
 		Provider:  p.info.Provider, Model: p.info.Model, BaseURL: p.info.BaseURL,
 		Effort: p.effort, System: req.System, Messages: messages, Tools: tools,
-		MaxTokens: req.MaxTokens,
+		MaxTokens: req.MaxTokens, Temperature: req.Temperature,
 	}
-	if len(messages)+len(tools)+len(req.System) > runnerwire.MaxLLMRequestBytes-64<<10 {
+	schemaBytes := 0
+	if rs := req.ResponseSchema; rs != nil {
+		call.ResponseSchema = &runnerwire.LLMResponseSchema{Name: rs.Name, Schema: rs.Schema}
+		schemaBytes = len(rs.Name) + len(rs.Schema)
+	}
+	if len(messages)+len(tools)+len(req.System)+schemaBytes > runnerwire.MaxLLMRequestBytes-64<<10 {
 		return provider.Response{}, errors.New("this conversation is too long to send to your runner; start a new one")
 	}
 	done, err := p.remote.Call(ctx, p.runnerID, call, func(text string) {

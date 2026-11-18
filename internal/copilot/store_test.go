@@ -213,3 +213,47 @@ func TestStatusAllowsAKeylessLocalOpenAIServer(t *testing.T) {
 }
 
 func ptr(value string) *string { return &value }
+
+// A draft entry keeps its draft in data, which only its own kind and its
+// conversation's owner may change.
+func TestStoreEntryDataBelongsToItsOwner(t *testing.T) {
+	ctx := context.Background()
+	store := NewStore(testpg.New(t))
+	conversation, err := store.CreateConversation(ctx, "alice", "demo", ModeDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := store.AppendEntry(ctx, Entry{ConversationID: conversation.ID, Kind: EntryDraft, Text: "3 steps",
+		Data: `{"state":"open"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _ := store.AppendEntry(ctx, Entry{ConversationID: conversation.ID, Kind: EntryUser, Text: "hi"})
+	entries, _ := store.Entries(ctx, conversation.ID)
+	if entries[0].Data != `{"state":"open"}` || entries[1].Data != "" {
+		t.Fatalf("entries = %+v", entries)
+	}
+	updated, err := store.SetEntryData(ctx, "alice", conversation.ID, draft.ID, EntryDraft, `{"state":"committed"}`)
+	if err != nil || updated.Data != `{"state":"committed"}` || updated.Seq != draft.Seq {
+		t.Fatalf("SetEntryData = %+v, %v", updated, err)
+	}
+	for name, call := range map[string]func() (Entry, error){
+		"another account": func() (Entry, error) {
+			return store.SetEntryData(ctx, "bob", conversation.ID, draft.ID, EntryDraft, `{}`)
+		},
+		"another kind": func() (Entry, error) {
+			return store.SetEntryData(ctx, "alice", conversation.ID, user.ID, EntryDraft, `{}`)
+		},
+		"another conversation": func() (Entry, error) {
+			return store.SetEntryData(ctx, "alice", "nope", draft.ID, EntryDraft, `{}`)
+		},
+	} {
+		if _, err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound", name, err)
+		}
+	}
+	entries, _ = store.Entries(ctx, conversation.ID)
+	if entries[0].Data != `{"state":"committed"}` {
+		t.Fatalf("data after refused updates = %s", entries[0].Data)
+	}
+}

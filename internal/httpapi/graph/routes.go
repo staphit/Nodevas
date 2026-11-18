@@ -14,6 +14,10 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.PUT("/graph", a.putGraph)
 	api.POST("/graph/ops", a.postGraphOps)
 	api.POST("/graph/subgraph", a.postSubgraph)
+	// The dry run of the above; read-only members may call it.
+	api.POST("/graph/subgraph/check", a.postSubgraphCheck)
+	api.POST("/graph/batches/:id/undo", a.postBatchUndo)
+	api.POST("/graph/batches/:id/redo", a.postBatchRedo)
 	api.GET("/state", httpx.ETag(a.getState))
 	api.GET("/validate", a.getValidate)
 	// The ready queue changes whenever anyone finishes anything, which is a

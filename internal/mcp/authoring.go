@@ -50,6 +50,11 @@ type SubgraphResult struct {
 	Issues       []engine.Issue          `json:"issues"`
 	Dependencies int                     `json:"dependencies"`
 	References   int                     `json:"references"`
+	// Draft and Note (P6): a draft plan run's create_subgraph was recorded
+	// for the person, not written; IDs are provisional ("draft:<key>"),
+	// Created is empty and Note is the hub's word on it.
+	Draft bool   `json:"draft"`
+	Note  string `json:"note"`
 }
 
 // CreateSubgraph creates many nodes and their wiring in one all-or-nothing

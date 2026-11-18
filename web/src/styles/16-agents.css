@@ -754,3 +754,15 @@ a.agent-file-chip:hover {
   flex-shrink: 0;
   gap: 6px;
 }
+
+/* With the Copilot panel open, the Agent button moves to the panel's left
+   edge instead of sitting over the panel's composer; on a phone the panel
+   covers the screen, so the button waits until it closes. */
+.app:has(> .copilot-panel) .agent-fab {
+  right: calc(var(--copilot-width) + 18px);
+}
+@media (max-width: 640px) {
+  .app:has(> .copilot-panel) .agent-fab {
+    display: none;
+  }
+}
