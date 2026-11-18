@@ -52,6 +52,16 @@ export function lastSaid(events: readonly RunEvent[] | undefined): string {
   return "";
 }
 
+/** What of the agent's last words the summary shows: none for a signed-out
+ * run (a signed-out CLI's last text is its own English sign-in error, which
+ * the plain sign-in sentence already covers), nor for a failed one whose last
+ * words are only its error. */
+export function shownSaid(run: Pick<Run, "status" | "failureCode" | "error">, said: string): string {
+  if (!said || runSignedOut(run)) return "";
+  if (run.status === "failed" && run.error && said === run.error.trim()) return "";
+  return said;
+}
+
 export function SimpleRunSummary({ run, children }: { run: Run; children: ReactNode }) {
   const { t } = useI18n();
   const localRunnerId = useLocalRunner()?.id;
@@ -73,7 +83,7 @@ export function SimpleRunSummary({ run, children }: { run: Run; children: ReactN
     wasFinal.current = final;
   }, [final, run.id, loadEvents]);
 
-  const said = useMemo(() => lastSaid(events), [events]);
+  const said = useMemo(() => shownSaid(run, lastSaid(events)), [run, events]);
   const files = run.status === "succeeded" && run.commit ? (run.filesChanged ?? 0) : 0;
   const plain = resultState(run, localRunnerId) !== "none";
 

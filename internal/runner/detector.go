@@ -24,6 +24,14 @@ import (
 // waits for that answer, with room for the hello that goes first.
 const defaultCheckAgain = (runnerwire.SettingsRedetectTimeoutSeconds - 15) * time.Second
 
+// defaultSignInRecheck is how often an agent the last look found signed out
+// is asked whether it is signed in again. The hub refuses a signed-out
+// agent, and the person who just signed in is told the app notices within a
+// minute: waiting for the next full look (defaultRedetect) would leave them
+// refused for minutes. Asking costs one `claude auth status`, which reads
+// the stored login and asks no model.
+const defaultSignInRecheck = 20 * time.Second
+
 // detector keeps what the runner knows about the agents on its machine, one
 // look at a time.
 type detector struct {
@@ -62,6 +70,8 @@ func (d *detector) run(ctx context.Context) {
 	close(d.first)
 	tick := time.NewTicker(d.c.redetectInterval())
 	defer tick.Stop()
+	recheck := time.NewTicker(d.c.signInRecheckInterval())
+	defer recheck.Stop()
 	for {
 		asked := false
 		select {
@@ -70,6 +80,10 @@ func (d *detector) run(ctx context.Context) {
 		case <-tick.C:
 		case <-d.wake:
 			asked = true
+		case <-recheck.C:
+			if !d.signedBackIn(ctx) {
+				continue
+			}
 		}
 		d.mu.Lock()
 		waiters := d.waiters
@@ -121,6 +135,22 @@ func (d *detector) look(ctx context.Context, first bool) {
 	if changed {
 		d.c.changedInfo()
 	}
+}
+
+// signedBackIn reports whether an agent the last look found signed out now
+// needs a full look: it says it is signed in, or its CLI is gone. Only
+// Claude Code is ever found signed out (prober.version); with none signed
+// out nothing is asked.
+func (d *detector) signedBackIn(ctx context.Context) bool {
+	agents, _ := d.found()
+	for _, agent := range agents {
+		if agent.Kind != "claude" || !agent.SignedOut {
+			continue
+		}
+		bin, err := agentBinary(d.probe.cmds, d.c.cfg(), agent.Kind)
+		return err != nil || !d.probe.claudeSignedOut(ctx, bin)
+	}
+	return false
 }
 
 // found is what the last look found.

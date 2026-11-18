@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, forgetGlobalRuns, rememberGlobalRun, WorkspaceActionError, type Run, type RunWorkspaceView } from "../api";
+import { api, forgetGlobalRuns, rememberGlobalRun, WorkspaceActionError, type Run, type RunEvent, type RunWorkspaceView } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
@@ -450,18 +450,22 @@ describe("a global agent's workspace", () => {
 describe("in Simple mode", () => {
   const local = () => makeWorkspaceRun({ runnerId: "local1", runnerName: "this machine", repoName: "my-app" });
 
-  function showIn(run: Run, experience: "simple" | "full", tab: "changes" | "terminal" = "changes") {
+  const madePage: RunEvent[] = [
+    { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
+    { seq: 2, type: "tool_call", at: "2026-11-12T08:00:02Z", tool: "Write", input: '{"file_path":"index.html"}' },
+    { seq: 3, type: "text", at: "2026-11-12T08:00:03Z", text: "I made the page with your opening hours." },
+  ];
+
+  function showIn(
+    run: Run,
+    experience: "simple" | "full",
+    tab: "changes" | "terminal" = "changes",
+    events: RunEvent[] = madePage,
+  ) {
     useApp.setState({ preferences: { ...useApp.getState().preferences, experience } });
     useRunners.setState({ runners: [localRunner()], loaded: true });
     seed(run);
-    vi.mocked(api.getRunEvents).mockResolvedValue({
-      events: [
-        { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
-        { seq: 2, type: "tool_call", at: "2026-11-12T08:00:02Z", tool: "Write", input: '{"file_path":"index.html"}' },
-        { seq: 3, type: "text", at: "2026-11-12T08:00:03Z", text: "I made the page with your opening hours." },
-      ],
-      more: false,
-    });
+    vi.mocked(api.getRunEvents).mockResolvedValue({ events, more: false });
     render(
       <EditionProvider edition="single">
         <Panel />
@@ -518,19 +522,56 @@ describe("in Simple mode", () => {
   });
 
   // A run whose agent is here but signed out says how to sign in, in the
-  // describe box's words, not the bare "could not finish".
+  // describe box's words, not the bare "could not finish". The events are
+  // what a signed-out Claude really leaves (adapter testdata
+  // claude_signed_out.jsonl): its last text is the CLI's own English, which
+  // Simple mode never shows.
   it("says how to sign in when the agent was signed out", async () => {
     showIn(
-      { ...local(), agent: "claude", status: "failed", failureCode: "signed_out", commit: "", filesChanged: 0 },
+      {
+        ...local(),
+        agent: "claude",
+        status: "failed",
+        failureCode: "signed_out",
+        error: "Not logged in · Please run /login",
+        commit: "",
+        filesChanged: 0,
+      },
       "simple",
       "terminal",
+      [
+        { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
+        { seq: 2, type: "text", at: "2026-11-12T08:00:02Z", text: "Not logged in · Please run /login" },
+        { seq: 3, type: "usage", at: "2026-11-12T08:00:03Z" },
+        { seq: 4, type: "error", at: "2026-11-12T08:00:04Z", text: "Not logged in · Please run /login" },
+      ],
     );
     const dialog = await screen.findByRole("dialog");
     const panel = within(dialog).getByRole("tabpanel");
     expect(
       await within(panel).findByText(/isn't signed in yet\. Open the Terminal app on this computer, type claude/),
     ).toBeInTheDocument();
+    await waitFor(() => expect(api.getRunEvents).toHaveBeenCalled());
+    await act(async () => {});
     expect(within(panel).queryByText(/could not finish/)).toBeNull();
+    expect(panel.textContent).not.toMatch(/Not logged in/);
+    expect(within(panel).queryByText("What the agent said")).toBeNull();
+  });
+
+  // A failed run whose last words are only its error says nothing twice.
+  it("leaves out the agent's last words when they are only the error", async () => {
+    showIn(
+      { ...local(), status: "failed", error: "rate limited", commit: "", filesChanged: 0 },
+      "simple",
+      "terminal",
+      [{ seq: 1, type: "text", at: "2026-11-12T08:00:01Z", text: "rate limited" }],
+    );
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    await waitFor(() => expect(api.getRunEvents).toHaveBeenCalled());
+    await act(async () => {});
+    expect(within(panel).queryByText("What the agent said")).toBeNull();
+    expect(within(panel).queryByText("rate limited")).toBeNull();
   });
 
   it("shows the raw log and diff straight away in full mode", async () => {

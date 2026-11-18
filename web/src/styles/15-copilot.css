@@ -125,10 +125,14 @@
 /* Station is one scroll container too. On a wide window the button stands
    left of its side column (25-station.css), over the main column's bottom
    right, where the agents list's last row keeps its "See what it did":
-   room below, past Station's own 16px, so that row scrolls clear. Narrower,
-   25-station.css keeps its own (slightly smaller) room for the button. */
-.app:has(> .copilot-fab) .station {
-  padding-bottom: calc(48px + 18px + 16px);
+   room below that column only, on top of Station's own 16px, so that row
+   scrolls clear. Not on Station itself: its content box sizes the side
+   column (100cqh), which would lose that height for nothing. Narrower,
+   25-station.css keeps its own room for the button on Station. */
+@media (min-width: 1181px) {
+  .app:has(> .copilot-fab) .station-center {
+    padding-bottom: calc(48px + 18px);
+  }
 }
 /* The editor leaves room below its last line, so it can always be scrolled
    clear of the button. */

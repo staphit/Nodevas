@@ -401,7 +401,7 @@ describe("GlobalAgentList", () => {
     seed([failed()]);
     const { unmount } = show();
     expect(rowOf("Fix the flaky login test")).toHaveTextContent(
-      "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in, then run it again.",
+      "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in. Nodevas notices within a minute; then start this task again here.",
     );
     unmount();
 

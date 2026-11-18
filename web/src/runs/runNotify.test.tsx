@@ -249,6 +249,29 @@ describe("usage limits and the daily budget", () => {
     expect(await screen.findAllByText("Daily budget used up")).toHaveLength(1);
   });
 
+  // Simple (single-user edition) calls the daily cap what its HUD and the
+  // notification settings call it, "today's limit", with no budget, tokens
+  // or UTC.
+  it("says today's limit is used up in Simple, as the HUD calls it", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, experience: "simple" } });
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    render(<RunToasts />);
+    await notify(makeRun({ runnerId: "local1" }), "tokens");
+    expect(await screen.findAllByText("Today's limit is used up")).toHaveLength(1);
+    const toast = screen.getByText("Today's limit is used up").closest(".run-toast") as HTMLElement;
+    expect(toast.textContent).toMatch(/New tasks can start again after it resets at /);
+    expect(toast.textContent).not.toMatch(/budget|tokens?|UTC/i);
+    useRunners.setState({ runners: [], loaded: false });
+  });
+
+  it("keeps the budget's words outside Simple", async () => {
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    render(<RunToasts />);
+    await notify(makeRun({ runnerId: "local1" }), "tokens");
+    expect(await screen.findAllByText("Daily budget used up")).toHaveLength(1);
+    useRunners.setState({ runners: [], loaded: false });
+  });
+
   it("says nothing about a budget that is not used up", async () => {
     render(<RunToasts />);
     await notify(makeRun());

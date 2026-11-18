@@ -167,7 +167,7 @@ describe("SimpleAgentBox", () => {
         failureKind: "agent_unavailable",
         failureCode: "signed_out",
       },
-      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in, then try again.",
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in. Nodevas notices within a minute; then try again.",
     ],
   ])("says how the run ended in plain words (%o)", async (end, text) => {
     renderBox();
@@ -178,6 +178,38 @@ describe("SimpleAgentBox", () => {
     const line = screen.getByRole("status");
     expect(line).toHaveTextContent(text);
     expect(line.textContent).not.toMatch(/working on it|exit status|runner/i);
+  });
+
+  // After a signed-out run the runner looks again and reports Claude signed
+  // out (not installed). With it the only agent, the box says how to sign
+  // in, as the run's line did, not that no agent is here; once a hello says
+  // it is signed in, the box is back.
+  it("keeps saying how to sign in once the runner reports the agent signed out", async () => {
+    const base = localRunner();
+    const claude = base.info!.agents![0];
+    hold([{ ...base, info: { ...base.info!, agents: [claude] } }]);
+    renderBox();
+    fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Started. The agent is working on it.");
+    act(() =>
+      useRuns.getState().putRun(
+        startedRun({ global: true, status: "failed", error: "Not logged in · Please run /login", failureCode: "signed_out" }),
+      ),
+    );
+
+    const signedOut = { ...claude, installed: false, signedOut: true, error: "claude: not signed in on this computer" };
+    act(() => hold([{ ...base, info: { ...base.info!, agents: [signedOut] } }]));
+    const sentence =
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in. Nodevas notices within a minute; then try again.";
+    expect(screen.getByText(sentence)).toBeInTheDocument();
+    expect(screen.queryByText("No agent is ready on this computer yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not logged in/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "What do you want done?" })).not.toBeInTheDocument();
+
+    act(() => hold([{ ...base, info: { ...base.info!, agents: [claude] } }]));
+    expect(screen.getByRole("textbox", { name: "What do you want done?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
   it("lets the person pick the agent right in the box", async () => {

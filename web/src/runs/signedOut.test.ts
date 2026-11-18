@@ -81,10 +81,10 @@ describe("a signed-out agent", () => {
 
   it("says how to sign in, in each reader's words", () => {
     expect(signedOutText(t, run(), "local")).toBe(
-      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in, then try again.",
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in. Nodevas notices within a minute; then try again.",
     );
     expect(signedOutText(t, run({ agent: "codex" }), "owner")).toBe(
-      "Codex isn't signed in on studio-mac. Open a terminal there, run codex login and sign in, then run it again.",
+      "Codex isn't signed in on studio-mac. Open a terminal there, run codex login and sign in. Nodevas notices within a minute; then start this task again here.",
     );
     const other = signedOutText(t, run(), "other");
     expect(other).toBe(
@@ -93,10 +93,10 @@ describe("a signed-out agent", () => {
     expect(other).not.toMatch(/claude login|run claude/);
     language("zh-TW");
     expect(signedOutText(t, run(), "local")).toBe(
-      "Claude 已經在這台電腦上，但還沒登入。請在這台電腦打開「終端機」，輸入 claude 後按 Enter 鍵並登入，再試一次。",
+      "Claude 已經在這台電腦上，但還沒登入。請在這台電腦打開「終端機」，輸入 claude 後按 Enter 鍵並登入。Nodevas 會在一分鐘內發現，之後再試一次。",
     );
     expect(signedOutText(t, run(), "owner")).toBe(
-      "Claude 在 studio-mac 上還沒登入。請在那台電腦打開終端機執行 claude 並登入，再重新執行。",
+      "Claude 在 studio-mac 上還沒登入。請在那台電腦打開終端機執行 claude 並登入。Nodevas 會在一分鐘內發現，之後再回到這裡重新執行這個工作。",
     );
   });
 });

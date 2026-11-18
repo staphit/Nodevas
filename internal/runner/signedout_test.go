@@ -113,6 +113,52 @@ func TestSignedOutRunIsCoded(t *testing.T) {
 	}
 }
 
+// Once Claude Code is signed out, the runner keeps asking it (only `claude
+// auth status`, which costs nothing) whether it is signed in again, far more
+// often than its full looks. The moment it is, a full look tells the hub, so
+// the person who signed in can start the task again without waiting minutes
+// for the next look or knowing to press Check again.
+func TestSignInIsNoticedSoon(t *testing.T) {
+	var cmds *fakeCommands
+	env := startJobRunner(t, func(c *Client) {
+		cmds = c.Commands.(*fakeCommands)
+		cmds.outputs[claudeAuthStatus] = claudeSignedIn
+		c.RedetectInterval = time.Hour
+		c.signInRecheck = 10 * time.Millisecond
+	})
+	if claude := agentNamed(t, env.hub.hello().Hello.Agents, "claude"); !claude.Installed {
+		t.Fatalf("hello: %+v", claude)
+	}
+	// Signed in: nothing is asked between looks.
+	asked := cmds.ran(claudeAuthStatus)
+	time.Sleep(100 * time.Millisecond)
+	if n := cmds.ran(claudeAuthStatus); n != asked {
+		t.Fatalf("signed-in claude asked about its login %d times between looks", n-asked)
+	}
+
+	cmds.set(claudeAuthStatus, claudeSignedOut)
+	env.hub.offer(testJob("run-login", "login-fail:"))
+	env.hub.wait("run-login", runnerwire.TypeFinish)
+	if claude := agentNamed(t, env.hub.hello().Hello.Agents, "claude"); claude.Installed || !claude.SignedOut {
+		t.Fatalf("hello after the run: %+v", claude)
+	}
+
+	// Still signed out: only its login is asked, no full look (no
+	// --version, which every look runs for every CLI).
+	versions := cmds.ran("/bin/codex --version")
+	asked = cmds.ran(claudeAuthStatus)
+	eventually(t, "a few checks of the login", func() bool { return cmds.ran(claudeAuthStatus) >= asked+3 })
+	if n := cmds.ran("/bin/codex --version"); n != versions {
+		t.Fatalf("a signed-out claude started %d full looks", n-versions)
+	}
+
+	// Signed in again: the hub hears it without anyone asking.
+	cmds.set(claudeAuthStatus, claudeSignedIn)
+	if claude := agentNamed(t, env.hub.hello().Hello.Agents, "claude"); !claude.Installed || claude.SignedOut {
+		t.Fatalf("hello after signing in: %+v", claude)
+	}
+}
+
 // A CLI gone from PATH is agent_unavailable too, but no sign-in fixes it.
 func TestMissingAgentIsNotSignedOut(t *testing.T) {
 	c := &Client{Config: &Config{}, Commands: &fakeCommands{paths: map[string]string{}}}

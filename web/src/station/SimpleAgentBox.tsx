@@ -36,7 +36,7 @@ import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { defaultModel, installedAgents } from "../runs/DispatchDialog";
-import { runSignedOut, signedOutText } from "../runs/signedOut";
+import { runSignedOut, signInCommand, signedOutText } from "../runs/signedOut";
 import { useSimpleMode } from "../simple/simpleMode";
 import { useApp, usePreference } from "../store";
 import { startFailure } from "./GlobalAgentForm";
@@ -162,9 +162,17 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
       </p>
     );
   } else if (agents.length === 0) {
+    // An agent here but signed out (after a signed-out run the runner looks
+    // again and says so): how to sign it in, which brings the box back, not
+    // "no agent".
+    const signedOut = runner.info?.agents?.find((item) => item.signedOut);
     content = (
       <div className="run-empty run-empty-left simple-agent-need">
-        <p>{t("globalAgents.simple.needAgent")}</p>
+        <p>
+          {signedOut
+            ? t("result.signedOut", { agent: agentName(signedOut.kind), command: signInCommand(signedOut.kind) })
+            : t("globalAgents.simple.needAgent")}
+        </p>
         <button type="button" className="ap-btn is-primary" onClick={() => setScanOpen(true)}>
           {t("globalAgents.simple.setUpAgent")}
         </button>

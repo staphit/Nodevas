@@ -253,7 +253,7 @@ describe("NodeRuns", () => {
     const { unmount } = render(<NodeRuns id="alpha" />);
     expect(
       await screen.findByText(
-        "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in, then run it again.",
+        "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in. Nodevas notices within a minute; then start this task again here.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Not logged in · Please run /login")).toBeInTheDocument();

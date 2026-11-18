@@ -30,11 +30,12 @@ const ALLOWED: Record<string, string> = {
   "local.firstFolder.gitNeeded": "it names Git, the program the person has to install",
   "local.scan.signInHint": "it names Terminal, the app the person opens to sign an agent in",
   "result.signedOut": "it names Terminal, the app the person opens to sign an agent in",
+  "simple.local.cliHint": "it names Terminal, the app the commands are typed in",
 };
 
 /** The keys allowed only to name the Terminal app (what macOS and Windows
  * call it), as the app to open and nothing else. */
-const NAMES_TERMINAL = ["local.scan.signInHint", "result.signedOut"];
+const NAMES_TERMINAL = ["local.scan.signInHint", "result.signedOut", "simple.local.cliHint"];
 
 /** Every key of one catalog, read from the source so none is missed. */
 function catalogKeys(language: "en" | "zh-TW"): string[] {
@@ -89,6 +90,40 @@ describe("easy start's plain words", () => {
       expect(EN_WORDS.test(en.replace("the Terminal app", ""))).toBe(false);
       expect(ZH_WORDS.test(zh.replace("「終端機」", ""))).toBe(false);
     }
+  });
+
+  // One name for the daily cap: the HUD, the notification settings and the
+  // toast all say "today's limit", never a budget or spending (it can be a
+  // token cap, not money).
+  it("calls the daily cap today's limit everywhere", () => {
+    const named = ["simple.energy.today", "simple.notify.default", "simple.notify.granted", "simple.notify.limitReached"];
+    for (const key of named) {
+      expect(translate(key, "en")).toMatch(/today's limit/i);
+      expect(translate(key, "zh-TW")).toContain("今天的額度");
+    }
+    for (const key of [...named, "simple.notify.limitBody"]) {
+      expect(translate(key, "en")).not.toMatch(/budget|spending|UTC/i);
+      expect(translate(key, "zh-TW")).not.toMatch(/預算|花費|UTC/);
+    }
+  });
+
+  // Notifications come from the open page while it is hidden; a closed one
+  // sends none, and neither language says otherwise.
+  it("promises notifications only while the page is hidden, not closed", () => {
+    for (const key of ["simple.notify.default", "simple.notify.granted"]) {
+      expect(translate(key, "en")).toContain("hidden");
+      expect(translate(key, "en")).toMatch(/closing the page stops/i);
+      expect(translate(key, "zh-TW")).toContain("隱藏");
+      expect(translate(key, "zh-TW")).toContain("關掉頁面");
+      expect(translate(key, "zh-TW")).not.toContain("沒開著");
+    }
+  });
+
+  // The toggle's hint points at OpenCode's own setup, not at the toggle.
+  it("says OpenCode needs its own setup to ask", () => {
+    expect(translate("simple.local.permissionRelayHelp", "en")).toMatch(/OpenCode itself is set up/);
+    expect(translate("simple.local.permissionRelayHelp", "zh-TW")).not.toContain("這項設定");
+    expect(translate("simple.local.permissionRelayHelp", "zh-TW")).toContain("另外設定");
   });
 
   it("allows only keys that exist", () => {

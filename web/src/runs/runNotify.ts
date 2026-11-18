@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
-import { translate } from "../i18n";
+import { formatLocalizedTime, translate } from "../i18n";
 import { useAgents } from "../agents/agentStore";
 import { agentName, agentWho } from "../game/labels";
 import { builtInRunner } from "../runners/edition";
@@ -350,16 +350,24 @@ async function checkBudget(push: RunToastState["push"]): Promise<void> {
   if (told.has(key)) return;
   told.add(key);
   const t = (k: string, values?: Record<string, string | number>) => translate(k, undefined, values);
-  push(
-    {
-      runId: "",
-      nodeId: "",
-      kind: "budget",
-      title: t("runNotify.budget"),
-      body: t("budget.exceeded", { limit: t(`budget.limit.${exceeded}`) }),
-    },
-    `nodevas-${key}`,
-  );
+  // Simple (single-user edition) says it as its HUD does, "today's limit",
+  // with the reset in this computer's time rather than UTC.
+  const text = simpleOn()
+    ? { title: t("simple.notify.limitReached"), body: t("simple.notify.limitBody", { time: formatLocalizedTime(nextUtcDay()) }) }
+    : { title: t("runNotify.budget"), body: t("budget.exceeded", { limit: t(`budget.limit.${exceeded}`) }) };
+  push({ runId: "", nodeId: "", kind: "budget", ...text }, `nodevas-${key}`);
+}
+
+/** Whether the Simple preset is on, outside React: the person chose it and
+ * this is the single-user edition, whose built-in runner only it has
+ * (useSimpleMode is the hook's way). */
+function simpleOn(): boolean {
+  return useApp.getState().preferences.experience === "simple" && Boolean(builtInRunner(useRunners.getState().runners));
+}
+
+/** When the hub's day, and so the daily budget, starts again. */
+function nextUtcDay(now = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
 }
 
 let nextId = 1;
