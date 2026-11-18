@@ -50,6 +50,11 @@ export interface GlobalAgentsState {
   /** A global-runs-changed push: reload, coalesced; with nobody watching,
    * only a run some view holds is refreshed. */
   onChanged: (runId?: string) => void;
+  /** A run that is not a global one moved somewhere (runs-changed,
+   * building-changed): a node's run takes and frees a slot on the viewer's
+   * runners too, so their load line reloads, coalesced, while watched. A
+   * viewer with no runner of their own has no load line to keep current. */
+  onRunnerLoadChanged: () => void;
   /** After a reconnect: pushes sent meanwhile are gone. */
   resync: () => void;
   /** Starts a global agent; throws the API error for the form to explain. */
@@ -153,6 +158,15 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
     });
   };
 
+  /** One reload at the end of a fixed window from the first ask. */
+  const reloadSoon = () => {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void get().load();
+    }, GLOBAL_COALESCE_MS);
+  };
+
   return {
     ...initial,
     watching: false,
@@ -240,11 +254,12 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
         if (runId && useRuns.getState().globalById[runId]) void useRuns.getState().refreshRun(runId);
         return;
       }
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
-        void get().load();
-      }, GLOBAL_COALESCE_MS);
+      reloadSoon();
+    },
+
+    onRunnerLoadChanged: () => {
+      const state = get();
+      if (state.watching && state.runners.length > 0) reloadSoon();
     },
 
     resync: () => {
