@@ -46,6 +46,9 @@ var Toolsets = []string{ToolsetFull, ToolsetRun}
 //     changed or ask each other, which the station shows.
 //   - submit_verdict: review and QA runs record their structured verdict;
 //     the hub takes it only from a reviewer's or QA's run.
+//   - list_team, save_attachment: check_inbox tells a run it has mail and
+//     to open attachments with save_attachment; without these a run could
+//     neither find who wrote to it nor read what was attached.
 var RunTools = []string{
 	"claim_task",
 	"get_node",
@@ -58,6 +61,8 @@ var RunTools = []string{
 	"approve_tool",
 	"check_inbox",
 	"send_message",
+	"list_team",
+	"save_attachment",
 	"submit_verdict",
 }
 
