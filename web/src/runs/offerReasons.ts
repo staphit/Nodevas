@@ -84,6 +84,7 @@ const DECLINES = new Set([
   "no_one_there",
   "repo_not_added",
   "agent_missing",
+  "agent_signed_out",
   "interactive_off",
   "global_off",
   "busy",
@@ -110,6 +111,6 @@ export function declineText(
 /** What fixes a decline in the single-user edition, or null. */
 export function declineFix(code: string | undefined): OfferFix | null {
   if (code === "repo_not_added") return "addRepo";
-  if (code === "agent_missing") return "local";
+  if (code === "agent_missing" || code === "agent_signed_out") return "local";
   return null;
 }

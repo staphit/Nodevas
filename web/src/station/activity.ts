@@ -24,6 +24,9 @@ export interface ActivityBar {
   end: number;
   /** Still running at the window's end. */
   open: boolean;
+  /** A global agent's run (no project, no node): opened on Station's
+   * Global agents tab, not in a node's runs. */
+  global: boolean;
 }
 
 export interface ActivityMark {
@@ -47,6 +50,10 @@ export interface ActivityLane {
 
 export interface ActivityInput {
   runs: Run[];
+  /** The viewer's global agents' runs (GET /api/global-runs: only those
+   * they started or that ran on their runners); a run in both lists counts
+   * once. */
+  globalRuns?: Run[];
   asks: AgentAsk[];
   messages: AgentMessage[];
   now: number;
@@ -67,6 +74,7 @@ const LIMIT_KINDS = new Set(["rate_limit", "quota"]);
 /** The lanes for the window ending at now, busiest-most-recently first. */
 export function buildActivity({
   runs,
+  globalRuns = [],
   asks,
   messages,
   now,
@@ -86,7 +94,10 @@ export function buildActivity({
     return found;
   };
 
-  for (const run of runs) {
+  const seen = new Set<string>();
+  for (const run of [...runs, ...globalRuns]) {
+    if (seen.has(run.id)) continue;
+    seen.add(run.id);
     const started = millis(run.startedAt) || millis(run.createdAt);
     if (!Number.isFinite(started)) continue;
     const finished = millis(run.finishedAt);
@@ -94,15 +105,17 @@ export function buildActivity({
     if (ended < from || started > now) continue;
     const key = run.agent || "agent";
     const target = lane(key, key);
+    const global = Boolean(run.global);
     target.bars.push({
       runId: run.id,
       nodeId: run.nodeId,
-      label: titleOf(run.nodeId) || run.nodeId,
+      label: global ? run.title || run.id : titleOf(run.nodeId) || run.nodeId,
       kind: run.kind === "review" ? "review" : "run",
       status: run.status,
       start: at(started),
       end: at(ended),
       open: !Number.isFinite(finished),
+      global,
     });
     target.latest = Math.max(target.latest, ended);
     if (run.status === "failed" && LIMIT_KINDS.has(run.failureKind ?? "") && Number.isFinite(finished)) {

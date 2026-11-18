@@ -425,9 +425,38 @@ func (p *prober) version(ctx context.Context, cfg *Config, kind string) sighting
 			return s
 		}
 	}
+	if kind == "claude" && p.claudeSignedOut(ctx, bin) {
+		// There, but every run would end at once on "Not logged in".
+		s.agent.SignedOut = true
+		s.agent.Error = "claude: not signed in on this computer; run `claude` in a terminal here and log in"
+		return s
+	}
 	s.agent.Installed = true
 	s.bin = bin
 	return s
+}
+
+// claudeSignedOut reports whether Claude Code says it is not signed in.
+// `claude auth status --json` reads the stored login and the environment (an
+// API key, a token, Bedrock or Vertex all count as signed in) and asks no
+// model, so it costs nothing; it exits 1 when signed out. Only its own
+// "loggedIn": false counts: an older Claude Code without the command (an
+// unknown option, no JSON), a failure or no answer in time leave the agent
+// as it was.
+//
+// Other CLIs are not asked. `codex login status` says "Not logged in" while
+// an API key in the environment or a provider of its own runs it fine, and
+// the rest have no such command: for them a sign-out shows only when a run
+// fails (adapter.SignedOut).
+func (p *prober) claudeSignedOut(ctx context.Context, bin string) bool {
+	a := p.ask(ctx, p.versionTimeout, "claude", bin, "auth", "status", "--json")
+	var status struct {
+		LoggedIn *bool `json:"loggedIn"`
+	}
+	if json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(a.out), "\ufeff")), &status) != nil || status.LoggedIn == nil {
+		return false
+	}
+	return !*status.LoggedIn
 }
 
 // catalogs is the second phase of a look: each usable CLI that can list its

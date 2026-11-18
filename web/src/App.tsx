@@ -329,8 +329,11 @@ function MainApp() {
           break;
         case "building-changed":
           // Something changed in a project this viewer may read (any of
-          // them): an open Station's building refetches, coalesced.
+          // them): an open Station's building refetches, coalesced; so does
+          // the load line of the viewer's runners, which a run in any of
+          // those projects takes a slot on and frees.
           useBuilding.getState().onChanged();
+          useGlobalAgents.getState().onRunnerLoadChanged();
           break;
         case "usage-changed":
           // A session reported its tokens: an open Usage dialog refetches.
@@ -346,8 +349,10 @@ function MainApp() {
           useRuns.getState().onRunsChanged(ev.id);
           // A finished run's usage arrives only as runs-changed.
           useUsage.getState().onUsageEvent();
-          // An open Station refetches the project's runs, coalesced.
+          // An open Station refetches the project's runs, coalesced, and
+          // its runners' load line: a run that ended freed a slot.
           useStation.getState().onRunsChanged();
+          useGlobalAgents.getState().onRunnerLoadChanged();
           // A task's run moved: active autopilot runs held refetch.
           useAutopilot.getState().onRunsChanged();
           break;

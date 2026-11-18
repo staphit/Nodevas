@@ -251,6 +251,45 @@
   gap: 8px;
   padding-top: 10px;
 }
+/* Simple: what happened in plain words, the raw record behind a toggle. */
+.simple-run-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 14px;
+  line-height: 1.5;
+}
+.simple-run-summary p {
+  margin: 0;
+}
+.simple-run-said {
+  align-self: stretch;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.simple-run-said h3 {
+  margin: 0 0 4px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.simple-run-said p + p {
+  margin-top: 6px;
+}
+.simple-run-details {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.simple-run-details[hidden] {
+  display: none;
+}
+.simple-run-details > .run-timeline-wrap {
+  margin: 10px 14px;
+}
 .run-ws-note {
   margin: 10px 14px;
   padding: 8px 10px;

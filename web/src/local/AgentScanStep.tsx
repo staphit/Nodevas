@@ -16,6 +16,7 @@ import { formatList, useI18n } from "../i18n";
 import { useEdition, useLocalRunner, useLocalState } from "../runners/edition";
 import { agentProblemPlain, runnerAgentProblem } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
+import { signInCommand } from "../runs/signedOut";
 import { useGlobalAgents } from "../station/globalAgentsStore";
 import { AddAgentDialog, localSettingsErrorText } from "./AddAgentDialog";
 import { AGENT_KINDS, EXTERNAL_LINK, installHelp } from "./agentInstallHelp";
@@ -161,23 +162,30 @@ function AgentScanBody({
           // another version): nothing to get or show, which would
           // contradict "Found".
           const plain = agent.error ? agentProblemPlain(t, agent.error, name) : "";
-          const offerGet = !agent.installed && !plain;
+          // Here but signed out: signing in is all it needs, and the
+          // runner's own sentence about it adds nothing.
+          const signIn = agent.signedOut ? t("local.scan.signInHint", { command: signInCommand(agent.kind) }) : "";
+          const offerGet = !agent.installed && !plain && !signIn;
           const status = agent.installed
             ? t("local.scan.found")
-            : agent.error
-              ? t("local.scan.problem")
-              : t("local.scan.missing");
+            : signIn
+              ? t("local.scan.signedOut")
+              : agent.error
+                ? t("local.scan.problem")
+                : t("local.scan.missing");
           return (
             <li
               key={agent.kind}
-              className={`agent-scan-row ${agent.installed ? "is-installed" : agent.error ? "is-problem" : "is-missing"}`}
+              className={`agent-scan-row ${agent.installed ? "is-installed" : agent.error || signIn ? "is-problem" : "is-missing"}`}
             >
               <strong>{name}</strong>
               <span>
                 {status}
                 {agent.installed && agent.version ? ` · ${agent.version}` : ""}
               </span>
+              {signIn && <small className="this-computer-problem agent-scan-problem">{signIn}</small>}
               {agent.error &&
+                !signIn &&
                 (plain ? (
                   <div className="this-computer-problem agent-scan-problem">
                     <small>{plain}</small>

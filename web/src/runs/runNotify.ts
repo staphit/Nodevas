@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
-import { translate } from "../i18n";
+import { formatLocalizedTime, translate } from "../i18n";
+import { useAgents } from "../agents/agentStore";
 import { agentName, agentWho } from "../game/labels";
 import { builtInRunner } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
@@ -9,6 +10,7 @@ import { useApp } from "../store";
 import { openNodeRuns } from "./openRuns";
 import { openRunWorkspace } from "./openWorkspace";
 import { applyRefusalKey } from "./resultState";
+import { runSignedOut, signInReader, signedOutText } from "./signedOut";
 import { useRuns } from "./runStore";
 import { workspaceCodeText } from "./workspaceStore";
 
@@ -181,6 +183,14 @@ function appliedFolder(run: Run, kind: RunNotifyKind): string {
   return local.info?.repos?.find((repo) => repo.id === run.repoId)?.path ?? "";
 }
 
+/** A failed run's second line: how to sign its agent in when that is why it
+ * failed (who may sign in decides the words), else what the runner said. */
+function failedBody(run: Run, t: (key: string, values?: Record<string, string | number>) => string): string {
+  if (!runSignedOut(run)) return run.error ?? "";
+  const reader = signInReader(run, useRunners.getState().runners, useAgents.getState().viewer);
+  return signedOutText(t, run, reader);
+}
+
 /** The toast's two lines, in the reader's language. */
 export function runNotifyText(
   run: Run,
@@ -198,6 +208,10 @@ export function runNotifyText(
       return { title: t("result.toast.finished", { agent, title: name }), body: t("result.toast.finishedBody") };
     }
     if (kind === "workspace-merged") return { title: t("result.toast.applied", { title: name }), body: "" };
+    // Its agent is here but signed out: what to do, not the CLI's English.
+    if (kind === "failed" && runSignedOut(run)) {
+      return { title: t("result.toast.signedOut", { agent: agentName(run.agent) }), body: failedBody(run, t) };
+    }
     // An apply refused after the fact: the plain sentence the result buttons
     // say, which always says nothing was changed.
     if (kind === "workspace-failed" && run.workspaceAction?.action === "merge_local") {
@@ -212,7 +226,7 @@ export function runNotifyText(
     const agent = agentWho(run.agent, run.model);
     return kind === "succeeded"
       ? { title: t("globalAgents.toast.finished", { agent, title: name }), body: pr }
-      : { title: t("globalAgents.toast.failed", { agent, title: name }), body: run.error ?? "" };
+      : { title: t("globalAgents.toast.failed", { agent, title: name }), body: failedBody(run, t) };
   }
   switch (kind) {
     case "ask":
@@ -223,7 +237,7 @@ export function runNotifyText(
     case "succeeded":
       return { title: t("runNotify.succeeded", { name }), body: pr };
     case "failed":
-      return { title: t("runNotify.failed", { name }), body: run.error ?? "" };
+      return { title: t("runNotify.failed", { name }), body: failedBody(run, t) };
     case "limit":
       return {
         title: t(run.failureKind === "quota" ? "runNotify.quota" : "runNotify.rateLimit", {
@@ -336,16 +350,24 @@ async function checkBudget(push: RunToastState["push"]): Promise<void> {
   if (told.has(key)) return;
   told.add(key);
   const t = (k: string, values?: Record<string, string | number>) => translate(k, undefined, values);
-  push(
-    {
-      runId: "",
-      nodeId: "",
-      kind: "budget",
-      title: t("runNotify.budget"),
-      body: t("budget.exceeded", { limit: t(`budget.limit.${exceeded}`) }),
-    },
-    `nodevas-${key}`,
-  );
+  // Simple (single-user edition) says it as its HUD does, "today's limit",
+  // with the reset in this computer's time rather than UTC.
+  const text = simpleOn()
+    ? { title: t("simple.notify.limitReached"), body: t("simple.notify.limitBody", { time: formatLocalizedTime(nextUtcDay()) }) }
+    : { title: t("runNotify.budget"), body: t("budget.exceeded", { limit: t(`budget.limit.${exceeded}`) }) };
+  push({ runId: "", nodeId: "", kind: "budget", ...text }, `nodevas-${key}`);
+}
+
+/** Whether the Simple preset is on, outside React: the person chose it and
+ * this is the single-user edition, whose built-in runner only it has
+ * (useSimpleMode is the hook's way). */
+function simpleOn(): boolean {
+  return useApp.getState().preferences.experience === "simple" && Boolean(builtInRunner(useRunners.getState().runners));
+}
+
+/** When the hub's day, and so the daily budget, starts again. */
+function nextUtcDay(now = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
 }
 
 let nextId = 1;

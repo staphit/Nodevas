@@ -180,6 +180,9 @@ export interface Run {
   kind?: RunKind | string;
   /** W5: why a failed run failed, for the fallback chain. */
   failureKind?: FailureKind | string;
+  /** More about failureKind: "signed_out" for an agent_unavailable run whose
+   * agent is on its machine but not signed in (runs/signedOut.ts). */
+  failureCode?: string;
   /** W5: a review run's verdict. */
   verdict?: ReviewVerdict | string;
   /** W5: the run this one falls back from. */

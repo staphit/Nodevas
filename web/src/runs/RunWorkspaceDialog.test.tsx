@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, forgetGlobalRuns, rememberGlobalRun, WorkspaceActionError, type Run, type RunWorkspaceView } from "../api";
+import { api, forgetGlobalRuns, rememberGlobalRun, WorkspaceActionError, type Run, type RunEvent, type RunWorkspaceView } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
@@ -450,17 +450,136 @@ describe("a global agent's workspace", () => {
 describe("in Simple mode", () => {
   const local = () => makeWorkspaceRun({ runnerId: "local1", runnerName: "this machine", repoName: "my-app" });
 
-  function showIn(run: Run, experience: "simple" | "full") {
+  const madePage: RunEvent[] = [
+    { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
+    { seq: 2, type: "tool_call", at: "2026-11-12T08:00:02Z", tool: "Write", input: '{"file_path":"index.html"}' },
+    { seq: 3, type: "text", at: "2026-11-12T08:00:03Z", text: "I made the page with your opening hours." },
+  ];
+
+  function showIn(
+    run: Run,
+    experience: "simple" | "full",
+    tab: "changes" | "terminal" = "changes",
+    events: RunEvent[] = madePage,
+  ) {
     useApp.setState({ preferences: { ...useApp.getState().preferences, experience } });
     useRunners.setState({ runners: [localRunner()], loaded: true });
     seed(run);
+    vi.mocked(api.getRunEvents).mockResolvedValue({ events, more: false });
     render(
       <EditionProvider edition="single">
         <Panel />
       </EditionProvider>,
     );
-    act(() => openRunWorkspace(run.id, "changes"));
+    act(() => openRunWorkspace(run.id, tab));
   }
+
+  // The Log tab: what the agent said, how many files, how it ended; the raw
+  // log (worktree, tool calls, tokens) behind "Show the full record".
+  it("sums up the log in plain words, with the raw log behind a toggle", async () => {
+    showIn(local(), "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("I made the page with your opening hours.")).toBeInTheDocument();
+    expect(within(panel).getByText("It changed 2 files.")).toBeInTheDocument();
+    expect(within(panel).getByText(/^Done\./)).toBeInTheDocument();
+    expect(within(panel).queryByText("worktree created")).toBeNull();
+    const toggle = within(panel).getByRole("button", { name: "Show the full record" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    expect(await within(panel).findByText("worktree created")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Hide the full record" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("sums up the changes in plain words, with the diff behind a toggle", async () => {
+    showIn(local(), "simple", "changes");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("It changed 2 files.")).toBeInTheDocument();
+    expect(panel.querySelector(".run-diff-file-path")).toBeNull();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Show the full record" }));
+    expect(await within(panel).findByText("src/a.ts", { selector: ".run-diff-file-path" })).toBeInTheDocument();
+  });
+
+  it("says it in Chinese with the toggle named 顯示詳細紀錄", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    showIn(local(), "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("I made the page with your opening hours.")).toBeInTheDocument();
+    expect(within(panel).getByText("改了 2 個檔案。")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "顯示詳細紀錄" })).toBeInTheDocument();
+  });
+
+  it("says nothing changed and keeps going while it works", async () => {
+    showIn({ ...local(), status: "running", commit: "", filesChanged: 0, finishedAt: undefined }, "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("The agent is still working on it.")).toBeInTheDocument();
+    expect(within(panel).queryByText(/It changed/)).toBeNull();
+  });
+
+  // A run whose agent is here but signed out says how to sign in, in the
+  // describe box's words, not the bare "could not finish". The events are
+  // what a signed-out Claude really leaves (adapter testdata
+  // claude_signed_out.jsonl): its last text is the CLI's own English, which
+  // Simple mode never shows.
+  it("says how to sign in when the agent was signed out", async () => {
+    showIn(
+      {
+        ...local(),
+        agent: "claude",
+        status: "failed",
+        failureCode: "signed_out",
+        error: "Not logged in · Please run /login",
+        commit: "",
+        filesChanged: 0,
+      },
+      "simple",
+      "terminal",
+      [
+        { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
+        { seq: 2, type: "text", at: "2026-11-12T08:00:02Z", text: "Not logged in · Please run /login" },
+        { seq: 3, type: "usage", at: "2026-11-12T08:00:03Z" },
+        { seq: 4, type: "error", at: "2026-11-12T08:00:04Z", text: "Not logged in · Please run /login" },
+      ],
+    );
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(
+      await within(panel).findByText(/isn't signed in yet\. Open the Terminal app on this computer, type claude/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(api.getRunEvents).toHaveBeenCalled());
+    await act(async () => {});
+    expect(within(panel).queryByText(/could not finish/)).toBeNull();
+    expect(panel.textContent).not.toMatch(/Not logged in/);
+    expect(within(panel).queryByText("What the agent said")).toBeNull();
+  });
+
+  // A failed run whose last words are only its error says nothing twice.
+  it("leaves out the agent's last words when they are only the error", async () => {
+    showIn(
+      { ...local(), status: "failed", error: "rate limited", commit: "", filesChanged: 0 },
+      "simple",
+      "terminal",
+      [{ seq: 1, type: "text", at: "2026-11-12T08:00:01Z", text: "rate limited" }],
+    );
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    await waitFor(() => expect(api.getRunEvents).toHaveBeenCalled());
+    await act(async () => {});
+    expect(within(panel).queryByText("What the agent said")).toBeNull();
+    expect(within(panel).queryByText("rate limited")).toBeNull();
+  });
+
+  it("shows the raw log and diff straight away in full mode", async () => {
+    showIn(local(), "full", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("worktree created")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Show the full record" })).toBeNull();
+  });
 
   afterEach(() => useRunners.setState({ runners: [], loaded: false }));
 

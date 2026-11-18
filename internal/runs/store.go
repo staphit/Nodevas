@@ -395,7 +395,7 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
        retry_at, limit_waits, role, verify, checks, override, job_roles,
        cost_usd, cost_estimated, node_type, acceptance_count, workspace, workspace_commit,
-       is_global, branch_slug, no_pr, origin, decline_code, draft`
+       is_global, branch_slug, no_pr, origin, decline_code, draft, failure_code`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -411,7 +411,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
 		&r.Role, &verify, &checks, &r.Override, &jobRoles,
 		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount, &r.Workspace, &r.WorkspaceCommit,
-		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode, &r.Draft); err != nil {
+		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode, &r.Draft, &r.FailureCode); err != nil {
 		return Record{}, err
 	}
 	r.AcceptanceCount = int(acceptanceCount)
@@ -673,8 +673,10 @@ type Change struct {
 	Summary  string
 	ExitCode *int
 	Usage    *runnerwire.Usage
-	// FailureKind and Verdict are what a finish reports (W5).
+	// FailureKind and Verdict are what a finish reports (W5); FailureCode
+	// what it says more about the kind (CleanFailureCode).
 	FailureKind string
+	FailureCode string
 	Verdict     string
 	// HandoffBranch and HandoffNote are a handoff a finish reports.
 	HandoffBranch string
@@ -722,6 +724,9 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.FailureKind != "" {
 		set("failure_kind", change.FailureKind)
+	}
+	if change.FailureCode != "" {
+		set("failure_code", change.FailureCode)
 	}
 	if change.Verdict != "" {
 		set("verdict", change.Verdict)
@@ -796,9 +801,10 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 		return Record{}, locale.Errorf("%w: finish status %q", "%w：結束狀態「%s」", ErrInvalid, result.Status)
 	}
 	exit := result.ExitCode
-	failureKind := ""
+	failureKind, failureCode := "", ""
 	if result.Status == runnerwire.RunFailed {
 		failureKind = CleanFailureKind(result.FailureKind)
+		failureCode = CleanFailureCode(failureKind, result.FailureCode)
 	}
 	// A handoff is a failed run's, and only ever a handoff branch's name: a
 	// runner cannot have the hub hand on any other ref.
@@ -821,7 +827,7 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
-		FailureKind: failureKind, Verdict: verdict,
+		FailureKind: failureKind, FailureCode: failureCode, Verdict: verdict,
 		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
 		Verify: result.Verify, Checks: result.Checks,
 	})

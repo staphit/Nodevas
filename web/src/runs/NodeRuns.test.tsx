@@ -2,7 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Run, type RunEvent } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
+import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
+import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
 import { NodeRuns } from "./NodeRuns";
 import { useRuns } from "./runStore";
@@ -233,6 +235,34 @@ describe("NodeRuns", () => {
     render(<NodeRuns id="alpha" />);
     expect(await screen.findByText("claude exited")).toBeInTheDocument();
     expect(screen.getByText("Exit code 2")).toBeInTheDocument();
+  });
+
+  // The runner's owner is told how to sign in on that computer; anyone else
+  // whom to ask. The CLI's own line stays below, as said.
+  it("says how to sign a signed-out agent in, to whoever can", async () => {
+    const run = makeRun({
+      status: "failed",
+      error: "Not logged in · Please run /login",
+      exitCode: 1,
+      failureKind: "agent_unavailable",
+      failureCode: "signed_out",
+    });
+    vi.spyOn(api, "listRuns").mockResolvedValue({ runs: [run] });
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    useRunners.setState({ runners: [{ ...localRunner(), id: "r1", name: "desktop", builtIn: false }], loaded: true });
+    const { unmount } = render(<NodeRuns id="alpha" />);
+    expect(
+      await screen.findByText(
+        "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in. Nodevas notices within a minute; then start this task again here.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not logged in · Please run /login")).toBeInTheDocument();
+    unmount();
+
+    useRunners.setState({ runners: [], loaded: true });
+    render(<NodeRuns id="alpha" />);
+    expect(await screen.findByText(/Only the person that computer belongs to can sign it in/)).toBeInTheDocument();
+    useRunners.setState({ runners: [], loaded: false });
   });
 
   it("switches the live view to another run", async () => {

@@ -130,6 +130,36 @@ describe("useGlobalAgents", () => {
     await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 
+  it("reloads its runners' load when a run elsewhere moves (a node's run ended)", async () => {
+    vi.useFakeTimers();
+    const list = vi
+      .spyOn(api, "listGlobalRuns")
+      .mockResolvedValueOnce({ runs: [], more: false, runners: [load({ busy: 1, globalActive: 0 })] })
+      .mockResolvedValue({ runs: [], more: false, runners: [load({ busy: 0, globalActive: 0 })] });
+    // Nobody watches: nothing to keep current.
+    useGlobalAgents.getState().onRunnerLoadChanged();
+    vi.advanceTimersByTime(GLOBAL_COALESCE_MS);
+    expect(list).not.toHaveBeenCalled();
+
+    useGlobalAgents.getState().setWatching(true);
+    await vi.waitFor(() => expect(useGlobalAgents.getState().runners[0]?.busy).toBe(1));
+    useGlobalAgents.getState().onRunnerLoadChanged();
+    useGlobalAgents.getState().onRunnerLoadChanged();
+    vi.advanceTimersByTime(GLOBAL_COALESCE_MS);
+    await vi.waitFor(() => expect(useGlobalAgents.getState().runners[0]?.busy).toBe(0));
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the load alone for a viewer with no runner of their own", async () => {
+    vi.useFakeTimers();
+    const list = vi.spyOn(api, "listGlobalRuns").mockResolvedValue({ runs: [], more: false, runners: [] });
+    useGlobalAgents.getState().setWatching(true);
+    await vi.waitFor(() => expect(useGlobalAgents.getState().loaded).toBe(true));
+    useGlobalAgents.getState().onRunnerLoadChanged();
+    vi.advanceTimersByTime(GLOBAL_COALESCE_MS);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
   it("refreshes a held run on a push while nobody watches the list", async () => {
     useRuns.getState().putRun(globalRun());
     const get = vi.spyOn(api, "getRun").mockResolvedValue(globalRun({ status: "succeeded" }));

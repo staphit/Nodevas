@@ -47,6 +47,16 @@ func CleanFailureKind(kind string) string {
 	return runnerwire.FailureTask
 }
 
+// CleanFailureCode keeps a failure code the contract knows on the kind it
+// belongs to, and drops anything else: FailureSignedOut only says more about
+// FailureAgentAbsent.
+func CleanFailureCode(kind, code string) string {
+	if kind == runnerwire.FailureAgentAbsent && code == runnerwire.FailureSignedOut {
+		return code
+	}
+	return ""
+}
+
 // CleanVerdict keeps a known verdict and drops anything else.
 func CleanVerdict(verdict string) string {
 	switch verdict {
@@ -328,6 +338,10 @@ func ResolveAgentModel(info *runnerwire.Info, am runnerwire.AgentModel) (string,
 		return "", locale.Errorf("the runner has not connected yet, so its agents are unknown", "runner 還沒連線，所以不知道它有哪些 agent")
 	}
 	i := slices.IndexFunc(info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == am.Agent })
+	if i >= 0 && info.Agents[i].SignedOut {
+		return "", locale.Errorf("agent %q is not signed in on the runner; its owner signs in there",
+			"runner 上的 agent「%s」還沒登入，要由 runner 的主人在那台電腦上登入", am.Agent)
+	}
 	if i < 0 || !info.Agents[i].Installed {
 		return "", locale.Errorf("agent %q is not installed on the runner", "runner 上沒有安裝 agent「%s」", am.Agent)
 	}

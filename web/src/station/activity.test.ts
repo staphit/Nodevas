@@ -98,4 +98,27 @@ describe("buildActivity", () => {
     expect(marks).toHaveLength(1);
     expect(marks[0].text).toBe("antigravity 想要執行 run_command");
   });
+
+  it("counts the viewer's global agents' runs too, named by their task and told apart", () => {
+    const lanes = buildActivity({
+      runs: [run({})],
+      globalRuns: [
+        run({ id: "g1", project: "", nodeId: "", global: true, title: "Fix login", startedAt: min(30), finishedAt: undefined, status: "running" }),
+        // Ended before the window: not shown.
+        run({ id: "g0", project: "", nodeId: "", global: true, title: "Old", startedAt: min(200), finishedAt: min(120) }),
+        // Held in both lists: one bar.
+        run({}),
+      ],
+      asks: [],
+      messages: [],
+      now: NOW,
+      titleOf,
+      t,
+    });
+    expect(lanes).toHaveLength(1);
+    expect(lanes[0].bars.map((b) => [b.runId, b.label, b.global])).toEqual([
+      ["r1", "Search", false],
+      ["g1", "Fix login", true],
+    ]);
+  });
 });
