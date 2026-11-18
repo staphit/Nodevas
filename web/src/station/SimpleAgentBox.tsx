@@ -41,6 +41,7 @@ import { useApp, usePreference } from "../store";
 import { startFailure } from "./GlobalAgentForm";
 import { useGlobalAgents } from "./globalAgentsStore";
 import { openGlobalAgents } from "./openGlobalAgents";
+import { offerIsStarting } from "./waiting";
 
 const MIN_ROWS = 3;
 const MAX_ROWS = 12;
@@ -204,7 +205,7 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
             {problem}
           </p>
         )}
-        {current && <StartedLine run={current} />}
+        {current && <StartedLine run={current} builtInRunnerId={runner.id} />}
         <div className="simple-agent-foot">
           {agents.length > 1 && (
             <label className="simple-agent-who">
@@ -299,8 +300,10 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
 /** How the run started here stands, in plain words, following it: at work
  * (or waiting for the person's OK), done (pointing to the result buttons),
  * done with nothing changed, applied, or ended without a result. Each with
- * the way to see it. */
-function StartedLine({ run }: { run: Run }) {
+ * the way to see it. An offer waits for an OK only when it asks: the
+ * built-in runner's offer from the person's click is just starting (the
+ * rule waiting.ts uses). */
+function StartedLine({ run, builtInRunnerId }: { run: Run; builtInRunnerId: string }) {
   const { t } = useI18n();
   const open = (label: string) => (
     <button type="button" className="run-link-button" onClick={() => openGlobalAgents(run.id)}>
@@ -310,7 +313,8 @@ function StartedLine({ run }: { run: Run }) {
   let text: string;
   let link: ReactNode = null;
   let tone = "";
-  switch (run.status) {
+  const justStarting = run.status === "offered" && offerIsStarting(run, builtInRunnerId);
+  switch (justStarting ? "queued" : run.status) {
     case "succeeded":
       if (run.workspace === "merged_local") {
         text = t("simple.box.applied");

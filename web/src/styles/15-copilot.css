@@ -122,6 +122,14 @@
 .app:has(> .copilot-fab) .settings-page {
   padding-bottom: calc(48px + 18px + 16px);
 }
+/* Station is one scroll container too. On a wide window the button stands
+   left of its side column (25-station.css), over the main column's bottom
+   right, where the agents list's last row keeps its "See what it did":
+   room below, past Station's own 16px, so that row scrolls clear. Narrower,
+   25-station.css keeps its own (slightly smaller) room for the button. */
+.app:has(> .copilot-fab) .station {
+  padding-bottom: calc(48px + 18px + 16px);
+}
 /* The editor leaves room below its last line, so it can always be scrolled
    clear of the button. */
 .app:has(> .copilot-fab) .drawer .cm-content {

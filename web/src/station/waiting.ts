@@ -110,8 +110,9 @@ export interface WaitingInput<R extends WaitingRunLike = Run> {
 }
 
 /** Whether an offered run is simply starting: on the built-in runner, with
- * nothing asked (Run.ask). */
-function starting(run: WaitingRunLike, builtIn: string | undefined): boolean {
+ * nothing asked (Run.ask). A person's click started it, so it waits on
+ * nobody; the describe box (SimpleAgentBox) says it the same way. */
+export function offerIsStarting(run: WaitingRunLike, builtIn: string | undefined): boolean {
   const fields = run as { ask?: unknown; runnerId?: string };
   return Boolean(builtIn) && fields.runnerId === builtIn && !fields.ask;
 }
@@ -153,7 +154,7 @@ export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput
     for (const run of applyRuns(input.results, input.now, input.builtInRunnerId)) out.push({ kind: "apply", run });
   }
   for (const run of input.active) {
-    if (run.status === "offered" && !starting(run, input.builtInRunnerId)) out.push({ kind: "offer", run });
+    if (run.status === "offered" && !offerIsStarting(run, input.builtInRunnerId)) out.push({ kind: "offer", run });
   }
   for (const item of runs) if (item.kind === "limit") out.push(item);
   return out;

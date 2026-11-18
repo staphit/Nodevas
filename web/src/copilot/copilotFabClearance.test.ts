@@ -108,6 +108,17 @@ describe("voice copilot button clearance", () => {
     );
   });
 
+  // Station scrolls as one page too. On a wide window the button stands left
+  // of the side column, over the main column's bottom right, where a long
+  // agents list ends: it covered the last row's "See what it did" even
+  // scrolled to the end, since Station kept only its own 16px below it there
+  // (25-station.css pads it for the button only under 1181px).
+  it("gives Station room to scroll its last row out from under the button at any width", () => {
+    expect(rules(".app:has(> .copilot-fab) .station")).toMatch(
+      /padding-bottom:\s*calc\(48px \+ 18px \+ \d+px\)/,
+    );
+  });
+
   // The vertical timeline's date ruler is sticky at its right edge: rows
   // scroll, the ruler never does, so a button over it hides a date for good.
   // While such a timeline is open the button stands left of the ruler.
