@@ -520,6 +520,19 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 	if method == http.MethodPost && path == "/api/themes" {
 		return ClassHeavy, 2.0
 	}
+	// A subgraph's dry run follows a person's edits to a draft (the client
+	// re-checks, debounced, as they change it). It writes nothing, so past the
+	// burst it waits its turn as a read does instead of being refused like
+	// the commit; it costs four reads because it validates the whole board
+	// twice, which still leaves ten checks a second per person.
+	if method == http.MethodPost && path == "/api/graph/subgraph/check" {
+		return ClassRead, 4.0
+	}
+	// Undoing or redoing a batch trashes or restores up to a hundred nodes at
+	// once, like a restore from the trash; one click, rarely repeated.
+	if method == http.MethodPost && batchUndoRedoPath(path) {
+		return ClassExpensive, 1.0
+	}
 	if isExpensivePath(path) {
 		return ClassExpensive, 2.0
 	}
@@ -588,6 +601,16 @@ func analyticsReportPath(path string) bool {
 		return true
 	}
 	return false
+}
+
+// batchUndoRedoPath is POST /api/graph/batches/:id/undo or /redo.
+func batchUndoRedoPath(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/graph/batches/")
+	if !ok {
+		return false
+	}
+	id, action, ok := strings.Cut(rest, "/")
+	return ok && id != "" && (action == "undo" || action == "redo")
 }
 
 // repoInspectPath is POST /api/runners/:id/repos/inspect.

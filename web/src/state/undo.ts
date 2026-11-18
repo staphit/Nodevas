@@ -37,7 +37,24 @@ export type UndoEntry =
       eventId: string;
       previousTimestamp: string;
       label?: string;
+    }
+  /**
+   * A recorded subgraph batch (a Copilot draft's Create). Reverting it while
+   * its nodes exist calls the batch's undo (the server trashes what nobody
+   * changed since); with `undone` set, reverting calls its redo.
+   */
+  | {
+      kind: "batch";
+      batchId: string;
+      ids: string[];
+      undone?: boolean;
+      /** The draft entry it came from, so the panel can follow. */
+      entryId?: string;
+      conversationId?: string;
+      label?: string;
     };
+
+export type BatchUndoEntry = Extract<UndoEntry, { kind: "batch" }>;
 
 /** Catalog keys, read when the label is shown so it follows the language. */
 const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
@@ -46,7 +63,39 @@ const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
   "delete-node": "undo.label.deleteNode",
   "lifecycle-status": "undo.label.lifecycleStatus",
   "lifecycle-move": "undo.label.lifecycleMove",
+  batch: "undo.label.batch",
 };
+
+/** What a batch undo or redo did, for whoever made the batch (the copilot). */
+export type BatchRevert =
+  | {
+      direction: "undo";
+      entry: BatchUndoEntry;
+      trashed: string[];
+      /** Kept: changed, status, claimed, busy or denied (api BatchRefusal). */
+      refused: { id: string; code: string; reason?: string }[];
+    }
+  | {
+      direction: "redo";
+      entry: BatchUndoEntry;
+      restored: string[];
+      /** Not restored: "exists" (already back on the board), "not-in-trash", "link". */
+      skipped?: { id: string; code: string; reason?: string }[];
+    };
+
+const batchListeners = new Set<(revert: BatchRevert) => void>();
+
+/** Hears every batch undo and redo; returns the unsubscribe. */
+export function observeBatchRevert(listener: (revert: BatchRevert) => void): () => void {
+  batchListeners.add(listener);
+  return () => {
+    batchListeners.delete(listener);
+  };
+}
+
+export function notifyBatchRevert(revert: BatchRevert): void {
+  for (const listener of batchListeners) listener(revert);
+}
 
 let stack: UndoEntry[] = [];
 let redoStack: UndoEntry[] = [];
@@ -109,6 +158,18 @@ export function peekRedo(): UndoEntry | undefined {
 export function clearRedo(): void {
   if (redoStack.length === 0) return;
   redoStack = [];
+  onChange?.();
+}
+
+/**
+ * Takes a batch's step off the undo stack, wherever it sits: the batch was
+ * undone another way (the draft toast's Undo, while a later step was on top),
+ * so replaying it would undo nothing and still say it did.
+ */
+export function dropBatchUndo(batchId: string): void {
+  const kept = stack.filter((entry) => !(entry.kind === "batch" && entry.batchId === batchId));
+  if (kept.length === stack.length) return;
+  stack = kept;
   onChange?.();
 }
 

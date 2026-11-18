@@ -320,6 +320,9 @@ func planPrompt(job runnerwire.Job) string {
 	if strings.TrimSpace(job.Review) != "" {
 		return replanPrompt(job)
 	}
+	if job.Draft {
+		return planDraftPrompt(job)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are running headless as a planner for Nodevas goal node %s", job.NodeID)
 	if job.NodeTitle != "" {
@@ -346,6 +349,49 @@ func planPrompt(job runnerwire.Job) string {
 	if job.Role == rolePlanner {
 		b.WriteString("8. " + plannerAcceptanceRule + "\n")
 		b.WriteString("9. " + untrustedRule + "\n")
+	}
+	b.WriteString("\nThe goal:\n\n")
+	b.WriteString(job.Prompt)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// planDraftPrompt is a plan job whose writes the hub holds as a draft for the
+// person (Job.Draft, P6): one create_subgraph, provisional ids, no goal link.
+func planDraftPrompt(job runnerwire.Job) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are running headless as a planner for Nodevas goal node %s", job.NodeID)
+	if job.NodeTitle != "" {
+		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
+	}
+	b.WriteString(", in a read-only checkout of the repository. " + headlessAskNote + "\n\n")
+	b.WriteString("Your job is to break the goal into tasks, not to do them. Other agents will implement each task " +
+		"later, one pull request per task. This run is a draft: the person reviews, edits and creates your tasks " +
+		"on the Nodevas board themselves, and nothing you send is written to the board.\n\n")
+	b.WriteString("Rules for this run:\n")
+	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push. Anything you change is thrown away.\n")
+	fmt.Fprintf(&b, "2. Read the goal with the nodevas MCP tool get_node (id %q), then read the code you need to plan well.\n", job.NodeID)
+	b.WriteString(planOutlineStep)
+	b.WriteString("3. Break the goal into small tasks, each one independently reviewable and mergeable as one pull request. " +
+		"Prefer a handful of well-scoped tasks over many tiny ones.\n")
+	fmt.Fprintf(&b, "4. Send all the tasks in one create_subgraph call (at most 100 nodes), even a single task: create_node, "+
+		"link_nodes, set_acceptance and every other board write are refused in this run. %s Give each a key, a short "+
+		"title, a body saying what to change and how to tell it is done (files, acceptance checks), and tags including "+
+		"%q. dependsOn names the tasks it needs finished first, by key or existing id; refs names existing Notes "+
+		"(character sheets, settings) it uses as context.\n", planKindRule, GoalTag(job.NodeID))
+	b.WriteString("5. Add a dependsOn only where one task really needs another's change; independent tasks run in parallel. " +
+		"Do not link anything to the goal and leave edges out: when the person creates the draft, the goal is made to " +
+		"wait for every non-note task that no other task waits for.\n")
+	fmt.Fprintf(&b, "6. create_subgraph answers with provisional ids (%s<key>) that are not on the board: do not pass them "+
+		"to link_nodes or get_node, and do not send the plan again because get_graph_outline does not show it. If "+
+		"create_subgraph refuses the call, fix what it names and send the whole corrected call again; a key you send "+
+		"again replaces that task in the draft.\n", runnerwire.PlanDraftIDPrefix)
+	b.WriteString("7. Do not claim, start or change the status of the goal or any node, and do not edit the goal node.\n")
+	b.WriteString("8. Finish with a short summary: the tasks you drafted (key and title) and the order they can run in. " +
+		"Say they are a draft for the person to review, not tasks on the board.\n")
+	if job.Role == rolePlanner {
+		b.WriteString("9. " + plannerAcceptanceRule + "\n")
+		b.WriteString("10. " + untrustedRule + "\n")
 	}
 	b.WriteString("\nThe goal:\n\n")
 	b.WriteString(job.Prompt)

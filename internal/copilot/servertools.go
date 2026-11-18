@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/runnerwire"
@@ -49,7 +50,8 @@ var serverTools = map[string]serverToolSpec{
 		description: "File a requirement the person dictated as a goal node and start a plan run on their runner: " +
 			"a coding agent reads the repository and breaks the goal into task nodes with dependencies, changing " +
 			"no files. Use it only after the person confirmed the requirement. The plan run takes a few minutes; " +
-			"its tasks appear under the goal on the board. Pass goalNodeId to break down an existing node instead.",
+			"its plan comes back to this conversation as a draft the person reviews and creates. Pass goalNodeId to " +
+			"break down an existing node instead.",
 		schema: `{"type":"object","properties":{` +
 			`"requirement":{"type":"string","description":"The requirement, in the person's own words"},` +
 			`"title":{"type":"string","description":"Short title for the goal node; derived from the requirement when omitted"},` +
@@ -123,8 +125,17 @@ type serverToolEnv struct {
 	accountID  string
 	// followup, when set, records a plan run start_breakdown or revise_goal
 	// started (revision set for the latter), so the copilot follows up in the
-	// conversation when it ends (followup.go, revise.go).
-	followup func(goalNodeID, runID string, revision *Revision)
+	// conversation when it ends (followup.go, revise.go); the error is the
+	// follow-up row's.
+	followup func(goalNodeID, runID string, revision *Revision) error
+	// draftPlans (P6): start_breakdown starts a draft plan run, whose plan
+	// comes back as a draft card. Set with followup when the server can read
+	// a draft run's capture (Options.PlanDraft).
+	draftPlans bool
+	// planDraftBusy, when set, says why the goal's plan is still a draft
+	// (planDraftBusy), "" when it is not; start_autopilot, start_breakdown
+	// on a goal and revise_goal refuse while it is.
+	planDraftBusy func(ctx context.Context, goal string) (string, error)
 }
 
 // maxServerToolResponse bounds a response a server tool reads.
@@ -149,7 +160,9 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 		}
 		target += sep + "project=" + url.QueryEscape(e.project)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, reader)
+	// Marked as a copilot server tool's request: POST /api/runs takes a
+	// draft plan run only from one (auth.CopilotServerTool).
+	req, err := http.NewRequestWithContext(auth.WithCopilotServerTool(ctx), method, target, reader)
 	if err != nil {
 		return err
 	}
@@ -196,6 +209,23 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 		}
 	}
 	return nil
+}
+
+// planDraftRefusal checks env.planDraftBusy for goal: ok false with the
+// tool error to answer when the goal's plan is still a draft, or when that
+// could not be told.
+func planDraftRefusal(ctx context.Context, env *serverToolEnv, goal, refused string) (toolbridge.Result, bool) {
+	if env.planDraftBusy == nil {
+		return toolbridge.Result{}, true
+	}
+	reason, err := env.planDraftBusy(ctx, goal)
+	if err != nil {
+		return toolError("Could not check the goal's plan draft: %v", err), false
+	}
+	if reason != "" {
+		return toolError("%s: %s", refused, reason), false
+	}
+	return toolbridge.Result{}, true
 }
 
 // apiError is a non-2xx answer from the API.
@@ -364,6 +394,12 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 	if len(in.Requirement) > maxRequirementBytes || !utf8.ValidString(in.Requirement) {
 		return toolError("the requirement is too long (at most %d bytes)", maxRequirementBytes)
 	}
+	// No second plan of a goal while its first is still a draft.
+	if in.GoalNodeID != "" {
+		if refused, ok := planDraftRefusal(ctx, env, in.GoalNodeID, "Not started"); !ok {
+			return refused
+		}
+	}
 	target, err := pickTarget(ctx, env, strings.TrimSpace(in.RunnerID), strings.TrimSpace(in.Agent),
 		strings.TrimSpace(in.Model), strings.TrimSpace(in.RepoID))
 	if err != nil {
@@ -388,11 +424,18 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 		goal, created = node.ID, true
 	}
 
-	var run runnerwire.Run
-	err = env.do(ctx, http.MethodPost, "/api/runs", map[string]any{
+	// P6: with follow-ups and a way to read the capture, the plan run is a
+	// draft: the hub holds its writes, and its plan comes back here.
+	draft := env.draftPlans && env.followup != nil
+	runBody := map[string]any{
 		"nodeId": goal, "runnerId": target.runner.ID, "agent": target.agent, "model": target.model,
 		"repoId": target.repo.ID, "kind": runnerwire.JobPlan,
-	}, &run)
+	}
+	if draft {
+		runBody["draft"] = true
+	}
+	var run runnerwire.Run
+	err = env.do(ctx, http.MethodPost, "/api/runs", runBody, &run)
 	if err != nil {
 		text := "Could not start the plan run: %v"
 		if created {
@@ -402,15 +445,38 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 	}
 	note := "The plan run reads the repository and adds task nodes under the goal; it may take a few minutes. " +
 		"Its tasks need the person's review before the autopilot starts."
+	if draft {
+		note = "The plan run reads the repository and drafts task nodes for the goal; it may take a few minutes. " +
+			"Nothing is written to the board: its plan comes back here as a draft the person reviews, edits and " +
+			"creates. The autopilot can start only after that."
+	}
 	if env.followup != nil && run.ID != "" {
-		env.followup(goal, run.ID, nil)
-		note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
-			"to start the autopilot. Tell the person you will come back to them then; they need not ask."
+		if err := env.followup(goal, run.ID, nil); err != nil && draft {
+			// A draft run's only way back to the person is its follow-up.
+			_ = env.do(ctx, http.MethodPost, "/api/runs/"+url.PathEscape(run.ID)+"/cancel", nil, nil)
+			const why = "its follow-up could not be recorded (%v), so the plan could not come back here; the run %s " +
+				"was cancelled. Try again."
+			text := "Could not start the breakdown: " + why
+			if created {
+				text = "Created the goal node " + goal + ", but could not start the breakdown: " + why
+			}
+			return toolError(text, err, run.ID)
+		}
+		if draft {
+			note += " When it ends, this conversation gets a follow-up by itself: the plan as a draft card for the " +
+				"person to create. Tell the person you will come back to them then; they need not ask."
+		} else {
+			note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
+				"to start the autopilot. Tell the person you will come back to them then; they need not ask."
+		}
 	}
 	result := map[string]any{
 		"goalNodeId": goal, "goalCreated": created, "runId": run.ID, "runStatus": run.Status,
 		"runner": target.runner.Name, "agent": target.agent, "model": target.model, "repo": target.repo.Name,
 		"note": note,
+	}
+	if draft {
+		result["draft"] = true
 	}
 	if title != "" {
 		result["goalTitle"] = title
@@ -452,6 +518,11 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	goal := strings.TrimSpace(in.GoalNodeID)
 	if goal == "" {
 		return toolError("give the goalNodeId")
+	}
+	// The goal's tasks must exist: not while its plan is still a draft
+	// (P6), which a Planner-stage autopilot would plan a second time.
+	if refused, ok := planDraftRefusal(ctx, env, goal, "Not started"); !ok {
+		return refused
 	}
 	// A paused autopilot on the goal (revise_goal pauses it) is resumed with
 	// the goal's tasks as they stand, rather than refused as a second one.

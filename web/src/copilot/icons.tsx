@@ -50,3 +50,12 @@ export const IconSpeakerOff = (p: P) => (
     <path d="m16 10 4 4M20 10l-4 4" />
   </svg>
 );
+
+/** The Copilot button: a pencil with a spark — typing first, not a microphone. */
+export const IconCopilot = (p: P) => (
+  <svg {...base(p)} data-icon="copilot">
+    <path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z" />
+    <path d="M13.5 7l3 3" />
+    <path d="M19 14.5v3M17.5 16h3M5.5 3.5v2.5M4.25 4.75h2.5" />
+  </svg>
+);

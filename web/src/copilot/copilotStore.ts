@@ -9,8 +9,14 @@
 
 import { create } from "zustand";
 import { readPreference, subscribePreferences, writePreference } from "../preferences";
+import { translate } from "../i18n";
 import type {
   CopilotConversation,
+  CopilotDraft,
+  CopilotDraftData,
+  CopilotDraftExtras,
+  CopilotDraftOrigin,
+  CopilotDraftStep,
   CopilotEntry,
   CopilotMode,
   CopilotSource,
@@ -52,7 +58,15 @@ export type TranscriptItem =
       status: ToolStatus;
       live?: boolean;
     }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+  | { kind: "notice"; id: string; text: string; tone: "info" | "error" }
+  /**
+   * Nodes the copilot proposes. `data` is the draft as the server stored it
+   * (null when it could not be read); the person's edits live in
+   * `CopilotState.drafts`, so editing never changes `items`.
+   */
+  | { kind: "draft"; id: string; text: string; data: CopilotDraftData | null };
+
+export type DraftItem = Extract<TranscriptItem, { kind: "draft" }>;
 
 export interface PermissionRequest {
   requestId: string;
@@ -101,12 +115,20 @@ export interface TurnState {
   turnId: string | null;
   /** Final assistant text of the newest finished turn, for spoken replies. */
   lastReply: { turnId: string; text: string } | null;
+  /** The step a running draft turn is on. */
+  draftStep: CopilotDraftStep | null;
 }
+
+/** What the text box does: draft nodes ("make", the default) or chat ("ask"). */
+export type CopilotIntent = "make" | "ask";
 
 export interface CopilotPrefs {
   speakReplies: boolean;
   /** Mode a new conversation starts in. */
   defaultMode: CopilotMode;
+  intent: CopilotIntent;
+  /** Send a spoken request when the person stops talking, instead of leaving it in the box. */
+  voiceAutoSend: boolean;
 }
 
 export interface CopilotState extends TurnState, CopilotPrefs {
@@ -121,6 +143,21 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   /** Transient line under the header (load failures, speech errors). */
   notice: string | null;
   download: BrowserModelDownload;
+  /**
+   * The person's edits of a draft, by entry id; a draft not here is as the
+   * copilot proposed it. Kept apart from `items` so an edit does not move the
+   * transcript.
+   */
+  drafts: Record<string, CopilotDraft>;
+  /**
+   * The draft the newest turn refines (its entry id), null for any other
+   * turn. Read together with `running` (isRefining): while its refine runs,
+   * a draft's card is read-only, so nothing done to it is lost or created
+   * twice when the refined draft lands.
+   */
+  refining: string | null;
+  /** Text for the box, as if typed; voice marks a spoken request to check before sending. */
+  composerFill: { text: string; at: number; voice?: boolean } | null;
 
   setStatus: (status: CopilotStatus | null) => void;
   setOpen: (open: boolean) => void;
@@ -136,14 +173,22 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   markRead: (id: string) => void;
   setMode: (mode: CopilotMode) => void;
   setSpeakReplies: (speak: boolean) => void;
+  setIntent: (intent: CopilotIntent) => void;
+  setVoiceAutoSend: (send: boolean) => void;
   setNotice: (notice: string | null) => void;
   setDownload: (download: Partial<BrowserModelDownload>) => void;
-  /** Starts a turn: adds the optimistic user bubble. */
-  beginTurn: (text: string, source: CopilotSource) => void;
+  /** Starts a turn: adds the optimistic user bubble. `refineOf`: the draft it refines. */
+  beginTurn: (text: string, source: CopilotSource, refineOf?: string) => void;
   applyEvent: (event: CopilotTurnEvent) => void;
   /** Ends the turn on the client side (finished, aborted or failed). */
   endTurn: (error?: string) => void;
   markDecisionSubmitting: (requestId: string, submitting: boolean) => void;
+  /** Applies one edit to a draft (on top of earlier edits). */
+  editDraft: (entryId: string, update: (draft: CopilotDraft) => CopilotDraft) => void;
+  /** The server's new word on a draft: its state, batch, created ids. */
+  setDraftData: (entryId: string, patch: Partial<CopilotDraftData>) => void;
+  /** Puts text into the composer, as if typed. */
+  fillComposer: (text: string, voice?: boolean) => void;
 }
 
 /** The panel's choices: preferences that follow the account. */
@@ -151,6 +196,8 @@ export function readCopilotPrefs(): CopilotPrefs {
   return {
     speakReplies: readPreference("copilotSpeakReplies"),
     defaultMode: readPreference("copilotDefaultMode"),
+    intent: readPreference("copilotIntent"),
+    voiceAutoSend: readPreference("copilotVoiceAutoSend"),
   };
 }
 
@@ -183,8 +230,73 @@ export function formatToolValue(value: unknown): string {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/** A plan draft's origin, when it names its run and goal; else undefined. */
+function parseDraftOrigin(value: unknown): CopilotDraftOrigin | undefined {
+  if (!isRecord(value) || typeof value.runId !== "string" || typeof value.goalId !== "string") return undefined;
+  const origin: CopilotDraftOrigin = { runId: value.runId, goalId: value.goalId };
+  for (const field of ["goalTitle", "agent", "model"] as const) {
+    if (typeof value[field] === "string") origin[field] = value[field];
+  }
+  return origin;
+}
+
+/** A plan draft's extras by key; a malformed value or field is dropped. */
+function parseDraftExtras(value: unknown): Record<string, CopilotDraftExtras> | undefined {
+  if (!isRecord(value)) return undefined;
+  const extras: Record<string, CopilotDraftExtras> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!isRecord(item)) continue;
+    const parsed: CopilotDraftExtras = {};
+    if (isStringList(item.tags)) parsed.tags = item.tags;
+    if (isStringList(item.acceptance)) parsed.acceptance = item.acceptance;
+    if (typeof item.priority === "string" && item.priority) parsed.priority = item.priority;
+    if (Object.keys(parsed).length) extras[key] = parsed;
+  }
+  return extras;
+}
+
+/** A draft entry's data; null when it is missing or not a draft. */
+export function parseDraftData(raw: string | undefined): CopilotDraftData | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<CopilotDraftData> | null;
+    if (!value || typeof value !== "object" || !value.draft || !Array.isArray(value.draft.nodes)) {
+      return null;
+    }
+    const { origin: rawOrigin, extras: rawExtras, ...rest } = value;
+    const origin = parseDraftOrigin(rawOrigin);
+    const extras = parseDraftExtras(rawExtras);
+    return {
+      ...rest,
+      ...(origin ? { origin } : {}),
+      ...(extras ? { extras } : {}),
+      draft: {
+        ...value.draft,
+        summary: value.draft.summary ?? "",
+        nodes: value.draft.nodes.filter(
+          (node) => node && typeof node.key === "string" && typeof node.title === "string",
+        ),
+      },
+      issues: Array.isArray(value.issues) ? value.issues : [],
+      provider: value.provider ?? "",
+      model: value.model ?? "",
+      state: value.state === "committed" || value.state === "discarded" ? value.state : "open",
+    } as CopilotDraftData;
+  } catch {
+    return null;
+  }
+}
+
 export function entryToItem(entry: CopilotEntry): TranscriptItem {
   switch (entry.kind) {
+    case "draft":
+      return { kind: "draft", id: entry.id, text: entry.text ?? "", data: parseDraftData(entry.data) };
     case "user":
       return {
         kind: "user",
@@ -243,6 +355,15 @@ function isSilentAssistant(entry: CopilotEntry): boolean {
 }
 
 function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptItem[] {
+  if (entry.kind === "draft") {
+    // A draft entry can come again with a new state (draft-state answers).
+    const stored = entryToItem(entry);
+    const index = items.findIndex((item) => item.id === entry.id);
+    if (index < 0) return [...items, stored];
+    const next = items.slice();
+    next[index] = stored;
+    return next;
+  }
   if (items.some((item) => item.id === entry.id)) return items;
   if (isSilentAssistant(entry)) return items;
   const stored = entryToItem(entry);
@@ -270,6 +391,66 @@ function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptIte
   const next = items.slice();
   next[index] = merged;
   return next;
+}
+
+/** Draft turns fail with a code the panel says in the reader's language. */
+const DRAFT_ERROR_CODES = new Set(["draft_unreadable", "draft_board", "provider_error"]);
+
+function turnErrorText(event: { message: string; code?: string }): string {
+  if (event.code && DRAFT_ERROR_CODES.has(event.code)) {
+    const text = translate(`draft.error.${event.code}`);
+    // provider_error carries the provider's own words, which help.
+    return event.code === "provider_error" && event.message ? `${text} ${event.message}` : text;
+  }
+  return event.message || event.code || "error";
+}
+
+/** The draft the overlay shows and a refine sends: the newest one, while open. */
+export function activeDraftId(state: { items: TranscriptItem[] }): string | null {
+  for (let index = state.items.length - 1; index >= 0; index--) {
+    const item = state.items[index];
+    if (item.kind === "draft") return item.data?.state === "open" ? item.id : null;
+  }
+  return null;
+}
+
+/** Whether a draft is a coding agent's plan (it names the run it came from). */
+export function isPlanDraft(state: { items: TranscriptItem[] }, entryId: string | null): boolean {
+  return Boolean(entryId && draftItemOf(state, entryId)?.data?.origin);
+}
+
+/**
+ * The open draft a "Make nodes" message refines. A coding agent's plan is
+ * never refined by the copilot's drafter (it holds fewer nodes and knows
+ * nothing of the plan's tags and acceptance): it is created or discarded.
+ */
+export function refinableDraftId(state: { items: TranscriptItem[] }): string | null {
+  const active = activeDraftId(state);
+  return isPlanDraft(state, active) ? null : active;
+}
+
+/** The composer's placeholder in "Make nodes": refining while a draft is open. */
+export function makePlaceholderKey(state: { items: TranscriptItem[] }): string {
+  const active = activeDraftId(state);
+  if (!active) return "copilot.placeholder.make";
+  return isPlanDraft(state, active) ? "copilot.placeholder.planOpen" : "copilot.placeholder.refine";
+}
+
+export function draftItemOf(state: { items: TranscriptItem[] }, entryId: string): DraftItem | undefined {
+  return state.items.find((item): item is DraftItem => item.kind === "draft" && item.id === entryId);
+}
+
+/** Whether a running turn is refining this draft (its card is read-only meanwhile). */
+export function isRefining(state: { running: boolean; refining: string | null }, entryId: string): boolean {
+  return state.running && state.refining === entryId;
+}
+
+/** A draft as it stands now: the person's edits, else as proposed. */
+export function currentDraft(
+  state: { items: TranscriptItem[]; drafts: Record<string, CopilotDraft> },
+  entryId: string,
+): CopilotDraft | null {
+  return state.drafts[entryId] ?? draftItemOf(state, entryId)?.data?.draft ?? null;
 }
 
 /** Applies one stream event. Pure: returns the changed fields only. */
@@ -375,11 +556,14 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
       return event.entry ? { items: adoptEntry(state.items, event.entry) } : {};
     case "error":
       return {
+        draftStep: null,
         items: [
           ...finishStreaming(state.items),
-          { kind: "notice", id: liveId("error"), text: event.message || event.code || "error", tone: "error" },
+          { kind: "notice", id: liveId("error"), text: turnErrorText(event), tone: "error" },
         ],
       };
+    case "draft_status":
+      return { draftStep: event.code };
     case "turn_finished": {
       const items = finishStreaming(state.items);
       // The reply to speak is the assistant text after this turn's user bubble.
@@ -396,6 +580,7 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
       return {
         items,
         running: false,
+        draftStep: null,
         pending: [],
         lastReply: reply ? { turnId: state.turnId ?? liveId("turn"), text: reply } : state.lastReply,
         turnId: null,
@@ -422,10 +607,16 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   activeId: null,
   mode: initialPrefs.defaultMode,
   speakReplies: initialPrefs.speakReplies,
+  intent: initialPrefs.intent,
+  voiceAutoSend: initialPrefs.voiceAutoSend,
   defaultMode: initialPrefs.defaultMode,
   lastSource: "text",
   notice: null,
   download: { active: false, progress: null, error: null },
+  drafts: {},
+  refining: null,
+  composerFill: null,
+  draftStep: null,
   items: [],
   pending: [],
   running: false,
@@ -443,15 +634,27 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       items: entries.filter((entry) => !isSilentAssistant(entry)).map(entryToItem),
       pending: [],
       lastReply: null,
+      drafts: {},
+      draftStep: null,
     }),
   showFollowup: (conversation, entries) => {
     const reply = [...entries].reverse().find((entry) => entry.kind === "assistant");
+    // The same conversation, more of it: edits of a draft still in it stay
+    // (they live only here until a Create records them).
+    const state = get();
+    const sameConversation = state.activeId === conversation.id;
+    const ids = new Set(entries.map((entry) => entry.id));
+    const drafts = sameConversation
+      ? Object.fromEntries(Object.entries(state.drafts).filter(([id]) => ids.has(id)))
+      : {};
     set({
       activeId: conversation.id,
       mode: isMode(conversation.mode) ? conversation.mode : get().defaultMode,
       items: entries.map(entryToItem),
       pending: [],
       lastReply: reply?.text ? { turnId: `followup-${reply.id}`, text: reply.text } : null,
+      drafts,
+      draftStep: null,
     });
   },
   markRead: (id) =>
@@ -468,12 +671,22 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     writePreference("copilotSpeakReplies", speakReplies);
     set({ speakReplies });
   },
+  setIntent: (intent) => {
+    writePreference("copilotIntent", intent);
+    set({ intent });
+  },
+  setVoiceAutoSend: (voiceAutoSend) => {
+    writePreference("copilotVoiceAutoSend", voiceAutoSend);
+    set({ voiceAutoSend });
+  },
   setNotice: (notice) => set({ notice }),
   setDownload: (download) => set((state) => ({ download: { ...state.download, ...download } })),
-  beginTurn: (text, source) =>
+  beginTurn: (text, source, refineOf) =>
     set((state) => ({
       running: true,
+      refining: refineOf ?? null,
       turnId: null,
+      draftStep: null,
       lastSource: source,
       notice: null,
       items: [...state.items, { kind: "user", id: liveId("user"), text, source, live: true }],
@@ -482,7 +695,9 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   endTurn: (error) =>
     set((state) => ({
       running: false,
+      refining: null,
       turnId: null,
+      draftStep: null,
       pending: [],
       items: [
         ...finishStreaming(state.items).map((item) =>
@@ -501,15 +716,44 @@ export const useCopilot = create<CopilotState>((set, get) => ({
         request.requestId === requestId ? { ...request, submitting } : request,
       ),
     })),
+  editDraft: (entryId, update) =>
+    set((state) => {
+      const current = currentDraft(state, entryId);
+      if (!current) return {};
+      const next = update(current);
+      if (next === current) return {};
+      return { drafts: { ...state.drafts, [entryId]: next } };
+    }),
+  setDraftData: (entryId, patch) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.kind === "draft" && item.id === entryId && item.data
+          ? { ...item, data: { ...item.data, ...patch } }
+          : item,
+      ),
+    })),
+  fillComposer: (text, voice = false) => set({ composerFill: { text, at: Date.now(), voice } }),
 }));
 
 // The choices follow the account: one made in another tab, browser or device
 // (preferences/sync.ts) shows here too. The open conversation keeps its mode.
 subscribePreferences((key) => {
-  if (key !== "copilotSpeakReplies" && key !== "copilotDefaultMode") return;
+  if (
+    key !== "copilotSpeakReplies" &&
+    key !== "copilotDefaultMode" &&
+    key !== "copilotIntent" &&
+    key !== "copilotVoiceAutoSend"
+  )
+    return;
   const prefs = readCopilotPrefs();
   const state = useCopilot.getState();
-  if (state.speakReplies === prefs.speakReplies && state.defaultMode === prefs.defaultMode) return;
+  if (
+    state.speakReplies === prefs.speakReplies &&
+    state.defaultMode === prefs.defaultMode &&
+    state.intent === prefs.intent &&
+    state.voiceAutoSend === prefs.voiceAutoSend
+  )
+    return;
   useCopilot.setState({
     ...prefs,
     ...(state.activeId === null && state.items.length === 0 ? { mode: prefs.defaultMode } : {}),

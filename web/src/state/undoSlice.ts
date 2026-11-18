@@ -19,6 +19,7 @@ import { translate } from "../i18n";
 import { queues, sendGraphWrite } from "./internals";
 import {
   clearRedo,
+  notifyBatchRevert,
   peekRedo,
   peekUndo,
   popRedo,
@@ -48,7 +49,13 @@ const NOTES = {
  * whether the write landed, and which entry a retry should start from (a
  * partially-applied delete has already consumed its trash files).
  */
-type Attempt = { applied: boolean; retry: UndoEntry };
+type Attempt = {
+  applied: boolean;
+  retry: UndoEntry;
+  /** The step answered but changed nothing: no inverse, and the opposite
+   * stack stays as it was. */
+  unchanged?: boolean;
+};
 
 /**
  * Applies one entry and returns the entry that would undo this application, or
@@ -96,7 +103,29 @@ async function applyEntry(
   }
 
   let inverse: UndoEntry | null = null;
-  if (entry.kind === "graph") {
+  if (entry.kind === "batch") {
+    // The server decides per node: what somebody changed since stays.
+    if (!entry.undone) {
+      const result = await api.undoBatch(entry.batchId);
+      attempt.applied = true;
+      const trashed = result.trashed ?? [];
+      for (const id of trashed) get().closeTab(id);
+      notifyBatchRevert({ direction: "undo", entry, trashed, refused: result.refused ?? [] });
+      if (trashed.length === 0) {
+        // Every node was kept (or the batch was undone already): the board
+        // did not move and the server did not mark the batch undone, so there
+        // is nothing to redo, and the redo steps already there still hold.
+        attempt.unchanged = true;
+        return null;
+      }
+      inverse = { ...entry, undone: true };
+    } else {
+      const result = await api.redoBatch(entry.batchId);
+      attempt.applied = true;
+      inverse = { ...entry, undone: false };
+      notifyBatchRevert({ direction: "redo", entry, restored: result.restored ?? [], skipped: result.skipped ?? [] });
+    }
+  } else if (entry.kind === "graph") {
     const { graph, graphRev } = get();
     if (!graph) return null;
     const before = structuredClone(graph);
@@ -182,6 +211,7 @@ function revert(
       // The board moved on: an error the top bar shows about the step before
       // no longer describes what is on screen.
       set((state) => (state.lastOperation?.status === "error" ? { lastOperation: null } : {}));
+      if (attempt.unchanged) return true;
       if (!inverse) {
         // The step landed but cannot describe its own reverse. Everything on
         // the opposite stack assumed that reverse, so it goes too.

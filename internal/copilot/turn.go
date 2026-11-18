@@ -3,7 +3,9 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -106,6 +108,12 @@ type TurnRequest struct {
 	// BrowserModel is the browser's own Prompt API availability
 	// ("available", "downloadable", …; "" when it has none).
 	BrowserModel string
+	// Intent is IntentAsk (the chat tool loop; the default) or IntentDraft
+	// (draft.go). Previous is the draft being refined, as the person left
+	// it, and RefineOf its entry; both only with IntentDraft.
+	Intent   string
+	Previous *Draft
+	RefineOf string
 }
 
 // Turn runs one turn: it stores what the person said, lets the model answer
@@ -132,6 +140,27 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	}
 	if req.Mode != "" && !req.Mode.Valid() {
 		return fmt.Errorf("%w: unknown mode %q", ErrInvalid, req.Mode)
+	}
+	switch req.Intent {
+	case "":
+		req.Intent = IntentAsk
+	case IntentAsk, IntentDraft:
+	default:
+		return fmt.Errorf("%w: intent must be ask or draft", ErrInvalid)
+	}
+	if req.Intent != IntentDraft && (req.Previous != nil || req.RefineOf != "") {
+		return fmt.Errorf("%w: only a draft turn refines a draft", ErrInvalid)
+	}
+	if req.Previous != nil {
+		previous := *req.Previous
+		previous.Nodes = slices.Clone(req.Previous.Nodes)
+		if err := boundDraft(&previous, MaxDraftNodes, maxDraftTitleRunes); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		req.Previous = &previous
+	}
+	if req.RefineOf != "" && !nodeIDPattern.MatchString(req.RefineOf) {
+		return fmt.Errorf("%w: bad refineOf", ErrInvalid)
 	}
 
 	conversation, err := s.store.Conversation(ctx, req.Actor.ID, req.ConversationID)
@@ -249,8 +278,14 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		}
 		if s.followupsOn() {
 			// The plan run's end comes back to this conversation by itself.
-			server.followup = func(goal, runID string, revision *Revision) {
-				s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language, revision)
+			server.followup = func(goal, runID string, revision *Revision) error {
+				return s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language, revision)
+			}
+			// P6: a breakdown's plan comes back as a draft, and nothing
+			// starts on the goal while it is one.
+			server.draftPlans = s.opts.PlanDraft != nil
+			server.planDraftBusy = func(ctx context.Context, goal string) (string, error) {
+				return s.planDraftBusy(ctx, req.Actor.ID, conversation.Project, goal)
 			}
 		}
 	}
@@ -258,28 +293,49 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if server != nil {
 		offered = s.serverToolsOffered()
 	}
-	tools, info := collectTools(bridge.Tools(), req.ClientTools, offered)
+	// An Ask turn may hand a description to the drafter (propose_nodes, C1);
+	// a draft turn has no tool loop at all.
+	tools, info := collectTools(bridge.Tools(), req.ClientTools, offered, req.Intent == IntentAsk)
 	if plan.host == ModelHostBrowser {
 		model = &browserProvider{
 			service: s, turn: turn, emit: emit, timeout: s.opts.BrowserModelTimeout,
-			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
+			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
 		}
 	}
-	run := &turnRun{
-		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
-		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
-		tools: tools, info: info,
-		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
-		history: appendMessage(history, userMessage),
+	var (
+		stop  string
+		usage Usage
+	)
+	if req.Intent == IntentDraft {
+		// No tool loop: the drafter reads the board itself and stores a
+		// draft; nothing is written to the board on this path.
+		draft := &draftRun{
+			service: s, ctx: turnCtx, storeCtx: storeCtx, emit: emit, model: model, bridge: bridge,
+			plan: plan, request: req, conversationID: conversation.ID,
+		}
+		stop, usage, err = draft.run()
+	} else {
+		run := &turnRun{
+			service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
+			conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
+			tools: tools, info: info, plan: plan, context: req.Context,
+			system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered, req.Source),
+			history: appendMessage(history, userMessage),
+		}
+		stop, usage, err = run.loop()
 	}
-	stop, usage, err := run.loop()
 	// The turn's tokens count toward the usage report, partial ones too.
 	if usage.InputTokens+usage.OutputTokens > 0 {
 		_ = s.store.RecordUsage(storeCtx, conversation.ID, req.Actor.ID, conversation.Project,
 			string(plan.provider), plan.model, int(usage.InputTokens), int(usage.OutputTokens))
 	}
 	if err != nil {
-		emit(Event{Type: EventError, Message: err.Error(), Code: "provider_error"})
+		code := "provider_error"
+		var coded *codedError
+		if errors.As(err, &coded) {
+			code = coded.code
+		}
+		emit(Event{Type: EventError, Message: err.Error(), Code: code})
 		return nil
 	}
 	emit(Event{Type: EventTurnFinished, Stop: stop, Usage: &usage})
@@ -302,13 +358,28 @@ type turnRun struct {
 	info         map[string]toolInfo
 	system       string
 	history      []provider.Message
+	// plan and context are the turn's model and what the person is looking
+	// at, for propose_nodes' drafter.
+	plan    modelPlan
+	context TurnContext
+	// drafted is the token count of propose_nodes' drafting calls.
+	drafted Usage
 }
 
 // loop alternates model calls and tool calls until the model stops asking for
-// tools, the turn is cancelled, or the per-turn tool budget runs out.
+// tools, the turn is cancelled, or the per-turn tool budget runs out. The
+// usage includes propose_nodes' drafting calls.
 func (r *turnRun) loop() (string, Usage, error) {
+	stop, usage, err := r.chat()
+	usage.InputTokens += r.drafted.InputTokens
+	usage.OutputTokens += r.drafted.OutputTokens
+	return stop, usage, err
+}
+
+func (r *turnRun) chat() (string, Usage, error) {
 	var usage Usage
 	executed := 0
+	retriedCutOff := false
 	limit := r.service.opts.MaxToolCallsPerTurn
 	for {
 		if r.ctx.Err() != nil {
@@ -330,7 +401,7 @@ func (r *turnRun) loop() (string, Usage, error) {
 		usage.InputTokens += response.InputTokens
 		usage.OutputTokens += response.OutputTokens
 
-		message := normalizeCalls(response.Message)
+		message, malformed := normalizeCalls(response.Message)
 		message.Role = provider.RoleAssistant
 		if len(message.Raw) > 0 && message.RawProvider == "" {
 			message.RawProvider, message.RawModel = r.model.Name(), r.model.Model()
@@ -346,15 +417,26 @@ func (r *turnRun) loop() (string, Usage, error) {
 		r.emit(Event{Type: EventEntry, Entry: &entry})
 
 		calls := toolCalls(message)
-		if response.Stop != provider.StopToolUse || len(calls) == 0 {
+		// An answer cut off at the length limit may carry half a call (a
+		// big create_subgraph, typically). None of it runs, the model is
+		// told why, and it gets one more try per turn.
+		cutOff := response.Stop == provider.StopMaxTokens && len(calls) > 0 && !retriedCutOff
+		if !cutOff && (response.Stop != provider.StopToolUse || len(calls) == 0) {
 			return string(response.Stop), usage, nil
 		}
+		retriedCutOff = retriedCutOff || cutOff
 
 		results := provider.Message{Role: provider.RoleUser}
 		exhausted := false
 		for _, call := range calls {
 			var block provider.Block
 			switch {
+			case cutOff:
+				block = r.refuse(call, ToolError, "Not run: your answer was cut off at the length limit, so this "+
+					"call may be incomplete. Send it again in smaller parts (split a large create_subgraph).")
+			case malformed[call.ToolCallID]:
+				block = r.refuse(call, ToolError, "Not run: the input was not valid JSON (it may have been cut "+
+					"off). Send the call again with one complete JSON object.")
 			case executed >= limit:
 				// Every call still gets a result: a history with an
 				// unanswered tool call is one the next turn cannot replay.
@@ -430,7 +512,9 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 	}
 
 	var result toolbridge.Result
-	if info.client {
+	if info.propose {
+		result = r.proposeNodes(input)
+	} else if info.client {
 		result = r.callClient(call, input)
 	} else if info.server {
 		spec, ok := serverTools[call.ToolName]
@@ -553,6 +637,13 @@ func (r *turnRun) finish(call provider.Block, input json.RawMessage, status, out
 func historyFrom(entries []Entry) []provider.Message {
 	var history []provider.Message
 	for _, entry := range entries {
+		// A coding agent's plan draft (P6) has no message of its own: the
+		// model reads its state as it is now, folded into the follow-up's
+		// note right before it.
+		if message, ok := planDraftHistoryMessage(entry); ok {
+			history = appendMessage(history, message)
+			continue
+		}
 		if entry.Message == "" {
 			continue
 		}
@@ -631,21 +722,33 @@ func repairToolResults(history []provider.Message) []provider.Message {
 
 // normalizeCalls makes every tool call's input a JSON object. A model can
 // emit a truncated or malformed argument string; carried as is, it would
-// poison the stored history and every stream event that echoes it.
-func normalizeCalls(message provider.Message) provider.Message {
+// poison the stored history and every stream event that echoes it. The
+// calls it replaced are returned by id: they are answered with an error,
+// never run on the {} that stands in for what the model meant. An absent
+// or null input is not malformed; a tool without arguments may be called so.
+func normalizeCalls(message provider.Message) (provider.Message, map[string]bool) {
 	blocks := make([]provider.Block, len(message.Blocks))
 	copy(blocks, message.Blocks)
+	var malformed map[string]bool
 	for i, block := range blocks {
 		if block.Type != provider.BlockToolCall {
 			continue
 		}
 		trimmed := strings.TrimSpace(string(block.Input))
-		if trimmed == "" || !json.Valid([]byte(trimmed)) || !strings.HasPrefix(trimmed, "{") {
+		if trimmed == "" || trimmed == "null" {
 			blocks[i].Input = json.RawMessage(`{}`)
+			continue
+		}
+		if !json.Valid([]byte(trimmed)) || !strings.HasPrefix(trimmed, "{") {
+			blocks[i].Input = json.RawMessage(`{}`)
+			if malformed == nil {
+				malformed = map[string]bool{}
+			}
+			malformed[block.ToolCallID] = true
 		}
 	}
 	message.Blocks = blocks
-	return message
+	return message, malformed
 }
 
 func toolCalls(message provider.Message) []provider.Block {

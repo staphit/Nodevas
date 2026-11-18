@@ -114,7 +114,14 @@ The MCP process follows the agent's session as it changes: after Claude Code's `
   all-or-nothing call. Each node has a `key`; `dependsOn` and `refs` name keys
   of the same call or existing node ids, and `edges` make existing nodes wait
   for new ones. It answers the new ids by key. It is not idempotent: after a
-  transport error, check `get_graph_outline` before retrying.
+  transport error, check `get_graph_outline` before retrying. In a draft plan
+  run (one the copilot's `start_breakdown` started) nothing is written: it
+  answers provisional ids `draft:<key>`, an empty `created` and the note
+  "Recorded as a draft for the person to review; nothing was created yet. Do
+  not link to these ids." The hub records the plan for the person to review and
+  create (a key sent again replaces that task; at most 8 calls and 100 tasks),
+  and every other graph or node write answers 409 `PLAN_RUN_DRAFTS`. (The hub's
+  HTTP answer also carries `draft: true`; the tool's output does not.)
 - `link_nodes` adds or removes a dependency, or, with `relation: "reference"`,
   makes `to` use `from` as context (a Note). A reference never blocks: it is
   ignored by the ready queue, the critical path and validation.

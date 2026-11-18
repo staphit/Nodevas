@@ -104,6 +104,16 @@ async function reloadPageFromDisk(set: SliceSet, get: SliceGet, id: string) {
   });
 }
 
+const NO_IDS: string[] = [];
+
+/** The canvas selection of the open project; none when it was made in another. */
+export function canvasSelectionIds(state: {
+  canvasSelection: { project: string; ids: string[] };
+  activeProject: string;
+}): string[] {
+  return state.canvasSelection.project === state.activeProject ? state.canvasSelection.ids : NO_IDS;
+}
+
 export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   tabs: [],
   activeTab: null,
@@ -214,6 +224,23 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   revealRequest: null,
   revealNode: (nodeId) => set({ revealRequest: { nodeId, at: Date.now() } }),
   clearRevealRequest: () => set({ revealRequest: null }),
+
+  canvasSelection: { project: "", ids: [] },
+  setCanvasSelection: (ids) => {
+    const project = get().activeProject;
+    const current = get().canvasSelection;
+    if (
+      current.project === project &&
+      current.ids.length === ids.length &&
+      current.ids.every((id, index) => id === ids[index])
+    ) {
+      return;
+    }
+    set({ canvasSelection: { project, ids } });
+  },
+  canvasSelectRequest: null,
+  selectOnCanvas: (ids) => set({ canvasSelectRequest: { ids, at: Date.now() } }),
+  clearCanvasSelectRequest: () => set({ canvasSelectRequest: null }),
 
   openTab: async (id) => {
     const { tabs } = get();

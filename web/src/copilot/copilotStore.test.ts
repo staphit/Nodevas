@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotEntry } from "../api";
 import { entryToItem, readCopilotPrefs, reduceTurnEvent, useCopilot, type TurnState } from "./copilotStore";
 
-const empty: TurnState = { items: [], pending: [], running: true, turnId: null, lastReply: null };
+const empty: TurnState = { items: [], pending: [], running: true, turnId: null, lastReply: null, draftStep: null };
 
 function apply(state: TurnState, ...events: Parameters<typeof reduceTurnEvent>[1][]): TurnState {
   return events.reduce((current, event) => ({ ...current, ...reduceTurnEvent(current, event) }), state);
@@ -190,7 +190,14 @@ describe("useCopilot", () => {
   it("persists UI preferences", () => {
     useCopilot.getState().setSpeakReplies(true);
     useCopilot.getState().setMode("acceptEdits");
-    expect(readCopilotPrefs()).toEqual({ speakReplies: true, defaultMode: "acceptEdits" });
+    useCopilot.getState().setIntent("ask");
+    useCopilot.getState().setVoiceAutoSend(true);
+    expect(readCopilotPrefs()).toEqual({
+      speakReplies: true,
+      defaultMode: "acceptEdits",
+      intent: "ask",
+      voiceAutoSend: true,
+    });
   });
 
   it("survives storage that throws", () => {
@@ -200,8 +207,15 @@ describe("useCopilot", () => {
     vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
-    expect(readCopilotPrefs()).toEqual({ speakReplies: false, defaultMode: "default" });
+    // Typing first: Make nodes is the default, and speech is checked before sending.
+    expect(readCopilotPrefs()).toEqual({
+      speakReplies: false,
+      defaultMode: "default",
+      intent: "make",
+      voiceAutoSend: false,
+    });
     expect(() => useCopilot.getState().setSpeakReplies(true)).not.toThrow();
+    expect(() => useCopilot.getState().setIntent("ask")).not.toThrow();
   });
 
   it("showConversation renders stored entries", () => {

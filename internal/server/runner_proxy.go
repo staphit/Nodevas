@@ -139,6 +139,10 @@ type runnerProxied struct {
 	// still reports whether the runner's token is still good, for long-polls
 	// that outlive a revoke.
 	still func() bool
+	// draft and goalID (P6): the run is a draft plan run (runs.draft), and
+	// its goal node, the only node its create_subgraph may name in edges.
+	draft  bool
+	goalID string
 }
 
 func runnerProxiedFrom(ctx context.Context) (runnerProxied, bool) {
@@ -221,6 +225,12 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 		httpx.Coded(c, http.StatusForbidden, CodeGlobalRunNoBoard, errGlobalRunNoBoard, nil)
 		return
 	}
+	// A draft plan run (P6) writes nothing to the board: only its
+	// create_subgraph gets through, to be recorded (capturePlanDraft).
+	if rec != nil && rec.Draft && planDraftRefuses(r.Method, target) {
+		httpx.Coded(c, http.StatusConflict, CodePlanRunDrafts, errPlanRunDrafts, nil)
+		return
+	}
 	actor, err := s.runnerProxyActor(r, runner, rec)
 	if err != nil {
 		httpx.Err(c, http.StatusUnauthorized, err)
@@ -238,6 +248,7 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	}}
 	if rec != nil {
 		proxied.runID, proxied.runProject = rec.ID, rec.Project
+		proxied.draft, proxied.goalID = rec.Draft, rec.NodeID
 	}
 	inner := r.Clone(context.WithValue(r.Context(), runnerProxyKey{}, proxied))
 	inner.URL.Path = target

@@ -94,6 +94,28 @@ describe("useSpeechRecognition with browser support", () => {
     expect(onFinal).toHaveBeenCalledWith("把任務標成完成");
   });
 
+  it("keeps listening through pauses when held, and joins what was said", () => {
+    window.webkitSpeechRecognition = FakeRecognition;
+    const onFinal = vi.fn();
+    const { result } = renderHook(() => useSpeechRecognition({ lang: "en-US", onFinal }));
+    act(() => result.current.start({ continuous: true }));
+    const recognition = FakeRecognition.last!;
+    expect(recognition.continuous).toBe(true);
+    act(() => recognition.emit([{ transcript: "plan the launch. ", isFinal: true }]));
+    act(() =>
+      recognition.onresult?.({
+        resultIndex: 1,
+        results: [
+          Object.assign([{ transcript: "plan the launch. " }], { isFinal: true }),
+          Object.assign([{ transcript: "docs, tests and release" }], { isFinal: true }),
+        ] as never,
+      }),
+    );
+    expect(onFinal).not.toHaveBeenCalled();
+    act(() => result.current.stop());
+    expect(onFinal).toHaveBeenCalledWith("plan the launch. docs, tests and release");
+  });
+
   it("maps not-allowed and no-speech to messages", () => {
     window.SpeechRecognition = FakeRecognition;
     const { result } = renderHook(() => useSpeechRecognition({ lang: "en-US", onFinal: vi.fn() }));

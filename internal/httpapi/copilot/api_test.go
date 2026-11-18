@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,13 @@ func (echoProvider) Model() string { return "fake-1" }
 func (echoProvider) Stream(_ context.Context, req provider.Request, onDelta func(provider.Delta)) (provider.Response, error) {
 	// One read tool call first, then an answer, so the stream carries every
 	// kind of line a simple turn produces.
+	if req.ResponseSchema != nil {
+		// A draft turn: one structured answer.
+		return provider.Response{Message: provider.Message{Role: provider.RoleAssistant, Blocks: []provider.Block{
+			{Type: provider.BlockText, Text: `{"summary":"two steps","nodes":[{"key":"n1","title":"A","kind":"task","after":[]},` +
+				`{"key":"n2","title":"B","kind":"task","after":["n1"]}]}`},
+		}}, Stop: provider.StopEndTurn}, nil
+	}
 	lastMessage := req.Messages[len(req.Messages)-1]
 	if lastMessage.Blocks[0].Type != provider.BlockToolResult {
 		return provider.Response{Message: provider.Message{Role: provider.RoleAssistant, Blocks: []provider.Block{
@@ -49,7 +57,10 @@ type readBridge struct{}
 func (readBridge) Tools() []toolbridge.Tool {
 	return []toolbridge.Tool{{Tool: provider.Tool{Name: "get_node", Schema: json.RawMessage(`{"type":"object"}`)}, Kind: toolbridge.KindRead}}
 }
-func (readBridge) Call(context.Context, string, json.RawMessage) (toolbridge.Result, error) {
+func (readBridge) Call(_ context.Context, name string, _ json.RawMessage) (toolbridge.Result, error) {
+	if name == "get_graph_outline" {
+		return toolbridge.Result{Output: `{"nodes":[],"edges":[],"total":0}`}, nil
+	}
 	return toolbridge.Result{Output: "node"}, nil
 }
 func (readBridge) Close() error { return nil }
@@ -123,6 +134,7 @@ func TestAnotherAccountGets404Everywhere(t *testing.T) {
 		{http.MethodPost, base + "/turns/t1/client-results", `{"callId":"c","output":"x"}`},
 		{http.MethodPost, base + "/turns/t1/model-results", `{"requestId":"r","output":"{}"}`},
 		{http.MethodPost, base + "/turns/t1/cancel", `{}`},
+		{http.MethodPut, base + "/entries/e1/draft-state", `{"state":"discarded"}`},
 	} {
 		response := call(t, router, "bob", request.method, request.target, request.body)
 		if response.Code != http.StatusNotFound {
@@ -170,6 +182,84 @@ func TestTurnStreamsNDJSONInOrder(t *testing.T) {
 		strings.Contains(read.Body.String(), `"message"`) {
 		t.Fatalf("transcript = %s", read.Body)
 	}
+}
+
+// A draft turn streams like any turn and leaves a draft entry; its state is
+// then recorded by its owner alone.
+func TestDraftTurnAndDraftState(t *testing.T) {
+	router := testRouter(t, "sk")
+	conversation := createConversation(t, router, "alice")
+	base := "/api/copilot/conversations/" + conversation.ID
+	response := call(t, router, "alice", http.MethodPost, base+"/turns",
+		`{"text":"two steps please","source":"text","intent":"draft","context":{"selectedNodeIds":[]}}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("draft turn = %d %s", response.Code, response.Body)
+	}
+	var entryID string
+	var kinds []string
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		var event struct {
+			Type  string         `json:"type"`
+			Code  string         `json:"code"`
+			Entry *copilot.Entry `json:"entry"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, event.Type+":"+event.Code)
+		if event.Entry != nil && event.Entry.Kind == copilot.EntryDraft {
+			entryID = event.Entry.ID
+			if !strings.Contains(event.Entry.Data, `"title":"B"`) {
+				t.Errorf("draft entry data = %s", event.Entry.Data)
+			}
+		}
+	}
+	if entryID == "" || kinds[len(kinds)-1] != "turn_finished:" {
+		t.Fatalf("events = %v", kinds)
+	}
+	if got := strings.Join(kinds, ","); !strings.Contains(got, "draft_status:reading,draft_status:drafting") {
+		t.Errorf("events = %s", got)
+	}
+	target := base + "/entries/" + entryID + "/draft-state"
+	if r := call(t, router, "bob", http.MethodPut, target, `{"state":"committed","batchId":"b1"}`); r.Code != http.StatusNotFound {
+		t.Fatalf("bob = %d %s", r.Code, r.Body)
+	}
+	if r := call(t, router, "alice", http.MethodPut, target, `{"state":"sideways"}`); r.Code != http.StatusBadRequest {
+		t.Fatalf("bad state = %d %s", r.Code, r.Body)
+	}
+	r := call(t, router, "alice", http.MethodPut, target, `{"state":"committed","batchId":"b1","ids":["x1","x2"]}`)
+	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `\"state\":\"committed\"`) {
+		t.Fatalf("commit = %d %s", r.Code, r.Body)
+	}
+	// C2: the person's final draft rides along and replaces the stored one.
+	r = call(t, router, "alice", http.MethodPut, target,
+		`{"state":"committed","batchId":"b1","ids":["x1"],"draft":{"summary":"mine","nodes":[{"key":"k1","title":"Edited","kind":"task"}]}}`)
+	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `\"title\":\"Edited\"`) ||
+		!strings.Contains(r.Body.String(), `\"edited\":true`) {
+		t.Fatalf("commit with the draft = %d %s", r.Code, r.Body)
+	}
+	var nodes []string
+	for i := 0; i <= copilot.MaxDraftNodes; i++ {
+		nodes = append(nodes, fmt.Sprintf(`{"key":"k%d","title":"t","kind":"task"}`, i))
+	}
+	tooMany := `{"state":"open","draft":{"summary":"","nodes":[` + strings.Join(nodes, ",") + `]}}`
+	if r := call(t, router, "alice", http.MethodPut, target, tooMany); r.Code != http.StatusBadRequest {
+		t.Fatalf("41 nodes = %d %s", r.Code, r.Body)
+	}
+	// A plan-sized draft fits the body limit.
+	big := `{"state":"open","draft":{"summary":"","nodes":[` + strings.Repeat(`{"key":"k","title":"t","kind":"task","body":"`+
+		strings.Repeat("長", 600)+`"},`, 39) + `{"key":"z","title":"t","kind":"task"}]}}`
+	if r := call(t, router, "alice", http.MethodPut, target, big); r.Code != http.StatusOK {
+		t.Fatalf("a 40-node draft with full bodies = %d %s", r.Code, truncate(r.Body.String()))
+	}
+}
+
+func truncate(s string) string {
+	if len(s) > 300 {
+		return s[:300]
+	}
+	return s
 }
 
 func TestTurnRefusedBeforeTheStreamIsPlainJSON(t *testing.T) {

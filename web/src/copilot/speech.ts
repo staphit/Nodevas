@@ -75,15 +75,21 @@ export interface SpeechRecognitionState {
   interim: string;
   /** i18n key of the last error, cleared on the next start. */
   errorKey: string | null;
-  start: () => void;
+  /**
+   * Starts listening. `continuous` keeps listening through pauses until
+   * stop() (push-to-talk held, or the mic toggled off), so a long request is
+   * one text; without it recognition ends after a pause (a spoken yes/no).
+   */
+  start: (options?: { continuous?: boolean }) => void;
   stop: () => void;
   abort: () => void;
 }
 
 /**
- * One utterance per start(): `continuous` is off, so recognition ends on its
- * own after a pause, or when stop() is called (push-to-talk release). The
- * final transcript goes to `onFinal` once, when recognition ends.
+ * One request per start(): recognition ends after a pause, or, with
+ * `continuous`, only when stop() is called (push-to-talk release). The final
+ * transcript, every final segment joined, goes to `onFinal` once, when
+ * recognition ends.
  */
 export function useSpeechRecognition({
   lang,
@@ -101,13 +107,13 @@ export function useSpeechRecognition({
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
 
-  const start = useCallback(() => {
+  const start = useCallback((options?: { continuous?: boolean }) => {
     const Ctor = speechRecognitionCtor();
     if (!Ctor || recognitionRef.current) return;
     const recognition = new Ctor();
     recognition.lang = lang;
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous = Boolean(options?.continuous);
     recognition.maxAlternatives = 1;
     let finalText = "";
     let heard = "";

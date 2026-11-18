@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -94,6 +96,18 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request, onDelta fun
 	if p.effort != "" {
 		params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(p.effort)}
 	}
+	// Structured output through output_config.format, not a forced tool:
+	// tool_choice naming a tool is refused while thinking is on, and the
+	// answer arrives as text either way.
+	structured := false
+	if req.ResponseSchema != nil {
+		var schema map[string]any
+		if err := json.Unmarshal(req.ResponseSchema.Schema, &schema); err != nil || schema == nil {
+			return Response{}, fmt.Errorf("anthropic: response schema is not a JSON object")
+		}
+		params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: schema}
+		structured = true
+	}
 
 	var opts []option.RequestOption
 	if p.fallback {
@@ -105,6 +119,22 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request, onDelta fun
 		)
 	}
 
+	msg, err := p.stream(ctx, params, opts, onDelta)
+	var apiErr *anthropic.Error
+	if structured && err != nil && ctx.Err() == nil && errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		// A model without structured outputs; the caller validates the
+		// answer whatever was asked.
+		params.OutputConfig.Format = anthropic.JSONOutputFormatParam{}
+		msg, err = p.stream(ctx, params, opts, onDelta)
+	}
+	if err != nil {
+		return Response{}, err
+	}
+	return p.response(msg)
+}
+
+// stream makes one streamed call and accumulates the whole message.
+func (p *anthropicProvider) stream(ctx context.Context, params anthropic.MessageNewParams, opts []option.RequestOption, onDelta func(Delta)) (anthropic.Message, error) {
 	stream := p.client.Messages.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
 
@@ -112,7 +142,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request, onDelta fun
 	for stream.Next() {
 		event := stream.Current()
 		if err := msg.Accumulate(event); err != nil {
-			return Response{}, fmt.Errorf("anthropic stream: %w", err)
+			return anthropic.Message{}, fmt.Errorf("anthropic stream: %w", err)
 		}
 		if ev, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
 			if d, ok := ev.Delta.AsAny().(anthropic.TextDelta); ok && d.Text != "" && onDelta != nil {
@@ -122,11 +152,11 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request, onDelta fun
 	}
 	if err := stream.Err(); err != nil {
 		if ctx.Err() != nil {
-			return Response{}, ctx.Err()
+			return anthropic.Message{}, ctx.Err()
 		}
-		return Response{}, fmt.Errorf("anthropic: %w", err)
+		return anthropic.Message{}, fmt.Errorf("anthropic: %w", err)
 	}
-	return p.response(msg)
+	return msg, nil
 }
 
 // response turns the accumulated message into the neutral turn plus the raw

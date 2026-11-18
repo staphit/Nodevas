@@ -242,6 +242,8 @@ func describeOffer(o Offer) string {
 	case runnerwire.JobPlan:
 		if strings.TrimSpace(job.Review) != "" {
 			fmt.Fprintf(&b, "  kind:         REPLAN: reconciles the goal's tasks with a revised requirement; reads the code, changes no files\n")
+		} else if job.Draft {
+			b.WriteString("  kind:         PLAN (draft): breaks the node into a draft of tasks for you to review; reads the code, changes no files\n")
 		} else {
 			fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
 		}

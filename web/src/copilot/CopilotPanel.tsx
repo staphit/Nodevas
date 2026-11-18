@@ -20,8 +20,8 @@ import {
   deleteConversation,
   newConversation,
   openConversation,
-  sendTurn,
   stopTurn,
+  submitText,
 } from "./session";
 import type { SpeechRecognitionState } from "./speech";
 import { Transcript } from "./Transcript";
@@ -223,7 +223,7 @@ export const CopilotPanel = forwardRef<
         ref={inputRef}
         running={running}
         speech={speech}
-        onSend={(text) => void sendTurn(text, "text")}
+        onSend={(text) => void submitText(text, "text")}
         onStop={() => void stopTurn()}
       />
     </aside>

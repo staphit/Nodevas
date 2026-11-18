@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { connectLanguageSource } from "../i18n";
+import type { Language } from "../preferences/schema";
 import {
   browserModelAvailability,
+  browserModelLanguages,
   downloadBrowserModel,
   parseConstrainedOutput,
   resetBrowserModelCache,
@@ -74,9 +77,62 @@ beforeEach(() => {
   resetBrowserModelCache();
 });
 
+function useLanguage(language: Language) {
+  connectLanguageSource({ get: () => language, subscribe: () => () => {}, set: () => {} });
+}
+
+beforeEach(() => {
+  useLanguage("en");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   resetBrowserModelCache();
+});
+
+describe("interface language", () => {
+  const zh = { expectedInputs: [{ type: "text", languages: ["zh", "en"] }] };
+
+  it("asks for the interface language and English when the model takes it", async () => {
+    useLanguage("zh-TW");
+    const { api, sessions } = fakeLanguageModel({ answers: ['{"type":"text","text":"好"}'] });
+    expect(await browserModelAvailability()).toBe("available");
+    expect(api.availability).toHaveBeenCalledWith(expect.objectContaining(zh));
+    expect(browserModelLanguages()).toEqual(["zh", "en"]);
+    await runBrowserModel(request([{ role: "user", content: "你好" }]));
+    expect(api.create).toHaveBeenLastCalledWith(expect.objectContaining(zh));
+    expect(sessions.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to English when the model refuses the interface language", async () => {
+    useLanguage("zh-TW");
+    const { api } = fakeLanguageModel({ answers: ['{"type":"text","text":"ok"}'] });
+    api.availability.mockImplementation(async (options?: { expectedInputs?: { languages: string[] }[] }) =>
+      options?.expectedInputs?.[0]?.languages.includes("zh") ? "unavailable" : "available",
+    );
+    expect(await browserModelAvailability()).toBe("available");
+    expect(browserModelLanguages()).toEqual(["en"]);
+    await runBrowserModel(request([{ role: "user", content: "hi" }]));
+    expect(api.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedInputs: [{ type: "text", languages: ["en"] }] }),
+    );
+  });
+
+  it("downloads with the languages the availability check settled, without waiting first", async () => {
+    useLanguage("zh-TW");
+    const { api } = fakeLanguageModel({ availability: "downloadable", progress: [1] });
+    await browserModelAvailability();
+    await downloadBrowserModel(() => {});
+    expect(api.availability).toHaveBeenCalledTimes(2);
+    expect(api.create).toHaveBeenCalledWith(expect.objectContaining(zh));
+  });
+
+  it("is English alone for an English interface", async () => {
+    const { api } = fakeLanguageModel({});
+    await browserModelAvailability();
+    expect(api.availability).toHaveBeenCalledTimes(1);
+    expect(browserModelLanguages()).toEqual(["en"]);
+  });
 });
 
 describe("browserModelAvailability", () => {

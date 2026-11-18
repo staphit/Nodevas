@@ -377,6 +377,19 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 			return
 		}
 	}
+	var schema *provider.ResponseSchema
+	if rs := req.ResponseSchema; rs != nil {
+		if reason := badResponseSchema(rs); reason != "" {
+			s.refuse(req.ID, "the request's response schema "+reason)
+			return
+		}
+		schema = &provider.ResponseSchema{Name: rs.Name, Schema: rs.Schema}
+	}
+	// NaN fails both comparisons, so it is refused too.
+	if t := req.Temperature; t != nil && !(*t >= runnerwire.MinLLMTemperature && *t <= runnerwire.MaxLLMTemperature) {
+		s.refuse(req.ID, "the request's temperature is not between 0 and 2")
+		return
+	}
 	maxTokens := req.MaxTokens
 	if maxTokens < 0 {
 		maxTokens = 0
@@ -415,8 +428,31 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 		}()
 		s.call(ctx, req.ID, what, info, key, req.Effort, provider.Request{
 			System: req.System, Messages: messages, Tools: tools, MaxTokens: maxTokens,
+			ResponseSchema: schema, Temperature: req.Temperature,
 		})
 	}()
+}
+
+// badResponseSchema says what is wrong with a request's response schema, or
+// "" when it is fine: a name of 1-64 of [a-zA-Z0-9_-] (what vendors accept)
+// and a JSON object of at most MaxLLMResponseSchemaBytes.
+func badResponseSchema(rs *runnerwire.LLMResponseSchema) string {
+	if rs.Name == "" || len(rs.Name) > runnerwire.MaxLLMResponseSchemaNameBytes {
+		return "has no usable name"
+	}
+	for _, r := range rs.Name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return "has a name with characters other than letters, digits, _ and -"
+		}
+	}
+	if len(rs.Schema) > runnerwire.MaxLLMResponseSchemaBytes {
+		return "is too large"
+	}
+	body := strings.TrimSpace(string(rs.Schema))
+	if !strings.HasPrefix(body, "{") || !json.Valid(rs.Schema) {
+		return "is not a JSON object"
+	}
+	return ""
 }
 
 func (s *llmSession) call(ctx context.Context, id, what string, info runnerwire.LLMInfo, key, effort string, req provider.Request) {

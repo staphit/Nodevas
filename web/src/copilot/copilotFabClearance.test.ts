@@ -122,3 +122,20 @@ describe("voice copilot button clearance", () => {
     expect(moved).toMatch(/right:\s*calc\(max\(18px, env\(safe-area-inset-right, 0px\)\)\s*\+\s*56px\s*\+/);
   });
 });
+
+// The Agent button sits above the Copilot button; with the Copilot panel open
+// it would cover the panel's composer row (the Make nodes / Ask switch).
+describe("the Agent button and the open Copilot panel", () => {
+  const agentsCss = readFileSync(resolve(process.cwd(), "src/styles/16-agents.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  it("moves left of the panel, and hides on a phone where the panel is full width", () => {
+    expect(agentsCss).toMatch(
+      /\.app:has\(> \.copilot-panel\) \.agent-fab\s*\{[^}]*right:\s*calc\(var\(--copilot-width\) \+ 18px\)/,
+    );
+    expect(agentsCss).toMatch(
+      /@media \(max-width: 640px\)\s*\{\s*\.app:has\(> \.copilot-panel\) \.agent-fab\s*\{\s*display:\s*none;/,
+    );
+  });
+});

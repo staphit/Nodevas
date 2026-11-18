@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -117,7 +118,7 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		if err != nil {
 			return fail(fmt.Errorf("toolbridge: list tools: %w", err))
 		}
-		if unusable[tool.Name] {
+		if unusable[tool.Name] || offTopic[tool.Name] {
 			continue
 		}
 		mapped, err := mapTool(tool)
@@ -143,31 +144,134 @@ var unusable = map[string]bool{
 	"save_attachment": true,
 }
 
+// offTopic are tools the copilot could call but has no business with: it
+// authors the board for the person it talks to, while claiming a task,
+// reading an inbox, listing the team or asking and approving are how agents
+// working tasks coordinate. Each one offered is one more a small model has
+// to weigh, so they are left out (index_documents is never offered at all:
+// the copilot's bridge has no ChromaURL).
+var offTopic = map[string]bool{
+	"claim_task":   true,
+	"release_task": true,
+	"check_inbox":  true,
+	"list_team":    true,
+	// The copilot talks to the person directly; it has no one to ask.
+	"ask_user": true,
+	// Answers another agent's permission ask; "not for you to call".
+	"approve_tool": true,
+}
+
 // unusableInputs are tool inputs the hub always refuses the copilot. They are
-// left out of the schema the model sees, for the same reason as unusable.
+// left out of the schema the model sees, for the same reason as unusable. A
+// path steps through properties by name; "items" steps into an array's
+// elements.
 var unusableInputs = map[string][]string{
 	// No folder to attach files from (NoLocalFiles).
 	"send_message": {"files"},
+	// Acceptance is written by a person or a planner/QA run, never by the
+	// role-less copilot, and CreateSubgraph checks every node before writing
+	// any: one node carrying it would fail the whole batch.
+	"create_subgraph": {"nodes.items.acceptance"},
 }
 
-// withoutInputs is schema without the named properties. The listed schema
-// is not changed: a copy of its top level and of its properties is.
-func withoutInputs(schema any, names []string) any {
+// droppedArgs are unusable inputs also removed from the arguments of a call
+// that sends them anyway (the MCP server validates against its own schema,
+// not the one offered here). Only where dropping keeps the call's meaning:
+// a batch of nodes is still the batch without acceptance criteria, while a
+// message whose attachments were dropped is not the message the model meant
+// to send, so send_message's files stay refused with the server's reason.
+var droppedArgs = map[string][]string{
+	"create_subgraph": {"nodes.items.acceptance"},
+}
+
+// withoutInputs is schema without the properties at the named paths, and
+// without them in the required list beside them. The listed schema is not
+// changed: every level on a path is copied before it is edited.
+func withoutInputs(schema any, paths []string) any {
+	for _, path := range paths {
+		schema = withoutInput(schema, strings.Split(path, "."))
+	}
+	return schema
+}
+
+func withoutInput(schema any, steps []string) any {
 	fields, ok := schema.(map[string]any)
-	if !ok || len(names) == 0 {
+	if !ok || len(steps) == 0 {
 		return schema
+	}
+	if steps[0] == "items" {
+		items, ok := fields["items"]
+		if !ok {
+			return schema
+		}
+		copied := maps.Clone(fields)
+		copied["items"] = withoutInput(items, steps[1:])
+		return copied
 	}
 	properties, ok := fields["properties"].(map[string]any)
 	if !ok {
 		return schema
 	}
-	kept := maps.Clone(properties)
-	for _, name := range names {
-		delete(kept, name)
+	child, ok := properties[steps[0]]
+	if !ok {
+		return schema
 	}
+	kept := maps.Clone(properties)
 	copied := maps.Clone(fields)
+	if len(steps) > 1 {
+		kept[steps[0]] = withoutInput(child, steps[1:])
+	} else {
+		delete(kept, steps[0])
+		if required, ok := fields["required"].([]any); ok {
+			copied["required"] = slices.DeleteFunc(slices.Clone(required), func(name any) bool { return name == steps[0] })
+		}
+	}
 	copied["properties"] = kept
 	return copied
+}
+
+// withoutArgs is a call's arguments without the values at the named paths.
+// Input that is not a JSON object is returned as is, for Call to refuse.
+func withoutArgs(input json.RawMessage, paths []string) json.RawMessage {
+	if len(paths) == 0 {
+		return input
+	}
+	var args map[string]any
+	if json.Unmarshal(input, &args) != nil || args == nil {
+		return input
+	}
+	for _, path := range paths {
+		dropArg(args, strings.Split(path, "."))
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return input
+	}
+	return encoded
+}
+
+// dropArg deletes the value at steps in place; args is the caller's own copy.
+func dropArg(value any, steps []string) {
+	if len(steps) == 0 {
+		return
+	}
+	if steps[0] == "items" {
+		if list, ok := value.([]any); ok {
+			for _, item := range list {
+				dropArg(item, steps[1:])
+			}
+		}
+		return
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	if len(steps) == 1 {
+		delete(object, steps[0])
+		return
+	}
+	dropArg(object[steps[0]], steps[1:])
 }
 
 // writeTools change content in a way history can undo. Everything else that
@@ -245,7 +349,7 @@ func (b *bridge) Call(ctx context.Context, name string, input json.RawMessage) (
 		if !json.Valid(trimmed) {
 			return Result{Output: "tool input is not valid JSON", IsError: true}, nil
 		}
-		args = json.RawMessage(trimmed)
+		args = withoutArgs(json.RawMessage(trimmed), droppedArgs[name])
 	}
 	result, err := b.client.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: args})
 	if err != nil {

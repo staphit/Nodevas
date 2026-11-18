@@ -580,6 +580,14 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.deleteNodesLocked(actor, unique, removing)
+}
+
+// deleteNodesLocked is DeleteNodes for a caller already holding s.mu
+// exclusively (a batch undo checks its nodes and deletes them in one hold).
+// unique are valid, distinct ids and removing is the same set.
+func (s *Store) deleteNodesLocked(actor identity.Actor, unique []string, removing map[string]bool) (DeleteNodesOutcome, error) {
+	var zero DeleteNodesOutcome
 	g, graphRev, err := s.loadGraphLocked()
 	if err != nil {
 		return zero, err
