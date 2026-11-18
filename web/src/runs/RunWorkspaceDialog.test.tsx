@@ -450,17 +450,79 @@ describe("a global agent's workspace", () => {
 describe("in Simple mode", () => {
   const local = () => makeWorkspaceRun({ runnerId: "local1", runnerName: "this machine", repoName: "my-app" });
 
-  function showIn(run: Run, experience: "simple" | "full") {
+  function showIn(run: Run, experience: "simple" | "full", tab: "changes" | "terminal" = "changes") {
     useApp.setState({ preferences: { ...useApp.getState().preferences, experience } });
     useRunners.setState({ runners: [localRunner()], loaded: true });
     seed(run);
+    vi.mocked(api.getRunEvents).mockResolvedValue({
+      events: [
+        { seq: 1, type: "log", at: "2026-11-12T08:00:01Z", text: "worktree created" },
+        { seq: 2, type: "tool_call", at: "2026-11-12T08:00:02Z", tool: "Write", input: '{"file_path":"index.html"}' },
+        { seq: 3, type: "text", at: "2026-11-12T08:00:03Z", text: "I made the page with your opening hours." },
+      ],
+      more: false,
+    });
     render(
       <EditionProvider edition="single">
         <Panel />
       </EditionProvider>,
     );
-    act(() => openRunWorkspace(run.id, "changes"));
+    act(() => openRunWorkspace(run.id, tab));
   }
+
+  // The Log tab: what the agent said, how many files, how it ended; the raw
+  // log (worktree, tool calls, tokens) behind "Show the full record".
+  it("sums up the log in plain words, with the raw log behind a toggle", async () => {
+    showIn(local(), "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("I made the page with your opening hours.")).toBeInTheDocument();
+    expect(within(panel).getByText("It changed 2 files.")).toBeInTheDocument();
+    expect(within(panel).getByText(/^Done\./)).toBeInTheDocument();
+    expect(within(panel).queryByText("worktree created")).toBeNull();
+    const toggle = within(panel).getByRole("button", { name: "Show the full record" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    expect(await within(panel).findByText("worktree created")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Hide the full record" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("sums up the changes in plain words, with the diff behind a toggle", async () => {
+    showIn(local(), "simple", "changes");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("It changed 2 files.")).toBeInTheDocument();
+    expect(panel.querySelector(".run-diff-file-path")).toBeNull();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Show the full record" }));
+    expect(await within(panel).findByText("src/a.ts", { selector: ".run-diff-file-path" })).toBeInTheDocument();
+  });
+
+  it("says it in Chinese with the toggle named 顯示詳細紀錄", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    showIn(local(), "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("I made the page with your opening hours.")).toBeInTheDocument();
+    expect(within(panel).getByText("改了 2 個檔案。")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "顯示詳細紀錄" })).toBeInTheDocument();
+  });
+
+  it("says nothing changed and keeps going while it works", async () => {
+    showIn({ ...local(), status: "running", commit: "", filesChanged: 0, finishedAt: undefined }, "simple", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(await within(panel).findByText("The agent is still working on it.")).toBeInTheDocument();
+    expect(within(panel).queryByText(/It changed/)).toBeNull();
+  });
+
+  it("shows the raw log and diff straight away in full mode", async () => {
+    showIn(local(), "full", "terminal");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("worktree created")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Show the full record" })).toBeNull();
+  });
 
   afterEach(() => useRunners.setState({ runners: [], loaded: false }));
 

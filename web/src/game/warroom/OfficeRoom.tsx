@@ -147,7 +147,7 @@ export function OfficeRoom({
     const meeting = meetingOf.get(actor.id);
     return {
       actor,
-      label: actorLabel(t, actor, placeOf(t, actor, simple)),
+      label: actorLabel(t, actor, placeOf(t, actor, simple), simple),
       detail: meeting ? meetingLabel(t, meeting) || undefined : undefined,
       row: actor.runId ? rowOf(actor.runId) : undefined,
       titleOf,

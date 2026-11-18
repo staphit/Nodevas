@@ -7,6 +7,7 @@ import {
 } from "../agents/systemNotify";
 import { IconBell, IconClose } from "../icons";
 import { useI18n } from "../i18n";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useRunToasts } from "./runNotify";
 
 /** run-notify toasts, bottom left (the agent network's sit bottom right).
@@ -69,10 +70,13 @@ export function RunToasts() {
 
 /**
  * Whether run notifications may also reach the system tray. Permission is only
- * ever asked from this button: browsers penalise unprompted asks.
+ * ever asked from this button: browsers penalise unprompted asks. Simple
+ * (single-user edition) says what it tells you about in plain words: a Simple
+ * run has no CI or merge to report.
  */
 export function RunNotifySettings() {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const [permission, setPermission] = useState<SystemNotifyPermission>(() =>
     systemNotifyPermission(),
   );
@@ -80,7 +84,7 @@ export function RunNotifySettings() {
   return (
     <div className="run-notify-settings">
       <IconBell size={14} />
-      <p>{t(`runNotify.permission.${permission}`)}</p>
+      <p>{t(simple ? `simple.notify.${permission}` : `runNotify.permission.${permission}`)}</p>
       {permission === "default" && (
         <button
           type="button"

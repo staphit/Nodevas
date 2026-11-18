@@ -34,9 +34,10 @@ export function openGoal(goalNodeId: string) {
   useStation.getState().focusGoal(goalNodeId, useApp.getState().activeProject);
 }
 
-/** "Review · Codex gpt-5 · laptop · 4m 05s · 12.3K tokens · $0.042 · Ship login". */
-export function runMeta(t: Translate, run: Run, now: number, goal: string): string {
-  const tokens = totalTokens(run.usage);
+/** "Review · Codex gpt-5 · laptop · 4m 05s · 12.3K tokens · $0.042 · Ship login";
+ * in Simple only what it cost, no tokens. */
+export function runMeta(t: Translate, run: Run, now: number, goal: string, simple = false): string {
+  const tokens = simple ? 0 : totalTokens(run.usage);
   const parts = [
     t(`station.control.kind.${controlRunKind(run)}`),
     agentWho(run.agent, run.model),

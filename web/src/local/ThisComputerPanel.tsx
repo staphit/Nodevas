@@ -5,8 +5,9 @@
 // command an agent that may only edit wants to run. Changes go to the built-in runner
 // (PUT /api/runners/:id/settings, the repo routes); new runs use them, runs
 // already going keep theirs. Command lines and the settings file only show
-// under Advanced, collapsed. In Simple the repos are folders and no test
-// command is asked for.
+// under Advanced, collapsed. In Simple the repos are folders, no test
+// command is asked for, and Advanced says up front that its command lines
+// are for people who type commands.
 
 import { useEffect, useId, useState } from "react";
 
@@ -255,11 +256,11 @@ export function ThisComputerPanel() {
           />
           <span>{t("local.permissionRelay")}</span>
         </label>
-        <small className="run-hint">{t("local.permissionRelayHelp")}</small>
+        <small className="run-hint">{t(simple ? "simple.local.permissionRelayHelp" : "local.permissionRelayHelp")}</small>
       </section>
 
       <details className="run-advanced this-computer-advanced">
-        <summary>{t("local.advanced")}</summary>
+        <summary>{t(simple ? "simple.local.advanced" : "local.advanced")}</summary>
         {/* Simple keeps finished work on this computer: no online review
             to switch on here (Settings / General brings every option back). */}
         {local && !simple && (
@@ -289,7 +290,7 @@ export function ThisComputerPanel() {
             {t("local.settingsFile")} <code>{local.configPath}</code>
           </p>
         )}
-        <p className="run-hint">{t("local.cliHint")}</p>
+        <p className="run-hint">{t(simple ? "simple.local.cliHint" : "local.cliHint")}</p>
         <pre className="this-computer-cli">{localCommands(runner).join("\n")}</pre>
       </details>
 

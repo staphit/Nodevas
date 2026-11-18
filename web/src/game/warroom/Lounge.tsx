@@ -104,7 +104,7 @@ export function Lounge({
 
   const faceOf = (actor: Actor): AgentFace => ({
     actor,
-    label: actorLabel(t, actor, placeOf(t, actor, simple)),
+    label: actorLabel(t, actor, placeOf(t, actor, simple), simple),
     row: actor.runId ? rowOf(actor.runId) : undefined,
     titleOf,
   });

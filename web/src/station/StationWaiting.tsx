@@ -25,6 +25,7 @@ import { openNodeRuns } from "../runs/openRuns";
 import { ResultActions } from "../runs/ResultActions";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
+import { useSimpleMode } from "../simple/simpleMode";
 import { useGlobalAgents } from "./globalAgentsStore";
 import { dismissResult, placeResults, useKeptResults } from "./keptResults";
 import { useTitleOf } from "./StationControl";
@@ -77,6 +78,7 @@ function useAppliedCopy(): (runId: string) => Run | undefined {
 
 export function StationWaiting() {
   const { t } = useI18n();
+  const simple = useSimpleMode();
   const cancelling = useRuns((s) => s.cancelling);
   const { dispatch } = useGameActions();
   const titleOf = useTitleOf();
@@ -243,7 +245,7 @@ export function StationWaiting() {
         {waiting.length > 0 && <span className="station-count">{waiting.length}</span>}
       </div>
       {shown.length === 0 ? (
-        <p className="station-empty">{t("station.waiting.empty")}</p>
+        <p className="station-empty">{t(simple ? "simple.waiting.empty" : "station.waiting.empty")}</p>
       ) : (
         <StationTiles label={t("station.waiting.title")}>
           {shown.map((entry) => {

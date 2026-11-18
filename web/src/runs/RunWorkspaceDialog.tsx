@@ -22,6 +22,7 @@ import { ResultActions } from "./ResultActions";
 import { resultState } from "./resultState";
 import { safeExternalUrl } from "./runFormat";
 import { RunTimeline } from "./RunTimeline";
+import { SimpleRunSummary } from "./SimpleRunSummary";
 import { selectRunById, useRuns } from "./runStore";
 import { WorkspaceFiles } from "./WorkspaceFiles";
 import { useWorkspace, workspaceCodeText, type WorkspaceTab } from "./workspaceStore";
@@ -419,7 +420,13 @@ export function RunWorkspaceDialog({
           )}
           {visited.has("changes") && (
             <TabPanel id={panelId("changes")} labelledBy={tabId("changes")} hidden={tab !== "changes"}>
-              <RunDiffBody run={run} />
+              {simple ? (
+                <SimpleRunSummary run={run}>
+                  <RunDiffBody run={run} />
+                </SimpleRunSummary>
+              ) : (
+                <RunDiffBody run={run} />
+              )}
             </TabPanel>
           )}
           {visited.has("terminal") && (
@@ -428,6 +435,10 @@ export function RunWorkspaceDialog({
                 <Suspense fallback={<p className="run-ws-note">{t("terminal.loading")}</p>}>
                   <RunTerminal run={run} />
                 </Suspense>
+              ) : simple ? (
+                <SimpleRunSummary run={run}>
+                  <RunTimeline run={run} />
+                </SimpleRunSummary>
               ) : (
                 <RunTimeline run={run} />
               )}

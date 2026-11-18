@@ -22,8 +22,8 @@ const FAMILIES = [
 ];
 const SINGLE_KEYS = ["start.describeHeading", "lane.emptyAskAgent", "dispatch.simpleNoChecksLocal"];
 
-const EN_WORDS = /\b(repo|repository|branch|merge|PR|pull request|CLI|worktree|commit|git|terminal|runner)\b/i;
-const ZH_WORDS = /儲存庫|分支|合併|工作樹|提交|終端機|拉取請求|runner/i;
+const EN_WORDS = /\b(repo|repository|branch|merge|PR|pull request|CLI|worktree|commit|git|terminal|runner|tokens?|CI|ACP|diff)\b/i;
+const ZH_WORDS = /儲存庫|分支|合併|工作樹|提交|終端機|拉取請求|runner|token|\bCI\b|ACP|差異/i;
 
 /** Allowed to use one of the words, and why. */
 const ALLOWED: Record<string, string> = {
@@ -83,5 +83,16 @@ describe("easy start's plain words", () => {
     expect(EN_WORDS.test("Merged into it")).toBe(false);
     expect(ZH_WORDS.test("合併到本機")).toBe(true);
     expect(ZH_WORDS.test("套用到你的資料夾")).toBe(false);
+    // Agent activity, notifications and the run view's summary say none of
+    // these in Simple either.
+    expect(EN_WORDS.test("Tokens today 12k tokens")).toBe(true);
+    expect(EN_WORDS.test("red CI and merge results")).toBe(true);
+    expect(EN_WORDS.test("OpenCode in ACP mode")).toBe(true);
+    expect(EN_WORDS.test("Show the diff")).toBe(true);
+    expect(EN_WORDS.test("Show the full record")).toBe(false);
+    expect(ZH_WORDS.test("今日 token")).toBe(true);
+    expect(ZH_WORDS.test("CI 變紅和合併結果")).toBe(true);
+    expect(ZH_WORDS.test("ACP 模式的 OpenCode")).toBe(true);
+    expect(ZH_WORDS.test("顯示詳細紀錄")).toBe(false);
   });
 });

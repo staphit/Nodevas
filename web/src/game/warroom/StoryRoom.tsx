@@ -86,9 +86,9 @@ function namesOf(group: StoryGroup): string[] {
 }
 
 /** A group in a sentence: the one in it, or who they all are and how many. */
-function groupLabel(t: Translate, group: StoryGroup): string {
+function groupLabel(t: Translate, group: StoryGroup, simple = false): string {
   const count = group.members.length;
-  if (count === 1) return personLabel(t, group.members[0]);
+  if (count === 1) return personLabel(t, group.members[0], simple);
   const whos = group.members.map((person) => {
     const who = personWho(person);
     return agentWho(who.agent, who.model);
@@ -472,7 +472,7 @@ export function StoryRoom({
                     key={group.key}
                     type="button"
                     className={`px-story-who${group === lead ? " is-on" : ""}${group.alert ? ` is-${group.alert}` : ""}`}
-                    aria-label={groupLabel(t, group)}
+                    aria-label={groupLabel(t, group, simple)}
                     aria-pressed={group === lead}
                     onClick={() => turnTo(group.key)}
                   >
@@ -523,7 +523,7 @@ export function StoryRoom({
                       <StoryTalk
                         group={group}
                         person={on && speaker ? speaker : leadMember(group, picked[`${place}/${group.key}`])}
-                        groupLabel={groupLabel(t, group)}
+                        groupLabel={groupLabel(t, group, simple)}
                         onPick={pick(group)}
                         narration={narration}
                         meetingOf={meetingOf}
@@ -591,7 +591,7 @@ export function StoryRoom({
               <StoryTalk
                 group={lead}
                 person={speaker}
-                groupLabel={lead ? groupLabel(t, lead) : ""}
+                groupLabel={lead ? groupLabel(t, lead, simple) : ""}
                 onPick={(id) => lead && pick(lead)(id)}
                 narration={narration}
                 narratorChoices={narratorChoices}
