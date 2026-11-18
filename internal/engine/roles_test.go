@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -224,5 +225,21 @@ func TestRolesRoundTripGraphYAML(t *testing.T) {
 	raw, _ := json.Marshal(g)
 	if !strings.Contains(string(raw), `"agentRoles"`) || !strings.Contains(string(raw), `"basedOn":"researcher"`) {
 		t.Fatalf("JSON keys: %s", raw)
+	}
+}
+
+// A role that may read its mail must also be able to find who wrote it
+// and open what was attached: check_inbox points at save_attachment, and
+// replies go to names list_team gives.
+func TestBuiltinRolesWithMailCanListTheTeamAndSaveAttachments(t *testing.T) {
+	for _, role := range BuiltinAgentRoles() {
+		if !slices.Contains(role.Tools, "check_inbox") {
+			continue
+		}
+		for _, tool := range []string{"list_team", "save_attachment"} {
+			if !slices.Contains(role.Tools, tool) {
+				t.Errorf("built-in role %s has check_inbox but not %s", role.ID, tool)
+			}
+		}
 	}
 }
