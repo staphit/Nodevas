@@ -517,6 +517,22 @@ describe("in Simple mode", () => {
     expect(within(panel).queryByText(/It changed/)).toBeNull();
   });
 
+  // A run whose agent is here but signed out says how to sign in, in the
+  // describe box's words, not the bare "could not finish".
+  it("says how to sign in when the agent was signed out", async () => {
+    showIn(
+      { ...local(), agent: "claude", status: "failed", failureCode: "signed_out", commit: "", filesChanged: 0 },
+      "simple",
+      "terminal",
+    );
+    const dialog = await screen.findByRole("dialog");
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(
+      await within(panel).findByText(/isn't signed in yet\. Open the Terminal app on this computer, type claude/),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/could not finish/)).toBeNull();
+  });
+
   it("shows the raw log and diff straight away in full mode", async () => {
     showIn(local(), "full", "terminal");
     const dialog = await screen.findByRole("dialog");

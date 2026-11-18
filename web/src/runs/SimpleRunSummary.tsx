@@ -8,16 +8,22 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 
 import { runFinal, type Run, type RunEvent } from "../api";
 import { useI18n } from "../i18n";
+import { useViewer } from "../components/SignIn";
 import { useLocalRunner } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { resultState } from "./resultState";
 import { paragraphs } from "./runFormat";
 import { useRuns } from "./runStore";
+import { runSignedOut, signInReader, signedOutText, type SignInReader } from "./signedOut";
 
 type Translate = ReturnType<typeof useI18n>["t"];
 
 /** How the run stands, in the describe box's words. `plain` is whether the
- * result buttons ("Take a look", "Apply to my folder") are on screen. */
-export function plainRunState(t: Translate, run: Run, plain: boolean): string {
+ * result buttons ("Take a look", "Apply to my folder") are on screen;
+ * `reader` is who would sign a signed-out agent in (signedOut.ts). */
+export function plainRunState(t: Translate, run: Run, plain: boolean, reader: SignInReader = "local"): string {
+  // Its agent is here but signed out: how to sign in, as the box says it.
+  if (runSignedOut(run)) return signedOutText(t, run, reader);
   switch (run.status) {
     case "succeeded":
       if (run.workspace === "merged_local") return t("simple.box.applied");
@@ -49,6 +55,8 @@ export function lastSaid(events: readonly RunEvent[] | undefined): string {
 export function SimpleRunSummary({ run, children }: { run: Run; children: ReactNode }) {
   const { t } = useI18n();
   const localRunnerId = useLocalRunner()?.id;
+  const runners = useRunners((s) => s.runners);
+  const viewer = useViewer();
   const events = useRuns((s) => s.eventsByRun[run.id]);
   const watchRun = useRuns((s) => s.watchRun);
   const loadEvents = useRuns((s) => s.loadEvents);
@@ -72,7 +80,7 @@ export function SimpleRunSummary({ run, children }: { run: Run; children: ReactN
   return (
     <>
       <section className="simple-run-summary" aria-label={t("simple.summary.label")}>
-        <p className="simple-run-state">{plainRunState(t, run, plain)}</p>
+        <p className="simple-run-state">{plainRunState(t, run, plain, signInReader(run, runners, viewer))}</p>
         {files > 0 && (
           <p className="simple-run-files">
             {files === 1 ? t("simple.summary.filesOne") : t("simple.summary.files", { count: files })}
