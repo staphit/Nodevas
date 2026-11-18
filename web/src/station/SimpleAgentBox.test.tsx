@@ -135,6 +135,25 @@ describe("SimpleAgentBox", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
+  // A run this box starts is offered to the built-in runner for a moment
+  // before it runs: the person's click was the OK, so nothing waits on them
+  // (the same rule as waiting.ts). Only an offer that asks says so.
+  it("does not say it waits for an OK while a built-in offer is just starting", async () => {
+    renderBox();
+    fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Started. The agent is working on it.");
+
+    act(() => useRuns.getState().putRun(startedRun({ global: true, status: "offered" })));
+    expect(screen.getByRole("status")).toHaveTextContent("Started. The agent is working on it.");
+    expect(screen.queryByText(t("simple.box.waitingOk"))).not.toBeInTheDocument();
+
+    const ask = { runId: "g1", where: "app", reasons: null, expiresAt: "2026-11-17T08:10:00Z" };
+    act(() => useRuns.getState().putRun(startedRun({ global: true, status: "offered", ask })));
+    expect(screen.getByRole("status")).toHaveTextContent(t("simple.box.waitingOk"));
+    expect(screen.getByRole("button", { name: "Watch it work" })).toBeInTheDocument();
+  });
+
   it.each([
     [{ status: "succeeded" as const }, "Done, but the agent did not change any files."],
     [{ status: "failed" as const, error: "exit status 1" }, "The agent could not finish this. Nothing in your folder was changed."],
