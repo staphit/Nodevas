@@ -20,19 +20,20 @@
 // language and overall, so a change to the prompt or the model can be
 // compared before and after. A low score does not fail the test.
 //
-// Baseline (2026-11-17, cases.json as of the P7 commit, the drafter prompt
-// before the final review fixes): opencode:opencode/deepseek-v4.1-flash-free
-// scored 99% overall (zh-TW 97%, en 100%) over 30 cases, every case valid on
-// the first call with no repair, 4-14 s per draft. The first run scored 98%;
-// zh-long-spec's keywords were then widened (租屋, 租約) because the model had
-// drafted those steps correctly in other words. Known misses:
-// zh-after-selection drops the third of three steps (上線); and while both
-// review-gate cases passed, in the browser smoke test a refine asking for a
-// manager's review (發布前加一個主管審查) added it as kind task, not gate.
-// Ollama and LM Studio were never run, nor whether they honour
-// response_format (the provider retries without it when refused, and the
-// drafter validates the answer either way). Re-run and replace
-// this paragraph when the prompt, the schema or the cases change.
+// Baseline (2026-11-18, cases.json and the drafter prompt after the final
+// review fixes, which made a person's approval step a gate and every listed
+// step a node): opencode:opencode/deepseek-v4.1-flash-free scored 100% (zh-TW
+// 100%, en 100%) over 30 cases, every case valid on the first call with no
+// repair, 3-23 s per draft. The earlier prompt scored 99%: zh-after-selection
+// dropped the third of three steps (上線), and a manager's review was drafted
+// as kind task. In a live Ask turn in bypassPermissions mode, the same model
+// answered "add these steps" with propose_nodes, so the steps came back as a
+// draft card and nothing was written to the board. Ollama and LM Studio were
+// never run, nor whether they honour response_format (the provider retries
+// without it when refused, and the drafter validates the answer either way).
+// OpenCode's free models share one usage limit; when it is spent, a call fails
+// at once with that reason. Re-run and replace this paragraph when the prompt,
+// the schema or the cases change.
 package copilot
 
 import (
