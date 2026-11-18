@@ -6,6 +6,8 @@ import { IconFolder, IconFork, IconSend, IconTerminal } from "../icons";
 import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
 import { useEdition } from "../runners/edition";
 import { runnerDisplayName } from "../runners/runnerName";
+import { useRunners } from "../runners/runnerStore";
+import { useViewer } from "../components/SignIn";
 import { openSettings } from "../settings/openSettings";
 import { useSimpleMode } from "../simple/simpleMode";
 import { relativeTime } from "../runners/RunnersModal";
@@ -28,6 +30,7 @@ import { useNodeType } from "../nodeTypeTheme";
 import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
 import { OfferAskCard, runAsksInApp } from "./OfferAskCard";
 import { declineFix, declineText } from "./offerReasons";
+import { runSignedOut, signInReader, signedOutText } from "./signedOut";
 
 export { RunAskItem, RunEventItem } from "./RunTimeline";
 
@@ -399,6 +402,11 @@ export function RunDetail({
   const stopRequested = useRuns((s) => Boolean(s.stopRequested[run.id])) && !runFinal(run.status);
   const cancelRun = useRuns((s) => s.cancelRun);
   const final = runFinal(run.status);
+  const runners = useRunners((s) => s.runners);
+  const viewer = useViewer();
+  // Its agent is on the runner but signed out: how to sign in, to whoever
+  // can (signedOut.ts), above what the CLI said.
+  const signedOut = runSignedOut(run) ? signedOutText(t, run, signInReader(run, runners, viewer)) : "";
 
   const onCancel = async () => {
     if (await confirmCancelRun(t, run)) await cancelRun(run.id);
@@ -555,6 +563,7 @@ export function RunDetail({
           {run.error && (
             <>
               <b>{t("runs.error")}</b>
+              {signedOut && <p className="run-signed-out">{signedOut}</p>}
               <pre>{run.error}</pre>
             </>
           )}

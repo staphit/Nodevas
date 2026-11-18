@@ -1240,6 +1240,15 @@ CREATE TABLE IF NOT EXISTS run_plan_drafts (
 );
 `,
 	},
+	{
+		// What a runner said more about a failure beside its kind
+		// (runnerwire.RunResult.FailureCode): "signed_out" for an agent CLI
+		// that is installed but not signed in. Rows from before have none.
+		name: "0042_run_failure_code",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS failure_code TEXT COLLATE "C" NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

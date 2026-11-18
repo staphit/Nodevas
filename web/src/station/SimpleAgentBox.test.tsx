@@ -159,6 +159,16 @@ describe("SimpleAgentBox", () => {
     [{ status: "failed" as const, error: "exit status 1" }, "The agent could not finish this. Nothing in your folder was changed."],
     [{ status: "cancelled" as const }, "Stopped. Nothing in your folder was changed."],
     [{ status: "declined" as const }, "It did not start. Nothing in your folder was changed."],
+    // Claude Code installed but signed out: how to sign in, not its English.
+    [
+      {
+        status: "failed" as const,
+        error: "Not logged in · Please run /login",
+        failureKind: "agent_unavailable",
+        failureCode: "signed_out",
+      },
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude, press Enter and sign in, then try again.",
+    ],
   ])("says how the run ended in plain words (%o)", async (end, text) => {
     renderBox();
     fireEvent.change(screen.getByRole("textbox", { name: "What do you want done?" }), { target: { value: "Do it" } });

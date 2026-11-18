@@ -3,6 +3,7 @@ import type { Runner } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
 import { IconShield, IconTrash } from "../icons";
 import { MODE_INTERACTIVE } from "../runs/autoAccept";
+import { signInCommand } from "../runs/signedOut";
 import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
 import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
 import { useFreshStepUp } from "../stepup/freshStepUp";
@@ -295,7 +296,11 @@ function RunnerCard({ runner }: { runner: Runner }) {
                     <span className="runner-agent-version">
                       {agent.installed
                         ? agent.version || t("runners.installed")
-                        : agent.error ? runnerAgentProblem(t, agent.error) : t("runners.notInstalled")}
+                        : agent.signedOut
+                          ? t("runners.signedOut", { command: signInCommand(agent.kind) })
+                          : agent.error
+                            ? runnerAgentProblem(t, agent.error)
+                            : t("runners.notInstalled")}
                     </span>
                     {agent.installed && agent.models.length > 0 && (
                       <span className="runner-models">

@@ -28,7 +28,13 @@ const ZH_WORDS = /儲存庫|分支|合併|工作樹|提交|終端機|拉取請�
 /** Allowed to use one of the words, and why. */
 const ALLOWED: Record<string, string> = {
   "local.firstFolder.gitNeeded": "it names Git, the program the person has to install",
+  "local.scan.signInHint": "it names Terminal, the app the person opens to sign an agent in",
+  "result.signedOut": "it names Terminal, the app the person opens to sign an agent in",
 };
+
+/** The keys allowed only to name the Terminal app (what macOS and Windows
+ * call it), as the app to open and nothing else. */
+const NAMES_TERMINAL = ["local.scan.signInHint", "result.signedOut"];
 
 /** Every key of one catalog, read from the source so none is missed. */
 function catalogKeys(language: "en" | "zh-TW"): string[] {
@@ -71,6 +77,18 @@ describe("easy start's plain words", () => {
       .filter((key) => ZH_WORDS.test(withoutPlaceholders(translate(key, "zh-TW"))))
       .map((key) => `${key}: ${translate(key, "zh-TW")}`);
     expect(hits).toEqual([]);
+  });
+
+  it("names the Terminal app only as the app to open, with nothing else a developer says", () => {
+    for (const key of NAMES_TERMINAL) {
+      expect(keys).toContain(key);
+      const en = withoutPlaceholders(translate(key, "en"));
+      const zh = withoutPlaceholders(translate(key, "zh-TW"));
+      expect(en).toContain("the Terminal app");
+      expect(zh).toContain("「終端機」");
+      expect(EN_WORDS.test(en.replace("the Terminal app", ""))).toBe(false);
+      expect(ZH_WORDS.test(zh.replace("「終端機」", ""))).toBe(false);
+    }
   });
 
   it("allows only keys that exist", () => {

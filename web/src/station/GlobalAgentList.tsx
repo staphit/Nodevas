@@ -27,6 +27,7 @@ import { declineText } from "../runs/offerReasons";
 import { openRunWorkspace } from "../runs/openWorkspace";
 import { ResultActions } from "../runs/ResultActions";
 import { resultState } from "../runs/resultState";
+import { runSignedOut, signedOutText } from "../runs/signedOut";
 import { CIBadge, PRChip } from "../runs/RunChanges";
 import { formatCompact, formatCost, safeExternalUrl, totalTokens } from "../runs/runFormat";
 import { useRuns } from "../runs/runStore";
@@ -308,6 +309,12 @@ function GlobalAgentRow({
   const usage = usageText(t, run, simple);
   const noPRChip = !simple && run.noPR && final && !run.workspace && !run.prUrl;
   const declined = run.status === "declined" ? declineText(t, run, single) : "";
+  // Its agent was signed out: how to sign in on this computer, or on a team
+  // hub what the runner's owner runs there and whom anyone else asks.
+  const builtIn = useRunners((s) => s.runners.some((runner) => runner.id === run.runnerId && runner.builtIn));
+  const signedOut = runSignedOut(run)
+    ? signedOutText(t, run, builtIn ? "local" : own ? "owner" : "other")
+    : "";
 
   const onStop = async () => {
     const ok = await confirmAction({
@@ -344,6 +351,7 @@ function GlobalAgentRow({
             )}
           </span>
           {declined && <small className="global-agent-declined">{declined}</small>}
+          {signedOut && <small className="global-agent-declined">{signedOut}</small>}
         </td>
         <td data-label={t("globalAgents.col.agent")}>
           <span className="global-agent-who">{who}</span>

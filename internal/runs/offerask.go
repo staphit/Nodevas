@@ -46,7 +46,7 @@ func CleanDeclineCode(code string) string {
 	case "", runnerwire.DeclineInApp, runnerwire.DeclineOnRunner, runnerwire.DeclineTimedOut,
 		runnerwire.DeclineNoOneThere, runnerwire.DeclineRepoNotAdded, runnerwire.DeclineAgentMissing,
 		runnerwire.DeclineInteractiveOff, runnerwire.DeclineGlobalOff, runnerwire.DeclineBusy,
-		runnerwire.DeclineOther:
+		runnerwire.DeclineOther, runnerwire.DeclineAgentSignedOut:
 		return code
 	}
 	return runnerwire.DeclineOther
