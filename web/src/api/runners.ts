@@ -18,6 +18,9 @@ export interface RunnerAgent {
   version?: string;
   models: RunnerModel[];
   error?: string;
+  /** On its machine but not signed in: not installed (usable) until someone
+   * signs in there. Only for a CLI that can say so without a run. */
+  signedOut?: boolean;
 }
 
 export interface RunnerRepo {

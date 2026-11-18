@@ -151,6 +151,27 @@ func (d *detector) again(ctx context.Context, wait time.Duration) {
 	}
 }
 
+// soon asks for a new look without waiting for it: something a run saw
+// (an agent that turned out signed out) may have changed what is here.
+func (d *detector) soon() {
+	d.mu.Lock()
+	// A look with nobody waiting on it would be skipped as already taken.
+	d.waiters = append(d.waiters, make(chan struct{}))
+	d.mu.Unlock()
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
+}
+
+// lookSoon is detector.soon, for a client that has one (tests make jobs
+// without).
+func (c *Client) lookSoon() {
+	if c.detect != nil {
+		c.detect.soon()
+	}
+}
+
 // info is the hello as of now: what the last look found, with the settings
 // in effect (refreshInfo): the limit a change from the hub (settings.go) may
 // have moved off the config's, and the built-in runner's own

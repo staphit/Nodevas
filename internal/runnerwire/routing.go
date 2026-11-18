@@ -74,6 +74,12 @@ const (
 	FailureTask        = "task"              // anything else: do not fall back
 )
 
+// FailureSignedOut is RunResult.FailureCode for a FailureAgentAbsent run whose
+// CLI is installed but not signed in on its runner: the app says how to sign
+// in, there, instead of the CLI's own words. The kind stays
+// FailureAgentAbsent, so fallback and an older hub read it as before.
+const FailureSignedOut = "signed_out"
+
 // FallbackWorthy reports whether a failure kind should move down the chain.
 func FallbackWorthy(kind string) bool {
 	switch kind {

@@ -384,6 +384,47 @@ describe("GlobalAgentList", () => {
     expect(rowOf("Other")).not.toHaveClass("is-focus");
   });
 
+  // An agent that was signed out: the row says how to sign in on this
+  // computer, or, on a team hub, to the runner's owner what to run there
+  // and to anyone else whom to ask.
+  it("says a signed-out agent needs signing in, to whoever can", () => {
+    const failed = (overrides: Partial<Run> = {}) =>
+      makeGlobalRun({
+        status: "failed",
+        error: "Not logged in · Please run /login",
+        failureKind: "agent_unavailable",
+        failureCode: "signed_out",
+        finishedAt: "2026-11-14T08:00:09Z",
+        ...overrides,
+      });
+    useRunners.setState({ runners: [{ ...localRunner(), id: "r1", name: "desktop", ownerId: "u1", builtIn: false }], loaded: true });
+    seed([failed()]);
+    const { unmount } = show();
+    expect(rowOf("Fix the flaky login test")).toHaveTextContent(
+      "Claude isn't signed in on desktop. Open a terminal there, run claude and sign in, then run it again.",
+    );
+    unmount();
+
+    // Bob sees the run but neither owns r1 nor has its load.
+    viewer = { id: "u2", name: "bob", role: "member" };
+    useGlobalAgents.setState({ runners: [] });
+    const again = show();
+    expect(rowOf("Fix the flaky login test")).toHaveTextContent("Only the person that computer belongs to can sign it in");
+    again.unmount();
+
+    viewer = null;
+    useRunners.setState({ runners: [localRunner()], loaded: true });
+    seed([failed({ runnerId: "local1", runnerName: "this machine" })]);
+    render(
+      <EditionProvider edition="single">
+        <GlobalAgentList />
+      </EditionProvider>,
+    );
+    expect(rowOf("Fix the flaky login test")).toHaveTextContent(
+      "Claude is on this computer but isn't signed in yet. Open the Terminal app on this computer, type claude",
+    );
+  });
+
   // Single-user edition: a finished result on this computer is offered in
   // plain words; the technical merge stays in its workspace panel.
   describe("plain result buttons", () => {

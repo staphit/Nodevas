@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
+import { useAgents } from "../agents/agentStore";
 import { agentName, agentWho } from "../game/labels";
 import { builtInRunner } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
@@ -9,6 +10,7 @@ import { useApp } from "../store";
 import { openNodeRuns } from "./openRuns";
 import { openRunWorkspace } from "./openWorkspace";
 import { applyRefusalKey } from "./resultState";
+import { runSignedOut, signInReader, signedOutText } from "./signedOut";
 import { useRuns } from "./runStore";
 import { workspaceCodeText } from "./workspaceStore";
 
@@ -181,6 +183,14 @@ function appliedFolder(run: Run, kind: RunNotifyKind): string {
   return local.info?.repos?.find((repo) => repo.id === run.repoId)?.path ?? "";
 }
 
+/** A failed run's second line: how to sign its agent in when that is why it
+ * failed (who may sign in decides the words), else what the runner said. */
+function failedBody(run: Run, t: (key: string, values?: Record<string, string | number>) => string): string {
+  if (!runSignedOut(run)) return run.error ?? "";
+  const reader = signInReader(run, useRunners.getState().runners, useAgents.getState().viewer);
+  return signedOutText(t, run, reader);
+}
+
 /** The toast's two lines, in the reader's language. */
 export function runNotifyText(
   run: Run,
@@ -198,6 +208,10 @@ export function runNotifyText(
       return { title: t("result.toast.finished", { agent, title: name }), body: t("result.toast.finishedBody") };
     }
     if (kind === "workspace-merged") return { title: t("result.toast.applied", { title: name }), body: "" };
+    // Its agent is here but signed out: what to do, not the CLI's English.
+    if (kind === "failed" && runSignedOut(run)) {
+      return { title: t("result.toast.signedOut", { agent: agentName(run.agent) }), body: failedBody(run, t) };
+    }
     // An apply refused after the fact: the plain sentence the result buttons
     // say, which always says nothing was changed.
     if (kind === "workspace-failed" && run.workspaceAction?.action === "merge_local") {
@@ -212,7 +226,7 @@ export function runNotifyText(
     const agent = agentWho(run.agent, run.model);
     return kind === "succeeded"
       ? { title: t("globalAgents.toast.finished", { agent, title: name }), body: pr }
-      : { title: t("globalAgents.toast.failed", { agent, title: name }), body: run.error ?? "" };
+      : { title: t("globalAgents.toast.failed", { agent, title: name }), body: failedBody(run, t) };
   }
   switch (kind) {
     case "ask":
@@ -223,7 +237,7 @@ export function runNotifyText(
     case "succeeded":
       return { title: t("runNotify.succeeded", { name }), body: pr };
     case "failed":
-      return { title: t("runNotify.failed", { name }), body: run.error ?? "" };
+      return { title: t("runNotify.failed", { name }), body: failedBody(run, t) };
     case "limit":
       return {
         title: t(run.failureKind === "quota" ? "runNotify.quota" : "runNotify.rateLimit", {

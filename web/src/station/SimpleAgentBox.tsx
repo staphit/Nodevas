@@ -36,6 +36,7 @@ import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { defaultModel, installedAgents } from "../runs/DispatchDialog";
+import { runSignedOut, signedOutText } from "../runs/signedOut";
 import { useSimpleMode } from "../simple/simpleMode";
 import { useApp, usePreference } from "../store";
 import { startFailure } from "./GlobalAgentForm";
@@ -325,7 +326,9 @@ function StartedLine({ run }: { run: Run }) {
       }
       break;
     case "failed":
-      text = t("simple.box.failed");
+      // Its agent is here but signed out (the box only runs on this
+      // computer): how to sign in, which is all a try again needs.
+      text = runSignedOut(run) ? signedOutText(t, run, "local") : t("simple.box.failed");
       link = open(t("simple.box.seeWhat"));
       tone = " is-failed";
       break;

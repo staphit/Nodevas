@@ -208,6 +208,10 @@ type Agent struct {
 	// Error says why detection failed, when Installed is false for a reason
 	// other than "not on PATH".
 	Error string `json:"error,omitempty"`
+	// SignedOut: the CLI is there but says it is not signed in, so it is not
+	// Installed (usable) until someone signs in on the runner's machine.
+	// Only set where the CLI can say so without a run (detect.go).
+	SignedOut bool `json:"signedOut,omitempty"`
 }
 
 // Model is one model a run can ask an agent for.
