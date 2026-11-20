@@ -235,8 +235,9 @@ func TestContestStartsNEntriesInOneTx(t *testing.T) {
 	}
 
 	// 2-entry global contest writes seq-0 user events and audits without task text.
-	f.log.audited = nil
-	gres, err := f.d.StartGlobalContest(ctx, f.globalRequest(nil))
+	gf := newContestFixture(t, contestHello(4))
+	gf.log.audited = nil
+	gres, err := gf.d.StartGlobalContest(ctx, gf.globalRequest(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,15 +248,15 @@ func TestContestStartsNEntriesInOneTx(t *testing.T) {
 		if !r.Global || r.ContestID != gres.Contest.ID || !r.NoPR {
 			t.Fatalf("global contest run = %+v", r)
 		}
-		events, _, err := f.s.Events(ctx, r.ID, 0, 5)
+		events, _, err := gf.s.Events(ctx, r.ID, 0, 5)
 		if err != nil || len(events) != 1 || events[0].Seq != 0 || events[0].Type != runnerwire.EventUser {
 			t.Fatalf("global contest seq-0 user event = %+v, %v", events, err)
 		}
 	}
-	if len(f.log.audited) != 1 || f.log.audited[0].Action != "run.contest.start" {
-		t.Fatalf("audit = %+v", f.log.audited)
+	if len(gf.log.audited) != 1 || gf.log.audited[0].Action != "run.contest.start" {
+		t.Fatalf("audit = %+v", gf.log.audited)
 	}
-	if detail := fmt.Sprint(f.log.audited[0].Detail); strings.Contains(detail, "Secret note") || strings.Contains(detail, "Fix login") {
+	if detail := fmt.Sprint(gf.log.audited[0].Detail); strings.Contains(detail, "Secret note") || strings.Contains(detail, "Fix login") {
 		t.Fatalf("audit leaked task text: %s", detail)
 	}
 }

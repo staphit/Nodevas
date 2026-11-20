@@ -53,7 +53,7 @@ func newRunsFixture(t *testing.T) *runsFixture {
 func runsHello(maxConcurrent int, active ...string) runnerwire.Envelope {
 	return runnerwire.Envelope{Type: runnerwire.TypeHello, Active: active, Hello: &runnerwire.Info{
 		Version: "test", Hostname: "desk", OS: "windows", Arch: "amd64",
-		Capabilities:  []string{runnerwire.CapHeadless},
+		Capabilities:  []string{runnerwire.CapHeadless, runnerwire.CapCoord},
 		MaxConcurrent: maxConcurrent,
 		Agents: []runnerwire.Agent{{Kind: "claude", Installed: true, Models: []runnerwire.Model{
 			{ID: "default", Default: true}, {ID: "opus"},
@@ -77,6 +77,14 @@ func (f *runsFixture) runBody(extra string) string {
 	body, _ := json.Marshal(runnerwire.CreateRunRequest{
 		NodeID: runsTestNode, RunnerID: f.runner.Runner.ID, Agent: "claude", RepoID: "repo-1",
 		Base: "main", Prompt: extra,
+	})
+	return string(body)
+}
+
+func (f *runsFixture) runBodyBoth(extra string) string {
+	body, _ := json.Marshal(runnerwire.CreateRunRequest{
+		NodeID: runsTestNode, RunnerID: f.runner.Runner.ID, Agent: "claude", RepoID: "repo-1",
+		Base: "main", Prompt: extra, OnBusy: runnerwire.OnBusyBoth,
 	})
 	return string(body)
 }
@@ -272,7 +280,7 @@ func TestRunDeclineAndCancel(t *testing.T) {
 	// A queued run (the runner is full) is cancelled without the runner.
 	busy := f.dispatch(t, f.bea, f.runBody(""))
 	expectOffer(t, conn, busy.ID)
-	queued := f.dispatch(t, f.bea, f.runBody(""))
+	queued := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	if queued.Status != runnerwire.RunQueued {
 		t.Fatalf("second run with one slot = %+v", queued)
 	}
@@ -289,12 +297,12 @@ func TestRunnerReconnectReconcilesRuns(t *testing.T) {
 	expectOffer(t, conn, lost.ID)
 	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeAccept, Accept: &runnerwire.Accept{RunID: lost.ID}})
 	f.waitStatus(t, lost.ID, runnerwire.RunRunning)
-	unanswered := f.dispatch(t, f.bea, f.runBody(""))
+	unanswered := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	expectOffer(t, conn, unanswered.ID)
 
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 	f.waitOffline(t)
-	waiting := f.dispatch(t, f.bea, f.runBody(""))
+	waiting := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	if waiting.Status != runnerwire.RunQueued {
 		t.Fatalf("run for an offline runner = %+v", waiting)
 	}

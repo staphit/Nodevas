@@ -218,7 +218,7 @@ func (a *API) create(c *gin.Context) {
 		return
 	}
 	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
-		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
+		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name, IsAdmin: actor.IsAdmin(),
 		// A person's click, never an agent's (refused above).
 		SteppedUpAt: steppedUpAt, Origin: runnerwire.OriginPerson,
 		// The project's roles (tool allowlists, custom roles) and the
@@ -269,6 +269,12 @@ func startFailed(c *gin.Context, err error) {
 	case runs.StartNodeType:
 		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, refused,
 			map[string]any{"nodeType": refused.NodeType, "agentMode": refused.AgentMode})
+	case runs.StartForbidden:
+		code := "PERMISSION_DENIED"
+		if refused.Reason != "" {
+			code = refused.Reason
+		}
+		httpx.Coded(c, http.StatusForbidden, code, refused, nil)
 	case runs.StartBusy:
 		extras := map[string]any{}
 		if refused.Busy != nil {

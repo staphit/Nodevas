@@ -158,7 +158,54 @@ func (a *API) resumeGlobalGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"group": resumed.RunGroup})
 }
 
-// Stub handler in Wave 0 (F1); filled by J1.
 func (a *API) followUpGlobalGroup(c *gin.Context) {
-	httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if a.d == nil {
+		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+		return
+	}
+	g, ok := a.visibleGroup(c)
+	if !ok {
+		return
+	}
+	var body runnerwire.GroupFollowUpRequest
+	if !httpx.DecodeJSONLimit(c, &body, maxGlobalBody) {
+		return
+	}
+	actor := auth.ActorFrom(c.Request)
+	steppedUpAt := ""
+	if a.steppedUpAt != nil {
+		if at, ok := a.steppedUpAt(c.Request); ok {
+			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	res, err := a.d.FollowUpGroup(c.Request.Context(), runs.GroupFollowUpRequest{
+		GroupID:     g.ID,
+		Body:        body,
+		Actor:       actor,
+		ActorID:     actor.ID,
+		ActorName:   actor.Name,
+		IsAgent:     actor.IsAgent(),
+		SteppedUpAt: steppedUpAt,
+	})
+	if err != nil {
+		var refused *runs.StartError
+		if errors.As(err, &refused) && refused.Code == runs.StartNotFound && refused.What == "group" {
+			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("group not found", "找不到群組"), nil)
+			return
+		}
+		followUpFailed(c, err)
+		return
+	}
+	out := runnerwire.GroupFollowUpResponse{
+		Started: make([]runnerwire.Run, 0, len(res.Started)),
+		Skipped: res.Skipped,
+	}
+	if out.Skipped == nil {
+		out.Skipped = []runnerwire.GroupFollowUpSkipped{}
+	}
+	for _, r := range res.Started {
+		out.Started = append(out.Started, a.forReader(c, r.Run))
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, out)
 }

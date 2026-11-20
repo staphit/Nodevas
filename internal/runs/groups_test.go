@@ -174,7 +174,7 @@ func TestStartGlobalGroupBudgetForN(t *testing.T) {
 	// Consume 1 run first -> 2 left.
 	if _, err := f.d.StartGlobal(ctx, GlobalStartRequest{
 		Body: runnerwire.CreateGlobalRunRequest{
-			RunnerID: f.runner.ID, RepoID: "repo-1", Agent: "claude", Task: "First",
+			RunnerID: f.runner.ID, RepoID: "repo-4", Agent: "claude", Task: "First",
 		},
 		ActorID: "u-ann", ActorName: "ann",
 	}); err != nil {
@@ -539,13 +539,13 @@ func TestResumeGroupClearsHold(t *testing.T) {
 }
 
 func TestCancelGroup(t *testing.T) {
-	f, _ := newGlobalFixture(t, groupHello(1, "api", "web", "worker"))
+	f, _ := newGlobalFixture(t, groupHello(1, "api", "web", "worker", "other"))
 	ctx := context.Background()
 
 	// Unrelated global run on another repo must not be cancelled.
 	other, err := f.d.StartGlobal(ctx, GlobalStartRequest{
 		Body: runnerwire.CreateGlobalRunRequest{
-			RunnerID: f.runner.ID, RepoID: "repo-1", Agent: "claude", Task: "Unrelated",
+			RunnerID: f.runner.ID, RepoID: "repo-4", Agent: "claude", Task: "Unrelated",
 		},
 		ActorID: "u-ann", ActorName: "ann",
 	})

@@ -296,6 +296,10 @@ func runReviseGoal(ctx context.Context, env *serverToolEnv, input json.RawMessag
 		return toolError("Not revised: a breakdown or revision of this goal is still running (run %s); its follow-up "+
 			"comes back here when it ends. Revise after that", board.planning)
 	}
+	// Preflight busy before pausing autopilot or writing to the goal (§C.2.4, §C.10).
+	if answer, busy := preflightRunBusy(ctx, env, target.runner.ID, target.repo.ID, goal); busy {
+		return answer
+	}
 	live, err := liveAutopilot(ctx, env, goal)
 	if err != nil {
 		return toolError("Not revised: could not read the goal's autopilot: %v", err)
@@ -340,6 +344,9 @@ func runReviseGoal(ctx context.Context, env *serverToolEnv, input json.RawMessag
 		"repoId": target.repo.ID, "kind": runnerwire.JobPlan, "revision": revisionText(stamp, change, board),
 	}, &run)
 	if err != nil {
+		if answer, busy := busyFromAPIError(err); busy {
+			return answer
+		}
 		return toolError("The change is recorded on the goal, but the replan run could not start: %v. Calling "+
 			"revise_goal again with the same change does not record it twice.%s", err, stillPaused)
 	}

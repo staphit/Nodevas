@@ -30,6 +30,7 @@ type StartContestRequest struct {
 	Project     string
 	ActorID     string
 	ActorName   string
+	IsAdmin     bool
 	SteppedUpAt string
 	LoadNode    func() (NodeInfo, bool, error)
 	// Optional shape-refusal fields when a caller passes forbidden dispatch
@@ -266,6 +267,7 @@ func (d *Dispatcher) StartContest(ctx context.Context, req StartContestRequest) 
 		outcome, err = d.applyBusy(ctx, tx, BusyRequest{
 			Query: BusyQuery{
 				ActorID: req.ActorID,
+				IsAdmin: req.IsAdmin,
 				Project: req.Project,
 				NodeID:  body.NodeID,
 				RepoKey: plans[0].repoKey,

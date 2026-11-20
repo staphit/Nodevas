@@ -91,6 +91,7 @@ func capabilities(cfg *Config) []string {
 	if cfg.GlobalRunsOn() {
 		caps = append(caps, runnerwire.CapGlobalRunsOn)
 	}
+	caps = append(caps, runnerwire.CapContinue)
 	if cfg.RemoteSettingsOn() {
 		caps = append(caps, runnerwire.CapRemoteSettings)
 	}

@@ -139,7 +139,7 @@ func TestStartRefusesStagedOnOldRunner(t *testing.T) {
 	if _, err := f.roleStart(t, lightStages(), criteria("x"), nil); err != nil {
 		t.Fatalf("light on an old runner: %v", err)
 	}
-	if _, err := f.roleStart(t, nil, nil, nil); err != nil {
+	if _, err := f.roleStart(t, nil, nil, func(req *StartRequest) { req.Body.NodeID = "node-2" }); err != nil {
 		t.Fatalf("legacy on an old runner: %v", err)
 	}
 }
@@ -187,6 +187,7 @@ func TestExecutorDispatchLocksAcceptance(t *testing.T) {
 	// A planner run does not lock anything.
 	if _, err := f.roleStart(t, lightStages(), criteria("x"), func(req *StartRequest) {
 		lock(req)
+		req.Body.NodeID = "node-2"
 		req.Body.Role = engine.RolePlanner
 		req.Body.Kind = runnerwire.JobPlan
 	}); err != nil {
@@ -197,6 +198,7 @@ func TestExecutorDispatchLocksAcceptance(t *testing.T) {
 	}
 	// A lock that fails stops the dispatch.
 	_, err := f.roleStart(t, lightStages(), criteria("x"), func(req *StartRequest) {
+		req.Body.NodeID = "node-3"
 		req.Body.Role = engine.RoleExecutor
 		req.LockAcceptance = func() error { return errors.New("disk full") }
 	})

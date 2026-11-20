@@ -39,12 +39,20 @@ func TestStartDraftOnlyForAPersonsPlainPlanRun(t *testing.T) {
 		})
 	}
 	for _, tc := range []struct {
-		name string
-		wf   *engine.Workflow
-		role string
-	}{{"no role", nil, ""}, {"default planner", lightStages(), ""}, {"planner", lightStages(), engine.RolePlanner}} {
+		name   string
+		nodeID string
+		wf     *engine.Workflow
+		role   string
+	}{
+		{"no role", "node-1", nil, ""},
+		{"default planner", "node-2", lightStages(), ""},
+		{"planner", "node-3", lightStages(), engine.RolePlanner},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := f.roleStart(t, tc.wf, nil, asCopilot(func(req *StartRequest) { req.Body.Role = tc.role }))
+			r, err := f.roleStart(t, tc.wf, nil, asCopilot(func(req *StartRequest) {
+				req.Body.NodeID = tc.nodeID
+				req.Body.Role = tc.role
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -57,7 +65,7 @@ func TestStartDraftOnlyForAPersonsPlainPlanRun(t *testing.T) {
 		})
 	}
 	// Without draft nothing changes.
-	r, err := f.roleStart(t, nil, nil, func(req *StartRequest) { req.Body.Kind = runnerwire.JobPlan })
+	r, err := f.roleStart(t, nil, nil, func(req *StartRequest) { req.Body.NodeID, req.Body.Kind = "node-4", runnerwire.JobPlan })
 	if err != nil || r.Draft {
 		t.Fatalf("plain plan run = %+v, %v", r.Run, err)
 	}

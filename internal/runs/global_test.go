@@ -127,12 +127,15 @@ func TestStartGlobalRecordsAndOffersAGlobalRun(t *testing.T) {
 	// A chosen slug and a pull request.
 	req = f.globalRequest("修正登入")
 	req.Body.Slug, req.Body.OpenPR, req.Body.Mode = "login-fix", true, runnerwire.ModeInteractive
+	req.Body.OnBusy = runnerwire.OnBusyBoth
 	asked, err := f.d.StartGlobal(ctx, req)
 	if err != nil || asked.BranchSlug != "login-fix" || asked.NoPR || asked.Title != "修正登入" || asked.Mode != runnerwire.ModeInteractive {
 		t.Fatalf("second run = %+v, %v", asked, err)
 	}
 	// A title with nothing ASCII derives the default slug.
-	plain, err := f.d.StartGlobal(ctx, f.globalRequest("修正登入"))
+	reqPlain := f.globalRequest("修正登入")
+	reqPlain.Body.OnBusy = runnerwire.OnBusyBoth
+	plain, err := f.d.StartGlobal(ctx, reqPlain)
 	if err != nil || plain.BranchSlug != runnerwire.DefaultGlobalSlug {
 		t.Fatalf("CJK title slug = %q, %v", plain.BranchSlug, err)
 	}
@@ -577,7 +580,9 @@ func TestCancelAllGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := f.d.StartGlobal(ctx, f.globalRequest("Two"))
+	reqTwo := f.globalRequest("Two")
+	reqTwo.Body.OnBusy = runnerwire.OnBusyBoth
+	queued, err := f.d.StartGlobal(ctx, reqTwo)
 	if err != nil || offered.Status != runnerwire.RunOffered || queued.Status != runnerwire.RunQueued {
 		t.Fatalf("statuses %s %s, %v", offered.Status, queued.Status, err)
 	}

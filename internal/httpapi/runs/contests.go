@@ -131,6 +131,7 @@ func (a *API) createContest(c *gin.Context) {
 		Project:     projectName,
 		ActorID:     actor.ID,
 		ActorName:   actor.Name,
+		IsAdmin:     actor.IsAdmin(),
 		SteppedUpAt: steppedUpAt,
 		Mode:        body.Mode,
 		Pipeline:    body.Pipeline,

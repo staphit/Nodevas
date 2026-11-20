@@ -411,8 +411,10 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		// External sessions' action log is analytics history, kept even
 		// where the agent network itself runs in memory.
 		s.agents.SetActionLog(database)
-		s.runs.SetRunClaimRelease(s.agents.ReleaseRunClaim)
+		s.agents.SetClaimStore(s.claimStoreFor)
+		s.runs.SetRunClaimRelease(s.releaseRunClaim)
 	}
+	s.runs.SetNodeCoordCheck(s.nodeDoneOrClaimed)
 	s.startAnalytics(database)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
@@ -536,6 +538,66 @@ func (s *Server) stagedApproved(project, nodeID, evidence string) {
 		slog.Warn("runs: mark approved node done", slog.String("node", nodeID), slog.Any("error", err))
 	}
 	s.broadcastProject(project, "state-changed", "")
+}
+
+type storeClaimAdapter struct{ st *store.Store }
+
+func (a storeClaimAdapter) LiveClaimOwner(nodeID string) string {
+	if c := a.st.ClaimFor(nodeID); c != nil {
+		return c.Owner
+	}
+	return ""
+}
+
+func (a storeClaimAdapter) ReleaseClaim(nodeID, owner string) error {
+	return a.st.ReleaseClaim(nodeID, owner)
+}
+
+func (s *Server) claimStoreFor(project string) agents.ClaimStore {
+	if s.pm == nil {
+		return nil
+	}
+	if st, err := s.pm.StoreFor(project); err == nil && st != nil {
+		return storeClaimAdapter{st: st}
+	}
+	if name, ok := s.pm.NameFor(project); ok {
+		if st, err := s.pm.StoreFor(name); err == nil && st != nil {
+			return storeClaimAdapter{st: st}
+		}
+	}
+	return nil
+}
+
+func (s *Server) releaseRunClaim(ctx context.Context, project, nodeID, runID string) {
+	if s.agents == nil {
+		return
+	}
+	projectKey := project
+	if s.pm != nil {
+		if st, err := s.pm.StoreFor(project); err == nil && st != nil {
+			projectKey = st.Root()
+		}
+	}
+	s.agents.ReleaseRunClaim(ctx, projectKey, nodeID, runID)
+}
+
+func (s *Server) nodeDoneOrClaimed(_ context.Context, project, nodeID string) bool {
+	if s.pm == nil || nodeID == "" {
+		return false
+	}
+	st, err := s.pm.StoreFor(project)
+	if err != nil || st == nil {
+		return false
+	}
+	if st.ClaimFor(nodeID) != nil {
+		return true
+	}
+	rs, err := st.LoadState()
+	if err != nil || rs == nil {
+		return false
+	}
+	ns := rs.Nodes[nodeID]
+	return ns != nil && ns.Status == engine.StatusDone
 }
 
 // broadcastProject tells the clients watching a project, named as ?project=

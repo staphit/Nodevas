@@ -2,12 +2,15 @@ package runs
 
 import (
 	"context"
+	"database/sql"
+	"reflect"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
@@ -29,8 +32,10 @@ type StartRequest struct {
 	Body    runnerwire.CreateRunRequest
 	Project string
 	// ActorID is who starts it; the runner must be theirs. ActorName is
-	// recorded as the run's dispatcher.
+	// recorded as the run's dispatcher. IsAdmin lets Layer 1 busy checks show
+	// and take over other members' node holders (§C.1, §C.2.1).
 	ActorID, ActorName string
+	IsAdmin            bool
 	// SteppedUpAt is the dispatcher's step-up (RFC3339Nano), or "".
 	SteppedUpAt string
 	// Origin is what starts it (runnerwire.OriginPerson for a person's
@@ -84,6 +89,8 @@ const (
 	StartNodeType = "node_type"
 	// StartBusy: an active or waiting run already holds the node or repository (§C.2).
 	StartBusy = "busy"
+	// StartForbidden: the actor may not stop a holder in a take-over (§C.2.2).
+	StartForbidden = "forbidden"
 )
 
 // StartError is why Start refused a run, worded for a person.
@@ -124,7 +131,7 @@ func (e *StartError) Is(target error) bool {
 		return target == ErrInvalid
 	case StartNotFound:
 		return target == ErrNotFound
-	case StartPrecondition, StartBudget, StartNodeType, StartOutdated, StartBusy:
+	case StartPrecondition, StartBudget, StartNodeType, StartOutdated, StartBusy, StartForbidden:
 		return target == ErrPrecondition
 	}
 	return false
@@ -166,6 +173,14 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	}
 	if !ValidMode(body.Mode) {
 		return Record{}, refuse(StartInvalid, `mode must be "" or %q`, `mode 須為 "" 或 %q`, runnerwire.ModeInteractive)
+	}
+	switch body.OnBusy {
+	case runnerwire.OnBusyAsk, runnerwire.OnBusyQueue, runnerwire.OnBusyTakeOver, runnerwire.OnBusyBoth:
+	default:
+		return Record{}, invalidField("onBusy", "onBusy is not a valid busy choice", "onBusy 不是有效的忙碌選項")
+	}
+	if !runnerwire.ValidHolderIDs(body.HolderIDs) {
+		return Record{}, invalidField("holderIds", "holderIds is not valid", "holderIds 無效")
 	}
 	// A dispatch is an implement run, (W7) a plan run, which breaks the node
 	// into tasks on the board, or (agent roles) a judge run, which checks
@@ -398,16 +413,13 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		}
 		first = firstStagedStep(wf, story, content, pipeline, body.Agent, model)
 	}
+	var newPipe *NewPipeline
 	if pipeline != nil {
-		p, err := d.store.CreatePipeline(ctx, NewPipeline{
+		newPipe = &NewPipeline{
 			OwnerID: runner.OwnerID, CreatedBy: req.ActorID, Project: req.Project, NodeID: body.NodeID,
 			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
 			Config: config, Phase: first.phase,
-		})
-		if err != nil {
-			return Record{}, err
 		}
-		pipelineID = p.ID
 	}
 	jobRoles := JobRoles{}
 	if first.role != "" {
@@ -418,28 +430,78 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		jobRoles.VerifySpec = &runnerwire.VerifySpec{Phase: runnerwire.VerifyGoal}
 	}
 	review := strings.TrimSpace(body.Revision)
-	createRun := d.createRun
-	if createRun == nil {
-		createRun = d.store.Create
-	}
-	record, err := createRun(ctx, New{
+	repoKey := runnerwire.RepoKey(runner.ID, repo)
+	in := New{
 		Project: req.Project, NodeID: body.NodeID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: first.am.Agent, Model: first.am.Model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: req.ActorID, CreatedByName: name,
-		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
+		Fallbacks:   body.Fallbacks,
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
 		Role: first.role, Override: body.Override, JobRoles: jobRoles,
 		NodeType: node.Type, AcceptanceCount: len(acceptance),
 		Origin: req.Origin, Draft: body.Draft,
+		RepoKey: repoKey,
+	}
+
+	customCreate := d.createRun != nil && reflect.ValueOf(d.createRun).Pointer() != reflect.ValueOf(d.store.Create).Pointer()
+	checkBusy := isWritingKind(first.kind, true)
+
+	var record Record
+	var outcome BusyOutcome
+	err = d.store.db.Tx(ctx, func(tx *sql.Tx) error {
+		if checkBusy {
+			if err := lockBusy(ctx, tx, "node:"+req.Project+"/"+body.NodeID, "repo:"+repoKey); err != nil {
+				return err
+			}
+			var err error
+			outcome, err = d.applyBusy(ctx, tx, BusyRequest{
+				Query: BusyQuery{
+					ActorID: req.ActorID,
+					IsAdmin: req.IsAdmin,
+					Project: req.Project,
+					NodeID:  body.NodeID,
+					RepoKey: repoKey,
+				},
+				OnBusy:     body.OnBusy,
+				HolderIDs:  body.HolderIDs,
+				RunnerCaps: runner.Info.Capabilities,
+			})
+			if err != nil {
+				return err
+			}
+			if !outcome.Proceed {
+				return nil
+			}
+			in.AfterRun = outcome.AfterRun
+			in.BusyChoice = outcome.Choice
+		}
+		if newPipe != nil {
+			p, err := d.store.createPipelineWith(ctx, tx, *newPipe)
+			if err != nil {
+				return err
+			}
+			pipelineID = p.ID
+			in.PipelineID = pipelineID
+		}
+		if customCreate {
+			var err error
+			record, err = d.createRun(ctx, in)
+			return err
+		}
+		var err error
+		record, err = d.store.createWith(ctx, tx, in)
+		return err
 	})
 	if err != nil {
-		if pipelineID != "" {
-			_, _ = d.store.EndPipeline(ctx, pipelineID, runnerwire.PipelineFailed, err.Error())
-		}
 		return Record{}, err
 	}
+	actor := identity.Actor{ID: req.ActorID, Name: name}
+	if req.IsAdmin {
+		actor.Role = identity.RoleAdmin
+	}
+	d.afterBusy(ctx, actor, outcome)
 	// The criteria an Executor works against do not change under it. They
 	// are locked only once the run exists; a failed lock cancels it.
 	if lockCriteria {

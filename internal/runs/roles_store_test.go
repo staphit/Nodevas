@@ -104,6 +104,7 @@ func TestRoleBudgetRefuses(t *testing.T) {
 	wantStartRefusal(t, err, StartBudget, "executor")
 	// Another role is not held back by the executor's budget.
 	if _, err := f.roleStart(t, lightStages(), nil, func(req *StartRequest) {
+		req.Body.NodeID = "node-2"
 		req.Body.Role = engine.RolePlanner
 		req.Body.Kind = runnerwire.JobPlan
 	}); err != nil {

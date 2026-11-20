@@ -32,6 +32,8 @@ type fakeAPI struct {
 	active      []runnerwire.Run
 	latest      string
 	goalContent string
+	// busy is returned by GET /api/runs/busy when non-nil.
+	busy *runnerwire.BusyResponse
 }
 
 type recorded struct {
@@ -81,6 +83,12 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(f.graph))
 	case "GET /api/runs":
 		_ = json.NewEncoder(w).Encode(runnerwire.RunListResponse{Runs: f.active})
+	case "GET /api/runs/busy":
+		resp := runnerwire.BusyResponse{Holders: []runnerwire.RunHolder{}, Choices: []string{}}
+		if f.busy != nil {
+			resp = *f.busy
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 	case "GET /api/autopilot":
 		if f.latest == "" {
 			w.WriteHeader(http.StatusNotFound)
@@ -618,5 +626,111 @@ func TestSystemPromptExplainsNodeTypes(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("system prompt missing %q", want)
 		}
+	}
+}
+
+func TestStartBreakdownBusyCreatesNoGoalNode(t *testing.T) {
+	api := standardAPI()
+	api.busy = &runnerwire.BusyResponse{
+		Holders: []runnerwire.RunHolder{{
+			RunID: "run-busy-1", Title: "Refactor auth", Agent: "claude", Model: "opus",
+			Status: runnerwire.RunRunning, Since: "2026-11-18T03:12:00Z", By: "alice",
+			RepoName: "app", MayStop: true,
+		}},
+		Choices: []string{runnerwire.OnBusyQueue, runnerwire.OnBusyTakeOver, runnerwire.OnBusyBoth},
+	}
+	result := runStartBreakdown(context.Background(), toolEnv(api),
+		json.RawMessage(`{"requirement":"Add CSV export to reports"}`))
+	if result.IsError {
+		t.Fatalf("busy preflight should be a plain answer, not a tool error: %s", result.Output)
+	}
+	if api.find(http.MethodPost, "/api/nodes") != nil {
+		t.Fatal("start_breakdown created a goal node even though preflight reported busy")
+	}
+	if api.find(http.MethodPost, "/api/runs") != nil {
+		t.Fatal("start_breakdown dispatched a run even though preflight reported busy")
+	}
+	if api.find(http.MethodGet, "/api/runs/busy") == nil {
+		t.Fatal("start_breakdown did not call GET /api/runs/busy")
+	}
+}
+
+func TestStartBreakdownBusyAnswerListsHolders(t *testing.T) {
+	api := standardAPI()
+	api.busy = &runnerwire.BusyResponse{
+		Holders: []runnerwire.RunHolder{{
+			RunID: "run-busy-1", Title: "Refactor auth", Agent: "claude", Model: "opus",
+			Status: runnerwire.RunRunning, Since: "2026-11-18T03:12:00Z", By: "alice",
+			NodeID: "node-0003", RepoName: "app", MayStop: true, SameNode: true,
+		}},
+		Others:  1,
+		Choices: []string{runnerwire.OnBusyQueue, runnerwire.OnBusyBoth},
+	}
+	result := runStartBreakdown(context.Background(), toolEnv(api),
+		json.RawMessage(`{"goalNodeId":"node-0003"}`))
+	if result.IsError {
+		t.Fatalf("expected plain answer, got error: %s", result.Output)
+	}
+	var out struct {
+		Busy    bool                   `json:"busy"`
+		Holders []runnerwire.RunHolder `json:"holders"`
+		Others  int                    `json:"others"`
+		Note    string                 `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, result.Output)
+	}
+	if !out.Busy || len(out.Holders) != 1 || out.Holders[0].RunID != "run-busy-1" || out.Holders[0].Title != "Refactor auth" || out.Others != 1 {
+		t.Fatalf("busy answer = %+v", out)
+	}
+	if !strings.Contains(out.Note, "Refactor auth") || !strings.Contains(out.Note, "board") {
+		t.Fatalf("note = %q", out.Note)
+	}
+}
+
+func TestCopilotToolsNeverSendOnBusy(t *testing.T) {
+	// 1. None of the copilot tool schemas expose onBusy or holderIds.
+	for name, spec := range serverTools {
+		if strings.Contains(spec.schema, "onBusy") || strings.Contains(spec.schema, "holderIds") {
+			t.Errorf("server tool %q schema exposes busy choice fields: %s", name, spec.schema)
+		}
+	}
+
+	// 2. start_breakdown never sends onBusy or holderIds on POST /api/runs.
+	api := standardAPI()
+	res := runStartBreakdown(context.Background(), toolEnv(api),
+		json.RawMessage(`{"requirement":"Add CSV export","onBusy":"takeOver","holderIds":["r1"]}`))
+	if res.IsError {
+		t.Fatalf("start_breakdown = %s", res.Output)
+	}
+	runCall := api.find(http.MethodPost, "/api/runs")
+	if runCall == nil {
+		t.Fatal("missing POST /api/runs")
+	}
+	if _, has := runCall.body["onBusy"]; has {
+		t.Fatalf("start_breakdown sent onBusy: %+v", runCall.body)
+	}
+	if _, has := runCall.body["holderIds"]; has {
+		t.Fatalf("start_breakdown sent holderIds: %+v", runCall.body)
+	}
+
+	// 3. revise_goal never sends onBusy or holderIds on POST /api/runs.
+	revAPI := revisingAPI()
+	env := toolEnv(revAPI)
+	env.followup = func(string, string, *Revision) error { return nil }
+	res = runReviseGoal(context.Background(), env,
+		json.RawMessage(`{"goalNodeId":"node-0042","change":"Add SSO","onBusy":"takeOver","holderIds":["r1"]}`))
+	if res.IsError {
+		t.Fatalf("revise_goal = %s", res.Output)
+	}
+	revRunCall := revAPI.find(http.MethodPost, "/api/runs")
+	if revRunCall == nil {
+		t.Fatal("missing POST /api/runs from revise_goal")
+	}
+	if _, has := revRunCall.body["onBusy"]; has {
+		t.Fatalf("revise_goal sent onBusy: %+v", revRunCall.body)
+	}
+	if _, has := revRunCall.body["holderIds"]; has {
+		t.Fatalf("revise_goal sent holderIds: %+v", revRunCall.body)
 	}
 }

@@ -189,6 +189,7 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 	}
 	if recorder.Code < 200 || recorder.Code > 299 {
 		var problem struct {
+			Code    string `json:"code"`
 			Error   string `json:"error"`
 			Message string `json:"message"`
 		}
@@ -200,8 +201,12 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 		if text == "" {
 			text = http.StatusText(recorder.Code)
 		}
-		return &apiError{status: recorder.Code,
-			text: fmt.Sprintf("%s %s: %s (HTTP %d)", method, path, truncateUTF8(text, 500), recorder.Code)}
+		return &apiError{
+			status: recorder.Code,
+			code:   strings.TrimSpace(problem.Code),
+			raw:    append([]byte(nil), data...),
+			text:   fmt.Sprintf("%s %s: %s (HTTP %d)", method, path, truncateUTF8(text, 500), recorder.Code),
+		}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -231,10 +236,87 @@ func planDraftRefusal(ctx context.Context, env *serverToolEnv, goal, refused str
 // apiError is a non-2xx answer from the API.
 type apiError struct {
 	status int
+	code   string
+	raw    []byte
 	text   string
 }
 
 func (e *apiError) Error() string { return e.text }
+
+// preflightRunBusy checks GET /api/runs/busy before a copilot tool creates
+// nodes or dispatches a run (§C.2.4, §C.10). When busy, it returns a plain
+// non-error answer listing the holders for the person so they can decide from
+// the board; models never choose onBusy or holderIds.
+func preflightRunBusy(ctx context.Context, env *serverToolEnv, runnerID, repoID, nodeID string) (toolbridge.Result, bool) {
+	path := "/api/runs/busy?runnerId=" + url.QueryEscape(runnerID) + "&repoId=" + url.QueryEscape(repoID)
+	if nodeID != "" {
+		path += "&nodeId=" + url.QueryEscape(nodeID)
+	}
+	var busy runnerwire.BusyResponse
+	if err := env.do(ctx, http.MethodGet, path, nil, &busy); err != nil {
+		return toolbridge.Result{}, false
+	}
+	if len(busy.Holders) == 0 && busy.Others == 0 {
+		return toolbridge.Result{}, false
+	}
+	return busyAnswer(busy), true
+}
+
+// busyFromAPIError turns a 409 BUSY response from POST /api/runs into the same
+// plain answer as preflightRunBusy.
+func busyFromAPIError(err error) (toolbridge.Result, bool) {
+	var ae *apiError
+	if !errors.As(err, &ae) || ae.status != http.StatusConflict || ae.code != "BUSY" {
+		return toolbridge.Result{}, false
+	}
+	var busy runnerwire.BusyResponse
+	_ = json.Unmarshal(ae.raw, &busy)
+	return busyAnswer(busy), true
+}
+
+func busyAnswer(busy runnerwire.BusyResponse) toolbridge.Result {
+	holders := busy.Holders
+	if holders == nil {
+		holders = []runnerwire.RunHolder{}
+	}
+	var parts []string
+	for _, h := range holders {
+		desc := h.Title
+		if desc == "" {
+			desc = h.RunID
+		}
+		status := h.Status
+		if h.Waiting {
+			status = "waiting"
+		}
+		if h.Agent != "" {
+			parts = append(parts, fmt.Sprintf("%s (%s, %s)", desc, h.Agent, status))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s (%s)", desc, status))
+		}
+	}
+	if busy.Others > 0 {
+		if busy.Others == 1 {
+			parts = append(parts, "someone else is also working on this")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d other runs by team members are active", busy.Others))
+		}
+	}
+	summary := "Another run is already active"
+	if len(parts) > 0 {
+		summary = "Work is already in progress: " + strings.Join(parts, "; ")
+	}
+	note := summary + ". Nothing was started or created. Tell the person what is running and let them start it from the board where they can choose whether to wait in line, take over, or run both."
+	out := map[string]any{
+		"busy":    true,
+		"holders": holders,
+		"note":    note,
+	}
+	if busy.Others > 0 {
+		out["others"] = busy.Others
+	}
+	return toolOK(out)
+}
 
 // isStatus reports whether err is the API answering with status.
 func isStatus(err error, status int) bool {
@@ -405,6 +487,11 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 	if err != nil {
 		return toolError("Not started: %v", err)
 	}
+	// Preflight busy before creating any goal node (§C.2.4, §C.10): models never
+	// choose onBusy or holderIds; tell the person what is running instead.
+	if answer, busy := preflightRunBusy(ctx, env, target.runner.ID, target.repo.ID, in.GoalNodeID); busy {
+		return answer
+	}
 
 	goal, title, created := in.GoalNodeID, "", false
 	if goal == "" {
@@ -437,6 +524,9 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 	var run runnerwire.Run
 	err = env.do(ctx, http.MethodPost, "/api/runs", runBody, &run)
 	if err != nil {
+		if answer, busy := busyFromAPIError(err); busy {
+			return answer
+		}
 		text := "Could not start the plan run: %v"
 		if created {
 			text = "Created the goal node " + goal + " but could not start the plan run: %v"

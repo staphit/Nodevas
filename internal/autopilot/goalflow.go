@@ -370,6 +370,7 @@ func (o *Orchestrator) startGoalRun(ctx context.Context, w *work, kind, role str
 		Body: runnerwire.CreateRunRequest{
 			NodeID: rec.GoalNodeID, RunnerID: runnerID, Agent: am.Agent, Model: am.Model, RepoID: rec.Policy.RepoID,
 			Kind: kind, Role: role, Prompt: runs.Truncate(extra, runs.MaxExtraPrompt),
+			OnBusy: runnerwire.OnBusyQueue,
 		},
 		Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName, SteppedUpAt: rec.SteppedUpAt,
 		Origin: runnerwire.OriginAutopilot,

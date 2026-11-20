@@ -149,7 +149,7 @@ func TestOffersCarryTheDispatchersStepUp(t *testing.T) {
 		t.Fatal("an offer vouched before any step-up")
 	}
 	stepUp(t, f.runnerTestServer, f.bea)
-	stepped := f.dispatch(t, f.bea, f.runBody(""))
+	stepped := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	if !expectOffer(t, conn, stepped.ID).SteppedUp {
 		t.Fatal("an offer after a step-up did not vouch")
 	}
