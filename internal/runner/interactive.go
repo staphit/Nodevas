@@ -240,6 +240,9 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	watcher.start(ctx)
 	defer watcher.close()
 
+	tail := j.startTranscriptTail(ctx, r, sessionID)
+	defer tail.stop()
+
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
@@ -318,11 +321,12 @@ waitLoop:
 		}
 	}
 	s.finish(readerDone)
+	tail.stop()
 
 	if stopped != "ended" || exitCode >= 0 {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})
 	}
-	result := runnerwire.RunResult{ExitCode: exitCode, Summary: s.summary()}
+	result := runnerwire.RunResult{ExitCode: exitCode, Summary: tail.summary(s.summary())}
 	switch {
 	case stopped == "cancel":
 		cancelledResult := cancelled(ctx)

@@ -768,6 +768,7 @@ test.describe("page formats", () => {
     await addSubpage(drawer);
     await drawer.getByLabel("子頁標題").fill("轉檔");
     await drawer.getByRole("button", { name: "建立頁面" }).click();
+    await expect(drawer.getByLabel("檔案位置")).toContainText("page-");
     await editorText(page).click();
     await page.keyboard.type("\n轉換前的內容\n");
     await page.keyboard.press("Control+s");
