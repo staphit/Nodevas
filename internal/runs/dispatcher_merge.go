@@ -4,8 +4,17 @@ import (
 	"context"
 	"log/slog"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
+
+// MsgTurnRunning is returned when a merge approval is asked for while a turn
+// of the work root is still unfinished (§6.3).
+const MsgTurnRunning = "a turn of this work is still running; merge after it ends"
+
+func init() {
+	preconditionChinese[MsgTurnRunning] = "這份工作還有一輪在執行，結束後再合併"
+}
 
 // Approver is who approves a merge.
 type Approver struct{ ID, Name string }
@@ -17,6 +26,28 @@ func (d *Dispatcher) Merge(ctx context.Context, runID string, by Approver, headS
 	r, err := d.store.Get(ctx, runID)
 	if err != nil {
 		return Record{}, err
+	}
+	// Block a remote merge while any turn of the work root is unfinished (§6.3).
+	var active bool
+	if r.Global || r.WorkRoot != "" {
+		workRoot := r.WorkRoot
+		if workRoot == "" {
+			workRoot = r.ID
+		}
+		active, err = d.store.ActiveInWork(ctx, workRoot, "")
+	} else {
+		active, err = d.store.ActiveInWork(ctx, r.ID, r.ID)
+	}
+	if err != nil {
+		return r, err
+	}
+	if active {
+		return r, stageRefusal(CodeTurnRunning, locale.Errorf(MsgTurnRunning, "這份工作還有一輪在執行，結束後再合併"))
+	}
+	// A merge approval through an older row that has been continued fails its
+	// head check (§6.3).
+	if r.ContinuedBy != "" {
+		return r, Precondition(MsgHeadMoved)
 	}
 	if err := CheckMergeable(r, headSHA); err != nil {
 		return r, err

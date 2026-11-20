@@ -10,6 +10,7 @@
 package redact
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -129,4 +130,24 @@ func Output(s string) string {
 		s = secretRow.ReplaceAllString(s, "${1}"+Placeholder)
 	}
 	return s
+}
+
+// SecretPath reports whether path's name is one secrets are kept under.
+func SecretPath(path string) bool {
+	name := strings.ToLower(filepath.Base(filepath.FromSlash(path)))
+	switch name {
+	case ".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials":
+		return true
+	}
+	for _, prefix := range []string{".env", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	for _, ext := range []string{".pem", ".key", ".p12", ".pfx"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return strings.Contains(name, "kubeconfig")
 }

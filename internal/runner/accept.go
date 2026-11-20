@@ -250,7 +250,20 @@ func describeOffer(o Offer) string {
 	default:
 		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
 		if job.Global {
-			fmt.Fprintf(&b, "  branch:       %s\n", terminalText(BranchName(branchKey(job.NodeID, job.Slug), job.RunID)))
+			root := job.RunID
+			if job.WorkRoot != "" {
+				root = job.WorkRoot
+			} else if job.ContinueOf != "" {
+				root = job.ContinueOf
+			}
+			fmt.Fprintf(&b, "  branch:       %s\n", terminalText(BranchName(branchKey(job.NodeID, job.Slug), root)))
+			if job.ContinueOf != "" {
+				line := fmt.Sprintf("Follow-up of run %s in the same folder", terminalText(job.ContinueOf))
+				if pr := terminalText(strings.TrimSpace(job.ContinuePR)); pr != "" {
+					line += fmt.Sprintf(" (updates PR %s)", pr)
+				}
+				fmt.Fprintf(&b, "  follow-up:    %s\n", line)
+			}
 			if job.NoPR {
 				b.WriteString("  pull request: no (kept on this machine)\n")
 			}

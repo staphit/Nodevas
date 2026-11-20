@@ -39,6 +39,15 @@ export function RunEventItem({
   const { t } = useI18n();
   const text = event.text ?? "";
   switch (event.type) {
+    case "user":
+      return (
+        <li className="run-ev run-ev-user" data-seq={event.seq}>
+          <b>{t("runDialog.you")}</b>
+          {paragraphs(text).map((part, index) => (
+            <p key={index}>{part}</p>
+          ))}
+        </li>
+      );
     case "text":
       return (
         <li className="run-ev run-ev-text" data-seq={event.seq}>

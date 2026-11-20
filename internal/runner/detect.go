@@ -392,7 +392,8 @@ func (p *prober) versions(ctx context.Context, cfg *Config) []sighting {
 }
 
 func (p *prober) version(ctx context.Context, cfg *Config, kind string) sighting {
-	s := sighting{agent: runnerwire.Agent{Kind: kind, Models: ModelsFor(kind, cfg)}}
+	_, interactive := adapter.For(kind).(adapter.Interactive)
+	s := sighting{agent: runnerwire.Agent{Kind: kind, Models: ModelsFor(kind, cfg), Interactive: interactive}}
 	bin, err := agentBinary(p.cmds, cfg, kind)
 	if errors.Is(err, errAgentPathGone) {
 		s.agent.Error = agentPathGoneError(kind)
@@ -432,8 +433,218 @@ func (p *prober) version(ctx context.Context, cfg *Config, kind string) sighting
 		return s
 	}
 	s.agent.Installed = true
+	s.agent.Untrusted = agentUntrusted(cfg, kind)
 	s.bin = bin
 	return s
+}
+
+// claudeConfigPath is Claude Code's user state file (~/.claude.json or
+// $CLAUDE_CONFIG_DIR/.claude.json), where per-repo trust is recorded.
+// Tests point it elsewhere.
+var claudeConfigPath = func() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, ".claude.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude.json"), nil
+}
+
+// codexConfigPath is Codex's user config file (~/.codex/config.toml or
+// $CODEX_HOME/config.toml), where per-repo trust_level is recorded.
+// Tests point it elsewhere.
+var codexConfigPath = func() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+		return filepath.Join(dir, "config.toml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex", "config.toml"), nil
+}
+
+// agentUntrusted reports whether kind's interactive TUI would block on a
+// "trust this folder" prompt for a new git worktree of any configured repo
+// (§8.2). Verified by live CLI smoke tests:
+//   - Claude and Codex propagate trust from the main git repository root to all
+//     its worktrees, but do not honor trusting an ancestor of the worktree dir.
+//   - Antigravity requires an exact worktree path in trustedWorkspaces, so a
+//     brand-new worktree is always untrusted.
+//   - OpenCode has no folder-trust prompt; Gemini has no probe yet.
+func agentUntrusted(cfg *Config, kind string) bool {
+	switch kind {
+	case "claude":
+		return claudeUntrusted(cfg)
+	case "codex":
+		return codexUntrusted(cfg)
+	case "antigravity":
+		return true
+	default:
+		return false
+	}
+}
+
+func claudeUntrusted(cfg *Config) bool {
+	if cfg == nil || len(cfg.Repos) == 0 {
+		return false
+	}
+	path, err := claudeConfigPath()
+	if err != nil {
+		return true
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	var parsed struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &parsed) != nil || len(parsed.Projects) == 0 {
+		return true
+	}
+	trusted := make(map[string]bool, len(parsed.Projects))
+	for k, v := range parsed.Projects {
+		if v.HasTrustDialogAccepted {
+			for _, cand := range repoCandidatePaths(k) {
+				trusted[cand] = true
+			}
+		}
+	}
+	return !allReposTrusted(cfg.Repos, trusted)
+}
+
+func codexUntrusted(cfg *Config) bool {
+	if cfg == nil || len(cfg.Repos) == 0 {
+		return false
+	}
+	path, err := codexConfigPath()
+	if err != nil {
+		return true
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	trusted := parseCodexTrustedProjects(string(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))))
+	return !allReposTrusted(cfg.Repos, trusted)
+}
+
+func parseCodexTrustedProjects(content string) map[string]bool {
+	trusted := map[string]bool{}
+	currentProject := ""
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			currentProject = parseCodexProjectHeader(trimmed)
+			continue
+		}
+		if currentProject == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(trimmed, "=")
+		if !ok || strings.TrimSpace(k) != "trust_level" {
+			continue
+		}
+		if parseTOMLStringValue(v) == "trusted" {
+			for _, cand := range repoCandidatePaths(currentProject) {
+				trusted[cand] = true
+			}
+		}
+	}
+	return trusted
+}
+
+func parseCodexProjectHeader(line string) string {
+	// Strip any trailing comment after the closing bracket.
+	const prefix = "[projects."
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+	rest := line[len(prefix):]
+	end := strings.LastIndex(rest, "]")
+	if end < 0 {
+		return ""
+	}
+	// Ensure nothing other than whitespace or a comment follows ']'.
+	tail := strings.TrimSpace(rest[end+1:])
+	if tail != "" && !strings.HasPrefix(tail, "#") {
+		return ""
+	}
+	key := strings.TrimSpace(rest[:end])
+	return parseTOMLStringValue(key)
+}
+
+func parseTOMLStringValue(raw string) string {
+	s := strings.TrimSpace(raw)
+	if len(s) >= 2 && s[0] == '"' {
+		// Find the closing unescaped double quote so trailing comments are ignored.
+		escaped := false
+		for i := 1; i < len(s); i++ {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if s[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if s[i] == '"' {
+				var unquoted string
+				if json.Unmarshal([]byte(s[:i+1]), &unquoted) == nil {
+					return unquoted
+				}
+				return s[1:i]
+			}
+		}
+	}
+	if len(s) >= 2 && s[0] == '\'' {
+		if end := strings.IndexByte(s[1:], '\''); end >= 0 {
+			return s[1 : 1+end]
+		}
+	}
+	return ""
+}
+
+func repoCandidatePaths(p string) []string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return nil
+	}
+	clean := filepath.Clean(p)
+	out := []string{clean}
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		if resolved = filepath.Clean(resolved); resolved != clean {
+			out = append(out, resolved)
+		}
+	}
+	return out
+}
+
+func allReposTrusted(repos []runnerwire.Repo, trusted map[string]bool) bool {
+	if len(trusted) == 0 {
+		return false
+	}
+	for _, repo := range repos {
+		ok := false
+		for _, cand := range repoCandidatePaths(repo.Path) {
+			if trusted[cand] {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // claudeSignedOut reports whether Claude Code says it is not signed in.

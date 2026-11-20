@@ -81,7 +81,7 @@ func (d *detector) run(ctx context.Context) {
 		case <-d.wake:
 			asked = true
 		case <-recheck.C:
-			if !d.signedBackIn(ctx) {
+			if !d.signedBackIn(ctx) && !d.trustChanged() {
 				continue
 			}
 		}
@@ -149,6 +149,24 @@ func (d *detector) signedBackIn(ctx context.Context) bool {
 		}
 		bin, err := agentBinary(d.probe.cmds, d.c.cfg(), agent.Kind)
 		return err != nil || !d.probe.claudeSignedOut(ctx, bin)
+	}
+	return false
+}
+
+// trustChanged reports whether any installed agent's folder-trust status
+// changed on disk (or across configured repos) since the last look, so the
+// runner sends an updated hello on the same cadence as sign-in re-checks.
+// Reading local config files spawns no subprocesses.
+func (d *detector) trustChanged() bool {
+	agents, _ := d.found()
+	cfg := d.c.cfg()
+	for _, agent := range agents {
+		if !agent.Installed {
+			continue
+		}
+		if agentUntrusted(cfg, agent.Kind) != agent.Untrusted {
+			return true
+		}
 	}
 	return false
 }

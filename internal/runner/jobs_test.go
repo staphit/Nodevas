@@ -154,6 +154,31 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
+	case "continue-codex":
+		if err := os.WriteFile(filepath.Join(wd, "more.txt"), []byte("more\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		fixture("codex_stream.jsonl")
+		os.Exit(0)
+	case "continue-fail":
+		if err := os.WriteFile(filepath.Join(wd, "failed-step.txt"), []byte("partial\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		fixture("claude_error.jsonl")
+		os.Exit(3)
+	case "resume-fail":
+		if i := slices.Index(os.Args, "--"); i >= 0 && slices.Contains(os.Args[i+1:], "--resume") {
+			raw, _ := json.Marshal(os.Args[i+1:])
+			put("resume-args", string(raw))
+			fmt.Println(`{"type":"system","subtype":"init","session_id":"s-expired","model":"m"}`)
+			fmt.Fprintln(os.Stderr, "session expired")
+			os.Exit(1)
+		}
+		if err := os.WriteFile(filepath.Join(wd, "more.txt"), []byte("more\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
 	case "repoconfig":
 		// Which of the repository's own agent config the agent found, then
 		// some of its own, written into the worktree.
@@ -211,7 +236,7 @@ func TestHelperProcess(t *testing.T) {
 			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
 		fmt.Println(string(raw))
 		os.Exit(0)
-	case "race":
+	case "race", "continue-race":
 		// Someone pushes to the PR branch while the agent works: the runner's
 		// push must then be refused, not forced.
 		_, rest, _ := strings.Cut(string(stdin), "race:")
@@ -229,7 +254,11 @@ func TestHelperProcess(t *testing.T) {
 		gitRun("commit", "-q", "-m", "someone else")
 		gitRun("push", "-q", "origin", "HEAD:refs/heads/"+branch)
 		gitRun("reset", "-q", "--hard", "HEAD~1")
-		edit()
+		if mode == "continue-race" {
+			_ = os.WriteFile(filepath.Join(wd, "more.txt"), []byte("more\n"), 0o644)
+		} else {
+			edit()
+		}
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
 	case "hang", "slow-hang":
@@ -314,6 +343,10 @@ type fakeAgent struct {
 func (f fakeAgent) Kind() string                { return f.real.Kind() }
 func (f fakeAgent) NewParser() adapter.Parser   { return f.real.NewParser() }
 func (f fakeAgent) Classify(text string) string { return f.real.Classify(text) }
+func (f fakeAgent) SupportsResume(interactive bool) bool {
+	r, ok := f.real.(adapter.Resumer)
+	return ok && r.SupportsResume(interactive)
+}
 
 // Command is the real adapter's command run by the helper, which gets the
 // real arguments after "--". The job's prompt picks the mode.

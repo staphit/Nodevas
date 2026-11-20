@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -314,7 +317,12 @@ func TestDescribeInteractiveOffer(t *testing.T) {
 type interactiveAgent struct{ fakeAgent }
 
 func (a interactiveAgent) InteractiveCommand(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, error) {
-	return a.real.(adapter.Interactive).InteractiveCommand(job, env)
+	cmd, err := a.real.(adapter.Interactive).InteractiveCommand(job, env)
+	if err == nil && len(cmd.Args) >= 4 && cmd.Args[1] == "--session-id" {
+		sid, prompt := cmd.Args[2], cmd.Args[3]
+		cmd.Args[1], cmd.Args[2], cmd.Args[3] = prompt, "--session-id", sid
+	}
+	return cmd, err
 }
 
 type startedTerm struct {
@@ -631,4 +639,424 @@ func TestInteractiveRunNeverSaysRelayed(t *testing.T) {
 	}
 	st.term.exit <- 0
 	env.hub.wait("run-int-relay", runnerwire.TypeFinish)
+}
+
+// End sends the CLI's graceful quit sequence (Ctrl+C spaced 300ms apart) and
+// waits for the process to exit on its own; only if it ignores the quit past
+// the grace period is the process tree killed. Either way it finishes succeeded
+// with EndReason "ended".
+func TestEndQuitsGracefullyThenKills(t *testing.T) {
+	t.Run("graceful", func(t *testing.T) {
+		env, started := startInteractiveRunner(t, func(c *Client) {
+			c.endQuitGap = 20 * time.Millisecond
+			c.endGrace = 500 * time.Millisecond
+		})
+		env.hub.hello()
+		env.hub.offer(interactiveJob("run-end-graceful"))
+		st := waitStarted(t, started)
+		env.hub.wait("run-end-graceful", runnerwire.TypeAccept)
+
+		// Simulate Claude/Agy exiting on the second Ctrl+C (even with exit code 1,
+		// as Claude's trust screen exits with code 1 on double Ctrl+C).
+		go func() {
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if strings.Count(st.term.typed(), "\x03") >= 2 {
+					st.term.exit <- 1
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}()
+
+		env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-end-graceful"})
+		finish := env.hub.wait("run-end-graceful", runnerwire.TypeFinish)
+		if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonEnded || finish.Result.Error != "" {
+			t.Fatalf("graceful end finish = %+v", finish.Result)
+		}
+		st.term.mu.Lock()
+		killed := st.term.killed
+		st.term.mu.Unlock()
+		if killed {
+			t.Fatal("graceful exit should not hard-kill the terminal")
+		}
+		if got := strings.Count(st.term.typed(), "\x03"); got != 2 {
+			t.Fatalf("expected 2 Ctrl+C presses before exit, got %d (%q)", got, st.term.typed())
+		}
+	})
+
+	t.Run("kills after grace", func(t *testing.T) {
+		env, started := startInteractiveRunner(t, func(c *Client) {
+			c.endQuitGap = 15 * time.Millisecond
+			c.endGrace = 60 * time.Millisecond
+		})
+		env.hub.hello()
+		env.hub.offer(interactiveJob("run-end-kill"))
+		st := waitStarted(t, started)
+		env.hub.wait("run-end-kill", runnerwire.TypeAccept)
+
+		env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-end-kill"})
+		finish := env.hub.wait("run-end-kill", runnerwire.TypeFinish)
+		if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonEnded || finish.Result.Error != "" {
+			t.Fatalf("kill-after-grace finish = %+v", finish.Result)
+		}
+		st.term.mu.Lock()
+		killed := st.term.killed
+		st.term.mu.Unlock()
+		if !killed {
+			t.Fatal("stubborn terminal was not killed after grace period")
+		}
+		if got := strings.Count(st.term.typed(), "\x03"); got != 3 {
+			t.Fatalf("expected 3 Ctrl+C presses before kill, got %d (%q)", got, st.term.typed())
+		}
+	})
+}
+
+// An End arriving before the PTY opens is recorded as pendingEnd and applied
+// as soon as the terminal starts, rather than being silently dropped.
+func TestEndBeforeTerminalOpensIsKept(t *testing.T) {
+	entering := make(chan struct{}, 1)
+	release := make(chan struct{})
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.endQuitGap = 15 * time.Millisecond
+		c.endGrace = 50 * time.Millisecond
+		orig := c.NewTerminal
+		c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
+			entering <- struct{}{}
+			<-release
+			return orig(cmd, cols, rows)
+		}
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-early-end"))
+	env.hub.wait("run-early-end", runnerwire.TypeAccept)
+
+	select {
+	case <-entering:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for NewTerminal to be called")
+	}
+
+	// Send End before NewTerminal returns and before terms.open runs.
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-early-end"})
+	eventually(t, "pendingEnd set on run", func() bool {
+		env.client.jobs.mu.Lock()
+		defer env.client.jobs.mu.Unlock()
+		r := env.client.jobs.runs["run-early-end"]
+		return r != nil && r.pendingEnd
+	})
+
+	close(release)
+	st := waitStarted(t, started)
+	finish := env.hub.wait("run-early-end", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonEnded || finish.Result.Error != "" {
+		t.Fatalf("early end finish = %+v", finish.Result)
+	}
+	if strings.Count(st.term.typed(), "\x03") == 0 {
+		t.Fatalf("pending end did not send quit sequence; typed = %q", st.term.typed())
+	}
+}
+
+// Ending an interactive run publishes its worktree edits as a succeeded run,
+// even when the process had to be killed after the grace period (exit code -1):
+// no -1 failure is shown.
+func TestEndPublishesAnInteractiveRunAsSucceeded(t *testing.T) {
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-end-pub"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-end-pub", runnerwire.TypeAccept)
+
+	// Simulate edits made by the interactive agent inside its worktree.
+	if err := os.WriteFile(filepath.Join(st.cmd.Dir, "note.txt"), []byte("kept work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.term.emit("Updated note.txt\r\n")
+	eventually(t, "term_out received", func() bool {
+		out, _ := termOutput(env, "run-end-pub")
+		return strings.Contains(out, "Updated note.txt")
+	})
+
+	// Do not exit on Ctrl+C so the grace period hard-kills with exitCode -1.
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-end-pub"})
+	finish := env.hub.wait("run-end-pub", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonEnded || finish.Result.Error != "" {
+		t.Fatalf("finish = %+v", finish.Result)
+	}
+	if hubHasEvent(env, "run-end-pub", "exited with code -1") {
+		t.Fatal("End logged an 'exited with code -1' failure event")
+	}
+
+	var changes *runnerwire.RunChanges
+	for _, msg := range env.hub.messages("run-end-pub") {
+		if msg.Type == runnerwire.TypeChanges && msg.Changes != nil {
+			changes = msg.Changes
+		}
+	}
+	if changes == nil || changes.Commit == "" {
+		t.Fatalf("expected published commit on End, got changes = %+v", changes)
+	}
+}
+
+// Quiet timeout is fixed at 20 minutes by default and ends an idle interactive
+// session gracefully as succeeded with EndReason "quiet" and a log line.
+func TestQuietTimeoutEndsAfter20Minutes(t *testing.T) {
+	if interactiveQuiet != 20*time.Minute {
+		t.Fatalf("interactiveQuiet = %v, want 20m", interactiveQuiet)
+	}
+	if got := (&Client{}).quietTimeout(); got != 20*time.Minute {
+		t.Fatalf("default Client.quietTimeout() = %v, want 20m", got)
+	}
+
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.interactiveQuietTimeout = 60 * time.Millisecond
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-quiet"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-quiet", runnerwire.TypeAccept)
+
+	st.term.emit("Ready.\r\n❯ ")
+	finish := env.hub.wait("run-quiet", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonQuiet || finish.Result.Error != "" {
+		t.Fatalf("quiet finish = %+v", finish.Result)
+	}
+	if !hubHasEvent(env, "run-quiet", "inactivity") {
+		t.Fatal("quiet timeout did not emit an inactivity log event")
+	}
+	if strings.Count(st.term.typed(), "\x03") == 0 {
+		t.Fatalf("quiet timeout did not send quit sequence; typed = %q", st.term.typed())
+	}
+}
+
+// Typing into the terminal counts as activity and resets the quiet timer even
+// when the program produces no output.
+func TestQuietCountsInputToo(t *testing.T) {
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.interactiveQuietTimeout = 90 * time.Millisecond
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+		c.Accepter = typingAccepter{typing: true, acceptFunc: func(context.Context, Offer) (bool, string) { return true, "" }}
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-quiet-in"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-quiet-in", runnerwire.TypeAccept)
+
+	// Keep sending keystrokes with no PTY output for well past the 90ms timeout.
+	for range 6 {
+		time.Sleep(30 * time.Millisecond)
+		env.hub.send(runnerwire.Envelope{
+			Type:  runnerwire.TypeTermIn,
+			RunID: "run-quiet-in",
+			Term:  &runnerwire.TermChunk{Data: []byte("a")},
+		})
+	}
+	eventually(t, "all keystrokes typed", func() bool { return len(st.term.typed()) >= 6 })
+	for _, msg := range env.hub.messages("run-quiet-in") {
+		if msg.Type == runnerwire.TypeFinish {
+			t.Fatalf("session ended while user input was still arriving: %+v", msg.Result)
+		}
+	}
+
+	// Once input stops, the quiet timeout fires.
+	finish := env.hub.wait("run-quiet-in", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonQuiet {
+		t.Fatalf("quiet finish after input stopped = %+v", finish.Result)
+	}
+}
+
+// When the screen is showing a CLI question/permission/trust menu (including
+// Ink CSI cursor-forward spaces), quiet timeout reports EndReason "quiet_waiting".
+func TestQuietWhileMenuShownIsQuietWaiting(t *testing.T) {
+	// Unit-check menu markers and idle false-positive guards across all 4 CLIs.
+	cases := []struct {
+		name  string
+		agent string
+		raw   string
+		want  bool
+	}{
+		{"claude trust with CSI spaces", "claude", "Quick\x1b[1Csafety\x1b[1Ccheck\r\n❯\x1b[1C1.\x1b[1CYes,\x1b[1CI\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder\r\nEnter\x1b[1Cto\x1b[1Cconfirm · Esc\x1b[1Cto\x1b[1Ccancel\r\n", true},
+		{"claude permission", "claude", "Do you want to proceed?\r\n❯ Yes\r\n  No\r\n", true},
+		{"claude idle prompt", "claude", "Done.\r\n❯ \r\n  shift+tab to cycle\r\n", false},
+		{"codex trust menu", "codex", "Do you trust the contents of this directory?\r\n› 1. Yes, continue\r\nPress enter to continue\r\n", true},
+		{"codex approval", "codex", "Would you like to run npm test?\r\nApprove  Deny\r\n", true},
+		{"codex idle prompt", "codex", "Ready\r\n› Ask Codex to do anything\r\n", false},
+		{"opencode update modal", "opencode", "Update Available\r\nA new release v2.3.2 is available.\r\nSkip  Confirm\r\n", true},
+		{"opencode permission", "opencode", "Permission required\r\nAllow once  Allow always  Reject\r\n", true},
+		{"opencode idle prompt", "opencode", "Ask anything...\r\ntab agents  ctrl+p commands\r\n", false},
+		{"agy trust screen", "antigravity", "Do you trust the contents of this project?\r\n> Yes, I trust this folder\r\n↑/↓ Navigate · enter Confirm\r\n", true},
+		{"agy idle prompt", "antigravity", "Ready\r\n> \r\n? for shortcuts\r\n", false},
+	}
+	for _, tc := range cases {
+		if got := screenWaiting(tc.agent, []byte(tc.raw)); got != tc.want {
+			t.Errorf("%s: screenWaiting(%q) = %v, want %v", tc.name, tc.agent, got, tc.want)
+		}
+	}
+
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.interactiveQuietTimeout = 60 * time.Millisecond
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-quiet-wait"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-quiet-wait", runnerwire.TypeAccept)
+
+	st.term.emit("Quick safety check\r\n❯\x1b[1C1.\x1b[1CYes,\x1b[1CI\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder\r\nEnter\x1b[1Cto\x1b[1Cconfirm\r\n")
+	finish := env.hub.wait("run-quiet-wait", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonQuietWaiting {
+		t.Fatalf("quiet_waiting finish = %+v", finish.Result)
+	}
+}
+
+// Idle repaints (cursor show/hide, full-screen or prompt redraws with no new
+// visible content) do not reset the quiet timeout.
+func TestIdleRepaintDoesNotResetQuiet(t *testing.T) {
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.interactiveQuietTimeout = 100 * time.Millisecond
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+	})
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-repaint"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-repaint", runnerwire.TypeAccept)
+
+	st.term.emit("Claude Code\r\nAll set.\r\n❯ ")
+	stopRepaint := make(chan struct{})
+	defer close(stopRepaint)
+	go func() {
+		repaints := []string{
+			"\x1b[?25l\x1b[?25h",
+			"\x1b[2J\x1b[HClaude Code\r\nAll set.\r\n❯ ",
+			"\r\x1b[2K❯ ",
+			"\x1b[1;1H\x1b[2KClaude Code",
+		}
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for i := 0; ; i++ {
+			select {
+			case <-stopRepaint:
+				return
+			case <-tick.C:
+				select {
+				case st.term.out <- []byte(repaints[i%len(repaints)]):
+				default:
+				}
+			}
+		}
+	}()
+
+	finish := env.hub.wait("run-repaint", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != runnerwire.EndReasonQuiet {
+		t.Fatalf("repaint finish = %+v", finish.Result)
+	}
+}
+
+// capturingInteractiveAgent wraps interactiveAgent to record the RunEnv passed
+// to InteractiveCommand.
+type capturingInteractiveAgent struct {
+	interactiveAgent
+	onEnv func(adapter.RunEnv)
+}
+
+func (a capturingInteractiveAgent) InteractiveCommand(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, error) {
+	if a.onEnv != nil {
+		a.onEnv(env)
+	}
+	return a.interactiveAgent.InteractiveCommand(job, env)
+}
+
+// Interactive Claude runs get a runner-generated UUID v4 passed via
+// RunEnv.SessionID and recorded on r.session; other interactive agents do not.
+func TestInteractiveClaudeGetsSessionID(t *testing.T) {
+	envs := make(chan adapter.RunEnv, 4)
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.Config.MaxConcurrent = 2
+		prev := c.Adapter
+		c.Adapter = func(kind string) adapter.Adapter {
+			ad := prev(kind)
+			if ia, ok := ad.(interactiveAgent); ok {
+				return capturingInteractiveAgent{
+					interactiveAgent: ia,
+					onEnv:            func(e adapter.RunEnv) { envs <- e },
+				}
+			}
+			return ad
+		}
+	})
+	env.hub.hello()
+
+	env.hub.offer(interactiveJob("run-claude-sid"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-claude-sid", runnerwire.TypeAccept)
+
+	gotEnv := <-envs
+	uuidRe := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	if !uuidRe.MatchString(gotEnv.SessionID) || !runnerwire.ValidSessionID(gotEnv.SessionID) {
+		t.Fatalf("claude RunEnv.SessionID = %q, want valid UUID v4", gotEnv.SessionID)
+	}
+	env.client.jobs.mu.Lock()
+	r := env.client.jobs.runs["run-claude-sid"]
+	recorded := ""
+	if r != nil {
+		recorded = r.session
+	}
+	env.client.jobs.mu.Unlock()
+	if recorded != gotEnv.SessionID {
+		t.Fatalf("r.session = %q, want %q", recorded, gotEnv.SessionID)
+	}
+	st.term.exit <- 0
+	env.hub.wait("run-claude-sid", runnerwire.TypeFinish)
+
+	// A non-Claude interactive agent gets no runner-generated SessionID.
+	codexJob := interactiveJob("run-codex-sid")
+	codexJob.Agent = "codex"
+	codexJob.Model = "default"
+	env.hub.offer(codexJob)
+	st2 := waitStarted(t, started)
+	env.hub.wait("run-codex-sid", runnerwire.TypeAccept)
+	gotCodexEnv := <-envs
+	if gotCodexEnv.SessionID != "" {
+		t.Fatalf("codex RunEnv.SessionID = %q, want empty", gotCodexEnv.SessionID)
+	}
+	env.client.jobs.mu.Lock()
+	r2 := env.client.jobs.runs["run-codex-sid"]
+	recorded2 := ""
+	if r2 != nil {
+		recorded2 = r2.session
+	}
+	env.client.jobs.mu.Unlock()
+	if recorded2 != "" {
+		t.Fatalf("codex r.session = %q, want empty", recorded2)
+	}
+	st2.term.exit <- 0
+	env.hub.wait("run-codex-sid", runnerwire.TypeFinish)
+}
+
+// End for an unknown run ID (or a headless run) is ignored cleanly without
+// panicking or affecting other runs.
+func TestEndUnknownRunIgnored(t *testing.T) {
+	env, started := startInteractiveRunner(t, nil)
+	env.hub.hello()
+
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-does-not-exist"})
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: ""})
+
+	// Follow with a normal interactive run to verify the client loop stayed healthy.
+	env.hub.offer(interactiveJob("run-after-unknown-end"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-after-unknown-end", runnerwire.TypeAccept)
+	st.term.exit <- 0
+	finish := env.hub.wait("run-after-unknown-end", runnerwire.TypeFinish)
+	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != "" {
+		t.Fatalf("finish = %+v", finish.Result)
+	}
 }

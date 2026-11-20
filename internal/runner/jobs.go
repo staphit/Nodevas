@@ -116,11 +116,13 @@ type run struct {
 	trail handoffTrail
 
 	// Continue and interactive End (R1, R2): CLI session id captured from the
-	// parser or chosen for interactive Claude, the chain's work root id, and
-	// an End that arrived before the PTY opened.
-	session    string
-	workRoot   string
-	pendingEnd bool
+	// parser or chosen for interactive Claude, the session id from work.json to
+	// resume on this turn, the chain's work root id, and an End that arrived
+	// before the PTY opened.
+	session       string
+	resumeSession string
+	workRoot      string
+	pendingEnd    bool
 }
 
 const (
@@ -393,6 +395,9 @@ func (j *jobs) checkLocked(job *runnerwire.Job, cfg *Config) (runnerwire.Repo, s
 			return repo, other, reason
 		}
 	}
+	if job.ContinueOf != "" && j.workRootActiveLocked(workRootOfJob(*job), job.RunID) {
+		return repo, other, fmt.Sprintf("another run on this runner is already working in %s", workRootOfJob(*job))
+	}
 	if reason := busy(); reason != "" {
 		return repo, runnerwire.DeclineBusy, reason
 	}
@@ -450,14 +455,33 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		j.decline(r, runnerwire.DeclineOther, reason)
 		return
 	}
+	// A follow-up turn reuses the root's worktree and branch in place (work.go).
+	workEntry, contWT, recreated, contCode, contReason := j.prepareContinue(ctx, r)
+	if ctx.Err() != nil {
+		if recreated {
+			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		}
+		j.finish(r, cancelled(ctx))
+		return
+	}
+	if contReason != "" {
+		j.decline(r, contCode, contReason)
+		return
+	}
 	job = r.job
 
 	ok, code, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
+		if recreated {
+			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		}
 		j.finish(r, cancelled(ctx))
 		return
 	}
 	if !ok {
+		if recreated {
+			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		}
 		j.decline(r, code, reason)
 		return
 	}
@@ -479,10 +503,16 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	}
 
-	dataDir, err := j.runCfg(r).RunDataDir()
 	var wt Worktree
-	if err == nil {
-		wt, err = CreateWorktreeFrom(ctx, r.repo.Path, dataDir, job.RunID, branchKey(job.NodeID, job.Slug), job.Base, job.HandoffBranch)
+	var err error
+	if job.ContinueOf != "" {
+		wt = contWT
+	} else {
+		var dataDir string
+		dataDir, err = j.runCfg(r).RunDataDir()
+		if err == nil {
+			wt, err = CreateWorktreeFrom(ctx, r.repo.Path, dataDir, job.RunID, branchKey(job.NodeID, job.Slug), job.Base, job.HandoffBranch)
+		}
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -508,11 +538,14 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.mu.Lock()
 	r.accepted = true
 	r.started = time.Now()
-	r.accept = &runnerwire.Accept{RunID: job.RunID, Base: wt.Base, Branch: wt.Branch}
+	viewOnly := job.Mode == runnerwire.ModeInteractive && !r.remoteTyping
+	r.accept = &runnerwire.Accept{RunID: job.RunID, Base: wt.Base, Branch: wt.Branch, ViewOnly: viewOnly}
 	j.mu.Unlock()
 	j.wake()
 	from := wt.BaseRef
-	if job.HandoffBranch != "" {
+	if job.ContinueOf != "" {
+		from = "follow-up of " + job.ContinueOf + " in " + wt.Path
+	} else if job.HandoffBranch != "" {
 		from = job.HandoffBranch + " (continuing the previous run's work; base " + wt.BaseRef + ")"
 	}
 	j.c.logf("run %s: accepted; worktree %s on %s from %s", job.RunID, wt.Path, wt.Branch, from)
@@ -524,6 +557,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	if result.Status == runnerwire.RunCancelled {
 		// Stopped on purpose: nothing is committed or pushed, and the
 		// worktree stays as the agent left it.
+		if job.Global {
+			j.recordGlobalWork(r, wt, workEntry, result, nil)
+		}
 		j.finish(r, result)
 		return
 	}
@@ -533,6 +569,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.mu.Lock()
 	r.publishing = true
 	j.mu.Unlock()
+	if job.ContinueOf != "" {
+		changes, pr, result := j.publishTurn(r, wt, &workEntry, result)
+		j.recordGlobalWork(r, wt, workEntry, result, pr)
+		j.finishWith(r, result, changes, pr)
+		return
+	}
 	// Stopped at a usage limit: keep the partial work for the next run
 	// instead of publishing it (handoff.go). Nothing is pushed. A global
 	// agent's has no next run: it is committed on its own branch below.
@@ -543,6 +585,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	}
 	changes, pr := j.publish(r, wt, result)
+	if job.Global {
+		j.recordGlobalWork(r, wt, workEntry, result, pr)
+	}
 	j.finishWith(r, result, changes, pr)
 }
 
@@ -733,6 +778,8 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	cfg := j.runCfg(r)
 	j.mu.Lock()
 	relay := cfg.PermissionRelay && !r.noRelay && !job.Global
+	resumeSession := r.resumeSession
+	sessionID := r.session
 	j.mu.Unlock()
 	mode, modeText := runPermission(cfg, job, note == "")
 	runEnv := adapter.RunEnv{
@@ -749,6 +796,8 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
 		PermissionRelay:  relay,
+		SessionID:        sessionID,
+		Resume:           resumeSession,
 	}
 	if !job.Global {
 		serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
@@ -788,8 +837,12 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 			return fail(runnerwire.FailureTask, "could not open %s's stdin: %v", job.Agent, err)
 		}
 	}
+	sawText := false
 	stdout := &lineWriter{fn: func(line []byte) {
 		for _, ev := range parser.Parse(line) {
+			if ev.Type == runnerwire.EventText {
+				sawText = true
+			}
 			j.emit(r, ev)
 		}
 	}}
@@ -799,6 +852,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	// Wait stops waiting for them.
 	cmd.WaitDelay = waitDelay
 	prepareTree(cmd)
+	attemptStart := time.Now()
 	if err := cmd.Start(); err != nil {
 		return fail(runnerwire.FailureAgentAbsent, "could not start %s: %v", job.Agent, err)
 	}
@@ -835,9 +889,26 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 
 	outcome := parser.Outcome()
+	if sr, ok := parser.(adapter.SessionReporter); ok {
+		if id := sr.Session(); runnerwire.ValidSessionID(id) {
+			j.mu.Lock()
+			r.session = id
+			j.mu.Unlock()
+		}
+	}
 	exitCode := -1
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
+	}
+	if runEnv.Resume != "" && stopped == "" && ctx.Err() == nil && (exitCode != 0 || outcome.IsError) &&
+		!sawText && time.Since(attemptStart) < resumeFastFailDuration {
+		j.mu.Lock()
+		r.resumeSession = ""
+		r.session = ""
+		j.mu.Unlock()
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "resume failed; continuing without the agent's memory"})
+		j.c.logf("run %s: resume failed; continuing without the agent's memory", job.RunID)
+		return j.startAgent(ctx, r, wt, job)
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})
 	result := runnerwire.RunResult{ExitCode: exitCode, Summary: outcome.Summary, Usage: outcome.Usage}
@@ -1143,7 +1214,19 @@ func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwi
 	r.changes, r.pr = changes, pr
 	r.finish = &result
 	dropped := r.dropped
+	root := r.workRoot
+	if root == "" {
+		root = r.job.RunID
+	}
+	var deferredPR *watchedPR
+	if w := j.watched[root]; w != nil && !w.closing && (w.PR.State == runnerwire.PRMerged || w.PR.State == runnerwire.PRClosed) {
+		copied := *w
+		deferredPR = &copied
+	}
 	j.mu.Unlock()
+	if deferredPR != nil {
+		j.updatePR(*deferredPR, deferredPR.PR)
+	}
 	j.wake()
 	line := fmt.Sprintf("run %s: %s", r.job.RunID, result.Status)
 	if result.FailureKind != "" && result.FailureKind != runnerwire.FailureTask {

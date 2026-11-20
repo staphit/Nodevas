@@ -1,1 +1,399 @@
 /* Picture-card pickers: agent, model, folder and mode cards (W2). */
+
+.picker-field {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.picker-legend,
+.picker-label {
+  padding: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+
+.picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+}
+
+.picker-head-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.picker-many-bar {
+  font-size: calc(11px * var(--font-scale, 1));
+}
+
+.picker-picked {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.picker-many-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker-link-btn,
+.picker-more-btn {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.picker-link-btn:hover:not(:disabled),
+.picker-more-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.picker-link-btn:disabled,
+.picker-more-btn:disabled {
+  color: var(--text-2);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.picker-more-btn {
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.picker-filter {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+.picker-filter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.picker-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 404px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.picker-group-title {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  max-height: 392px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.picker-groups .picker-grid {
+  max-height: none;
+  overflow-y: visible;
+  padding: 0;
+}
+
+.picker-field[aria-invalid="true"] > .picker-grid,
+.picker-field [role="radiogroup"][aria-invalid="true"] {
+  border-radius: 8px;
+  outline: 1.5px solid var(--st-failed-fg);
+  outline-offset: 2px;
+}
+
+.picker-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease-out),
+    background-color 140ms var(--ease-out),
+    box-shadow 140ms var(--ease-out),
+    transform 120ms var(--ease-out);
+}
+
+.picker-card:hover:not(:disabled):not(.is-disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+
+.picker-card:active:not(:disabled):not(.is-disabled) {
+  transform: scale(0.97);
+}
+
+.picker-card.is-selected {
+  border-color: var(--accent);
+  background: var(--hover);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.picker-card:focus-visible,
+.picker-card-check:has(.picker-checkbox:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.picker-card:disabled,
+.picker-card.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.picker-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: inherit;
+}
+
+.picker-card-visual {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+}
+
+.picker-card-art {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.picker-card-room img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.picker-card-avatar {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  font-size: calc(14px * var(--font-scale, 1));
+}
+
+.picker-card-folder-icon,
+.picker-runner-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.picker-runner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.picker-runner-badge .picker-runner-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.picker-runner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-card-text {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.picker-card-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.picker-card-sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: calc(10px * var(--font-scale, 1));
+  line-height: 1.2;
+}
+
+.picker-signed-out-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.picker-signed-out,
+.picker-note,
+.picker-empty {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+
+/* One column of wide cards on narrow containers / phones (<= 400px). */
+@container (max-width: 400px) {
+  .picker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .picker-card {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    text-align: left;
+  }
+
+  .picker-card-check {
+    padding-left: 30px;
+  }
+
+  .picker-checkbox {
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+  }
+
+  .picker-card-visual {
+    width: 52px;
+    min-height: 42px;
+    flex: 0 0 52px;
+  }
+
+  .picker-card-art {
+    width: 52px;
+    height: 42px;
+    aspect-ratio: auto;
+  }
+
+  .picker-card-text {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 400px) {
+  .picker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .picker-card {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    text-align: left;
+  }
+
+  .picker-card-check {
+    padding-left: 30px;
+  }
+
+  .picker-checkbox {
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+  }
+
+  .picker-card-visual {
+    width: 52px;
+    min-height: 42px;
+    flex: 0 0 52px;
+  }
+
+  .picker-card-art {
+    width: 52px;
+    height: 42px;
+    aspect-ratio: auto;
+  }
+
+  .picker-card-text {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker-card {
+    transition: none;
+  }
+}

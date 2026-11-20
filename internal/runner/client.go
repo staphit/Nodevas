@@ -89,6 +89,12 @@ type Client struct {
 	// time.NewTimer. Tests fire it themselves once the run is where they
 	// want it to time out, instead of racing a short timeout.
 	runTimer func(time.Duration) (expired <-chan time.Time, stop func() bool)
+	// interactiveQuietTimeout, endQuitGap and endGrace override interactive
+	// session quiet timeout and graceful-End timings in tests; zero uses the
+	// defaults in interactive.go.
+	interactiveQuietTimeout time.Duration
+	endQuitGap              time.Duration
+	endGrace                time.Duration
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
@@ -402,6 +408,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.offer(msg.Job)
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			case runnerwire.TypeEnd:
+				c.jobs.endRun(msg.RunID)
 			case runnerwire.TypeMerge:
 				c.jobs.merge(msg.RunID, msg.Merge)
 			case runnerwire.TypeWorkspaceAction:
@@ -718,4 +726,25 @@ func (c *Client) backoffMax() time.Duration {
 		return c.BackoffMax
 	}
 	return defaultBackoffMax
+}
+
+func (c *Client) quietTimeout() time.Duration {
+	if c != nil && c.interactiveQuietTimeout > 0 {
+		return c.interactiveQuietTimeout
+	}
+	return interactiveQuiet
+}
+
+func (c *Client) quitGap() time.Duration {
+	if c != nil && c.endQuitGap > 0 {
+		return c.endQuitGap
+	}
+	return endQuitGap
+}
+
+func (c *Client) quitGrace() time.Duration {
+	if c != nil && c.endGrace > 0 {
+		return c.endGrace
+	}
+	return endGrace
 }

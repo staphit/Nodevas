@@ -1,11 +1,14 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Run } from "../api";
+import type { Run, TerminalConnection } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { FakeWebSocket } from "./fakeWebSocket";
 import { RunModeTabs } from "./RunModeTabs";
-import RunTerminal, { keySequence } from "./RunTerminal";
+import RunTerminal from "./RunTerminal";
+import { hasScreenMenuPrompt, keySequence, terminalTheme } from "./terminalKeys";
 
 // xterm needs a real canvas and layout; a recording stand-in is enough to
 // check what reaches it and what it sends back.
@@ -251,5 +254,61 @@ describe("RunModeTabs", () => {
     // Still attached: switching tabs does not reconnect.
     fireEvent.click(screen.getByRole("tab", { name: "Terminal" }));
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("terminalKeys and story palette", () => {
+  it("keeps terminalKeys free of any @xterm import", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/runs/terminalKeys.ts"), "utf8");
+    expect(source).not.toMatch(/@xterm/);
+  });
+
+  it("reads --story-* palette tokens when mounted inside .px-story-talk", () => {
+    const storyBox = document.createElement("div");
+    storyBox.className = "px-story-talk";
+    storyBox.style.setProperty("--story-night", "#150e08");
+    storyBox.style.setProperty("--story-ink", "#efe6d0");
+    storyBox.style.setProperty("--story-soft", "#b3a48c");
+    storyBox.style.setProperty("--story-accent", "#d9b86c");
+    const host = document.createElement("div");
+    storyBox.appendChild(host);
+    document.body.appendChild(storyBox);
+
+    try {
+      const theme = terminalTheme(host);
+      expect(theme.background).toBe("#150e08");
+      expect(theme.foreground).toBe("#efe6d0");
+      expect(theme.cursor).toBe("#d9b86c");
+      expect(theme.brightBlack).toBe("#b3a48c");
+    } finally {
+      storyBox.remove();
+    }
+  });
+
+  it("exposes the live connection via onConnection so RunComposer shares one socket", () => {
+    const seen: Array<TerminalConnection | null> = [];
+    const { unmount } = render(<RunTerminal run={run} onConnection={(c) => seen.push(c)} />);
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]).not.toBeNull();
+    const socket = FakeWebSocket.last();
+    act(() => socket.serverOpen());
+    expect(seen[0]?.sendInput("hi")).toBe(true);
+    expect(socket.input()).toEqual(["hi"]);
+    unmount();
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+
+  it("detects verified CLI trust/menu prompts without false positives on idle main prompts", () => {
+    // Verified prompts from CLI smoke report §6.3
+    expect(hasScreenMenuPrompt(["Quick safety check", "❯ 1. Yes, I trust this folder", "Enter to confirm · Esc to cancel"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Do you trust the contents of this directory?", "› 1. Yes, continue", "Press enter to continue"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Update Available", "A new release is available", "Skip   Confirm"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Do you trust the contents of this project?", "> Yes, I trust this folder", "↑/↓ Navigate · enter Confirm"])).toBe(true);
+
+    // Idle main prompts must NOT trigger false positives
+    expect(hasScreenMenuPrompt(["❯ ", "shift+tab to cycle"])).toBe(false);
+    expect(hasScreenMenuPrompt(["› Ask Codex to do anything"])).toBe(false);
+    expect(hasScreenMenuPrompt(["Ask anything...", "tab agents  ctrl+p commands"])).toBe(false);
+    expect(hasScreenMenuPrompt(["> ", "? for shortcuts"])).toBe(false);
   });
 });

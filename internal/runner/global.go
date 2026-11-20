@@ -28,12 +28,21 @@ func checkGlobal(job *runnerwire.Job, cfg *Config) string {
 		if job.Project == "" || job.NodeID == "" {
 			return "a run for no project or node must be a global agent's, which this one is not"
 		}
+		if job.ContinueOf != "" || job.WorkRoot != "" {
+			return "only a global agent run may continue an earlier run"
+		}
 		return ""
 	}
 	if job.Project != "" || job.NodeID != "" || job.Kind != runnerwire.JobImplement || job.Role != "" ||
 		len(job.Tools) > 0 || len(job.TestFiles) > 0 || len(job.Acceptance) > 0 || job.Verify != nil ||
 		job.HandoffBranch != "" || job.Branch != "" || job.PRURL != "" || job.Review != "" ||
 		!runnerwire.ValidSlug(job.Slug) {
+		return "malformed global job"
+	}
+	if job.ContinueOf != "" && !validRunID.MatchString(job.ContinueOf) {
+		return "malformed global job"
+	}
+	if job.WorkRoot != "" && (!validRunID.MatchString(job.WorkRoot) || job.ContinueOf == "") {
 		return "malformed global job"
 	}
 	if !cfg.GlobalRunsOn() {

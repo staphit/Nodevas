@@ -72,6 +72,10 @@ const geminiTrustWorkspace = "GEMINI_CLI_TRUST_WORKSPACE=true"
 // ten minutes.
 const geminiToolTimeoutMs = 900_000
 
+// Gemini intentionally does not implement Resumer in v1: the Gemini CLI was
+// not installed for live smoke testing, so follow-up turns use the carry-over
+// prompt (ContinueSection). Its parser still implements SessionReporter so the
+// runner captures session_id when available.
 func (Gemini) Kind() string { return "gemini" }
 
 func (Gemini) NewParser() Parser { return &geminiParser{} }
@@ -186,6 +190,8 @@ func writeGeminiWorkspaceSettings(dir string, settings []byte) error {
 // one event rather than one per token.
 type geminiParser struct {
 	outcome Outcome
+	// session is the validated session_id from init.
+	session string
 	// model is the model the init line named.
 	model   string
 	pending strings.Builder
@@ -195,6 +201,8 @@ type geminiParser struct {
 	// result does not give one.
 	lastError string
 }
+
+func (p *geminiParser) Session() string { return p.session }
 
 type geminiLine struct {
 	Type      string `json:"type"`
@@ -278,6 +286,9 @@ func (p *geminiParser) Parse(line []byte) []runnerwire.RunEvent {
 	switch msg.Type {
 	case "init":
 		p.model = strings.TrimSpace(msg.Model)
+		if id := strings.TrimSpace(msg.SessionID); runnerwire.ValidSessionID(id) {
+			p.session = id
+		}
 		text := "gemini session started"
 		if msg.SessionID != "" {
 			text += " " + msg.SessionID

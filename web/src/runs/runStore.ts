@@ -40,6 +40,8 @@ export interface RunStoreState {
    * Fed by the Global agents tab's list, a workspace action, a realtime
    * fetch; kept across project switches. */
   globalById: Record<string, Run>;
+  /** Follow-up turn chains keyed by root run id, oldest turn first. */
+  threadsByRoot: Record<string, string[]>;
   /** A run's changes, fetched only when someone opens its diff. */
   changesByRun: Record<string, HeldChanges>;
   changesLoading: Record<string, boolean>;
@@ -89,6 +91,8 @@ export interface RunStoreState {
   putRun: (run: Run) => void;
   /** putRun for many: the Global agents list. */
   putRuns: (runs: Run[]) => void;
+  /** Loads a global run's follow-up turn chain oldest-first (GET …/thread). */
+  loadThread: (runId: string) => Promise<Run[]>;
   /** Fetches a pipeline unless it is held already (or `force`). */
   loadPipeline: (id: string, force?: boolean) => Promise<void>;
   /** Holds a pipeline fetched elsewhere (the run-notify handler). */
@@ -221,6 +225,37 @@ export function selectRunById(
   );
 }
 
+/** Returns the known follow-up chain for `runId`, oldest turn first. */
+export function selectRunChain(
+  state: Pick<RunStoreState, "runsByNode" | "activeRuns" | "latestByNode"> &
+    Partial<Pick<RunStoreState, "globalById" | "threadsByRoot">>,
+  runId: string,
+): Run[] {
+  const run = selectRunById(state, runId);
+  const threads = state.threadsByRoot ?? {};
+  const root = run?.workRoot || (run && !run.continueOf ? run.id : "");
+  let ids = root ? threads[root] : undefined;
+  if (!ids) {
+    ids = Object.values(threads).find((list) => list.includes(runId));
+  }
+  if (ids && ids.length > 0 && (!run || ids.includes(run.id))) {
+    const resolved = ids.map((id) => selectRunById(state, id)).filter((item): item is Run => Boolean(item));
+    if (resolved.length > 0) return resolved;
+  }
+  if (!run) return [];
+  if (!run.global) return [run];
+
+  const chainRoot = run.workRoot || (!run.continueOf ? run.id : "");
+  if (!chainRoot) return [run];
+  const siblings = Object.values(state.globalById ?? {}).filter(
+    (item) => item.id === chainRoot || item.workRoot === chainRoot,
+  );
+  if (siblings.length === 0) return [run];
+  return siblings.sort((a, b) =>
+    a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt),
+  );
+}
+
 /** Where a run fetched or returned is held: a global run by id, any other
  * in its node's list and the newest per node. */
 function placed(state: RunStoreState, run: Run): Partial<RunStoreState> {
@@ -262,6 +297,7 @@ const initial = {
   runsByNode: {},
   latestByNode: {},
   globalById: {},
+  threadsByRoot: {},
   projectRunsLoaded: false,
   activeRuns: [],
   activeRunsLoaded: false,
@@ -475,6 +511,23 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     for (const run of runs) if (run?.id && !run.global) get().putRun(run);
   },
 
+  loadThread: async (runId) => {
+    if (!runId) return [];
+    const response = await api.getGlobalRunThread(runId);
+    const runs = [...(response.runs ?? [])].sort((a, b) =>
+      a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt),
+    );
+    if (runs.length > 0) {
+      get().putRuns(runs);
+      const root = runs[0].workRoot || runs[0].id;
+      const ids = runs.map((run) => run.id);
+      set((state) => ({
+        threadsByRoot: { ...state.threadsByRoot, [root]: ids },
+      }));
+    }
+    return runs;
+  },
+
   loadPipeline: (id, force = false) => {
     if (!id) return Promise.resolve();
     const running = pipelinesInFlight.get(id);
@@ -518,33 +571,36 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       return running;
     }
     const gen = generation;
-    const work = (async () => {
-      do {
-        eventsDirty.delete(runId);
-        try {
-          for (let page = 0; page < MAX_EVENT_PAGES; page++) {
-            const after = lastSeq(get().eventsByRun[runId]);
-            const response = await api.getRunEvents(runId, after);
+    let work: Promise<void> | undefined;
+    work = (async () => {
+      try {
+        do {
+          eventsDirty.delete(runId);
+          try {
+            for (let page = 0; page < MAX_EVENT_PAGES; page++) {
+              const after = lastSeq(get().eventsByRun[runId]);
+              const response = await api.getRunEvents(runId, after);
+              if (gen !== generation) return;
+              const events = response.events ?? [];
+              get().appendEvents(runId, events);
+              if (!response.more || events.length === 0) break;
+            }
+            set((state) => {
+              if (!(runId in state.eventErrors)) return {};
+              const eventErrors = { ...state.eventErrors };
+              delete eventErrors[runId];
+              return { eventErrors };
+            });
+          } catch (error) {
             if (gen !== generation) return;
-            const events = response.events ?? [];
-            get().appendEvents(runId, events);
-            if (!response.more || events.length === 0) break;
+            set((state) => ({ eventErrors: { ...state.eventErrors, [runId]: message(error) } }));
+            return;
           }
-          set((state) => {
-            if (!(runId in state.eventErrors)) return {};
-            const eventErrors = { ...state.eventErrors };
-            delete eventErrors[runId];
-            return { eventErrors };
-          });
-        } catch (error) {
-          if (gen !== generation) return;
-          set((state) => ({ eventErrors: { ...state.eventErrors, [runId]: message(error) } }));
-          return;
-        }
-      } while (eventsDirty.has(runId) && gen === generation);
-    })().finally(() => {
-      if (eventsInFlight.get(runId) === work) eventsInFlight.delete(runId);
-    });
+        } while (eventsDirty.has(runId) && gen === generation);
+      } finally {
+        if (eventsInFlight.get(runId) === work) eventsInFlight.delete(runId);
+      }
+    })();
     eventsInFlight.set(runId, work);
     return work;
   },
@@ -694,9 +750,18 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       set((state) => {
         const watched = { ...state.watched };
         const count = (watched[runId] ?? 1) - 1;
-        if (count > 0) watched[runId] = count;
-        else delete watched[runId];
-        return { watched };
+        if (count > 0) {
+          watched[runId] = count;
+          return { watched };
+        }
+        delete watched[runId];
+        const eventsByRun = { ...state.eventsByRun };
+        delete eventsByRun[runId];
+        const asksByRun = { ...state.asksByRun };
+        delete asksByRun[runId];
+        const eventErrors = { ...state.eventErrors };
+        delete eventErrors[runId];
+        return { watched, eventsByRun, asksByRun, eventErrors };
       });
     };
   },
@@ -782,6 +847,11 @@ export const useRuns = create<RunStoreState>((set, get) => ({
 
     // Live views keep their watch counts; they re-register on remount.
     // Global runs belong to no project: a switch keeps them.
-    set({ ...initial, watched: get().watched, globalById: get().globalById });
+    set({
+      ...initial,
+      watched: get().watched,
+      globalById: get().globalById,
+      threadsByRoot: get().threadsByRoot,
+    });
   },
 }));

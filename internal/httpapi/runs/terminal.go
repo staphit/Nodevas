@@ -114,7 +114,7 @@ func (a *API) terminal(c *gin.Context) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", locale.Errorf("this run is not interactive", "這次執行不是互動式的"), nil)
 		return
 	}
-	canType := mayType(actor, r)
+	canType := mayType(actor, r) && !r.ViewOnly
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
@@ -158,9 +158,9 @@ func (a *API) terminal(c *gin.Context) {
 			Action: action, Target: r.ID, Detail: detail,
 		})
 	}
-	audit("run.terminal.attach", map[string]any{"canType": canType})
+	audit("run.terminal.attach", map[string]any{"canType": viewer.CanType()})
 	var typed int64
-	defer func() { audit("run.terminal.detach", map[string]any{"canType": canType, "inputBytes": typed}) }()
+	defer func() { audit("run.terminal.detach", map[string]any{"canType": viewer.CanType(), "inputBytes": typed}) }()
 
 	safego.Go("terminal writer", func() { a.termWriter(ctx, cancel, conn, viewer) })
 	safego.Go("terminal recheck", func() { termRecheckLoop(ctx, c.Request, conn) })
@@ -176,8 +176,8 @@ func (a *API) terminal(c *gin.Context) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "authorization expired")
 			return
 		}
-		if !canType {
-			// Told {"type":"readonly"} on attach; whatever it sends is ignored.
+		if !viewer.CanType() {
+			// Told {"type":"readonly"} on attach or view_only accept; whatever it sends is ignored.
 			continue
 		}
 		switch kind {

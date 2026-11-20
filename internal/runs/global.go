@@ -2,12 +2,14 @@ package runs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"nodevas/internal/identity"
 	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
@@ -65,38 +67,112 @@ func invalidField(field, english, chinese string, args ...any) error {
 	return &StartError{Code: StartInvalid, Field: field, Msg: said.Error(), said: said}
 }
 
+// globalValidated holds the shared fields resolved by validateGlobal for both
+// single-repo and multi-repo global starts (§10.2).
+type globalValidated struct {
+	task        string
+	title, rest string
+	slug        string
+	actorName   string
+	runner      runnerwire.Runner
+}
+
+// validateGlobal checks the task, slug, base, onBusy/holderIds, runner
+// ownership and global capabilities shared by StartGlobal and StartGlobalGroup.
+func (d *Dispatcher) validateGlobal(ctx context.Context, task, slug, base, mode, onBusy string, holderIDs []string, runnerID, actorID, actorName string, group bool) (globalValidated, error) {
+	task = strings.TrimSpace(task)
+	switch {
+	case task == "":
+		return globalValidated{}, invalidField("task", "task is required", "請填寫任務")
+	case len(task) > runnerwire.MaxGlobalTaskBytes:
+		return globalValidated{}, invalidField("task", "task is over %d bytes", "任務超過 %d 位元組", runnerwire.MaxGlobalTaskBytes)
+	case !utf8.ValidString(task) || strings.ContainsRune(task, 0):
+		return globalValidated{}, invalidField("task", "task must be valid text", "任務須為有效的文字")
+	}
+	if slug != "" && !runnerwire.ValidSlug(slug) {
+		return globalValidated{}, invalidField("slug", "slug must be lowercase letters, digits and single dashes, at most %d",
+			"slug 只能用小寫英文字母、數字與單一連字號，最多 %d 個字元", runnerwire.MaxSlugBytes)
+	}
+	if !ValidBase(base) {
+		return globalValidated{}, invalidField("base", "base is not a valid branch name", "base 不是有效的分支名稱")
+	}
+	if group {
+		if mode == runnerwire.ModeInteractive {
+			said := locale.Errorf("multi-repository groups run in the background; talk to any member after it finishes",
+				"多資料夾群組會在背景執行；任一成員完成後即可接著對話")
+			return globalValidated{}, &StartError{Code: StartInvalid, Reason: CodeGroupNeedsBackground, Field: "mode", Msg: said.Error(), said: said}
+		}
+		if !ValidMode(mode) {
+			return globalValidated{}, invalidField("mode", `mode must be ""`, `mode 須為 ""`)
+		}
+	} else if !ValidMode(mode) {
+		return globalValidated{}, invalidField("mode", `mode must be "" or %q`, `mode 須為 "" 或 %q`, runnerwire.ModeInteractive)
+	}
+	if !runnerwire.ValidOnBusy(onBusy, group) {
+		return globalValidated{}, invalidField("onBusy", "onBusy is not a valid busy choice", "onBusy 不是有效的忙碌選項")
+	}
+	if !runnerwire.ValidHolderIDs(holderIDs) {
+		return globalValidated{}, invalidField("holderIds", "holderIds is not valid", "holderIds 無效")
+	}
+	if group {
+		// Group repoIds checked before runner lookup so malformed requests fail fast.
+	}
+
+	// The runner must be the caller's own, administrators included, as for
+	// a node's run: it executes on the owner's machine with their logins.
+	runner, err := d.reg.Get(ctx, runnerID)
+	if err != nil || runner.OwnerID != actorID {
+		return globalValidated{}, &StartError{Code: StartNotFound, What: "runner", Msg: "runner not found", said: errRunnerNotFound}
+	}
+	title, rest := runnerwire.GlobalTitle(task)
+	if slug == "" {
+		slug = runnerwire.SlugFrom(title)
+	}
+	name := actorName
+	if name == "" {
+		name = actorID
+	}
+	return globalValidated{
+		task:      task,
+		title:     title,
+		rest:      rest,
+		slug:      slug,
+		actorName: name,
+		runner:    runner,
+	}, nil
+}
+
+// checkGlobalRunnerCaps checks that runner.Info takes global runs in mode.
+func checkGlobalRunnerCaps(info *runnerwire.Info, mode string) error {
+	if !Headless(info) {
+		return refuse(StartPrecondition, "this runner does not take runs; update nodevas on it", "這個 runner 不接受執行；請更新它的 nodevas")
+	}
+	if !ModeSupported(info, mode) {
+		return refuse(StartPrecondition, "this runner cannot run interactive sessions", "這個 runner 不能執行互動式工作階段")
+	}
+	if !slices.Contains(info.Capabilities, runnerwire.CapGlobalRuns) {
+		return refuse(StartOutdated, "this runner cannot run global agents; update nodevas on it", "這個 runner 不能執行全域 agent；請更新它的 nodevas")
+	}
+	if !slices.Contains(info.Capabilities, runnerwire.CapGlobalRunsOn) {
+		return stageRefusal(CodeGlobalRunsOff, locale.Errorf(
+			"the runner's owner turned global agents off on it (nodevas runner set globalRuns on)",
+			"runner 的擁有者在該機關閉了全域 agent（nodevas runner set globalRuns on）"))
+	}
+	return nil
+}
+
 // StartGlobal validates a global run request against the caller's own
 // runner and its hello, records the run and queues it. Refusals are
 // *StartError; anything else is a store failure. The task's text is never
 // audited: it is the caller's, and may say anything.
 func (d *Dispatcher) StartGlobal(ctx context.Context, req GlobalStartRequest) (Record, error) {
 	body := req.Body
-	task := strings.TrimSpace(body.Task)
-	switch {
-	case task == "":
-		return Record{}, invalidField("task", "task is required", "請填寫任務")
-	case len(task) > runnerwire.MaxGlobalTaskBytes:
-		return Record{}, invalidField("task", "task is over %d bytes", "任務超過 %d 位元組", runnerwire.MaxGlobalTaskBytes)
-	case !utf8.ValidString(task) || strings.ContainsRune(task, 0):
-		return Record{}, invalidField("task", "task must be valid text", "任務須為有效的文字")
+	v, err := d.validateGlobal(ctx, body.Task, body.Slug, body.Base, body.Mode, body.OnBusy, body.HolderIDs,
+		body.RunnerID, req.ActorID, req.ActorName, false)
+	if err != nil {
+		return Record{}, err
 	}
-	if body.Slug != "" && !runnerwire.ValidSlug(body.Slug) {
-		return Record{}, invalidField("slug", "slug must be lowercase letters, digits and single dashes, at most %d",
-			"slug 只能用小寫英文字母、數字與單一連字號，最多 %d 個字元", runnerwire.MaxSlugBytes)
-	}
-	if !ValidBase(body.Base) {
-		return Record{}, invalidField("base", "base is not a valid branch name", "base 不是有效的分支名稱")
-	}
-	if !ValidMode(body.Mode) {
-		return Record{}, invalidField("mode", `mode must be "" or %q`, `mode 須為 "" 或 %q`, runnerwire.ModeInteractive)
-	}
-
-	// The runner must be the caller's own, administrators included, as for
-	// a node's run: it executes on the owner's machine with their logins.
-	runner, err := d.reg.Get(ctx, body.RunnerID)
-	if err != nil || runner.OwnerID != req.ActorID {
-		return Record{}, &StartError{Code: StartNotFound, What: "runner", Msg: "runner not found", said: errRunnerNotFound}
-	}
+	runner := v.runner
 	model, repo, problem := CheckAgainstHello(runner.Info, runnerwire.CreateRunRequest{
 		Agent: body.Agent, Model: body.Model, RepoID: body.RepoID,
 	})
@@ -111,19 +187,8 @@ func (d *Dispatcher) StartGlobal(ctx context.Context, req GlobalStartRequest) (R
 		}
 		return Record{}, &StartError{Code: StartInvalid, Field: field, Msg: problem.Error(), said: problem}
 	}
-	if !Headless(runner.Info) {
-		return Record{}, refuse(StartPrecondition, "this runner does not take runs; update nodevas on it", "這個 runner 不接受執行；請更新它的 nodevas")
-	}
-	if !ModeSupported(runner.Info, body.Mode) {
-		return Record{}, refuse(StartPrecondition, "this runner cannot run interactive sessions", "這個 runner 不能執行互動式工作階段")
-	}
-	if !slices.Contains(runner.Info.Capabilities, runnerwire.CapGlobalRuns) {
-		return Record{}, refuse(StartOutdated, "this runner cannot run global agents; update nodevas on it", "這個 runner 不能執行全域 agent；請更新它的 nodevas")
-	}
-	if !slices.Contains(runner.Info.Capabilities, runnerwire.CapGlobalRunsOn) {
-		return Record{}, stageRefusal(CodeGlobalRunsOff, locale.Errorf(
-			"the runner's owner turned global agents off on it (nodevas runner set globalRuns on)",
-			"runner 的擁有者在該機關閉了全域 agent（nodevas runner set globalRuns on）"))
+	if err := checkGlobalRunnerCaps(runner.Info, body.Mode); err != nil {
+		return Record{}, err
 	}
 	// The budget is the runner owner's: runs spend their subscription.
 	budget, err := d.store.BudgetStatus(ctx, runner.OwnerID)
@@ -133,38 +198,59 @@ func (d *Dispatcher) StartGlobal(ctx context.Context, req GlobalStartRequest) (R
 	if budget.Exceeded != "" {
 		return Record{}, &StartError{Code: StartBudget, Msg: BudgetMessage(budget), said: BudgetSay(budget), Budget: budget}
 	}
+	if body.OnBusy == runnerwire.OnBusyContinue {
+		return d.continueBusy(ctx, req)
+	}
 
-	title, rest := runnerwire.GlobalTitle(task)
-	slug := body.Slug
-	if slug == "" {
-		slug = runnerwire.SlugFrom(title)
-	}
-	name := req.ActorName
-	if name == "" {
-		name = req.ActorID
-	}
-	createRun := d.createRun
-	if createRun == nil {
-		createRun = d.store.Create
-	}
-	record, err := createRun(ctx, New{
-		Global: true, NodeTitle: title, BranchSlug: slug, NoPR: !body.OpenPR,
+	repoKey := runnerwire.RepoKey(runner.ID, repo)
+	in := New{
+		Global: true, NodeTitle: v.title, BranchSlug: v.slug, NoPR: !body.OpenPR,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		JobPrompt: BuildPrompt(title, rest, "", withSimple("", body.Simple)),
-		CreatedBy: req.ActorID, CreatedByName: name,
+		JobPrompt: BuildPrompt(v.title, v.rest, "", withSimple("", body.Simple)),
+		CreatedBy: req.ActorID, CreatedByName: v.actorName,
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode,
 		// Only a person starts a global agent (its routes refuse agents),
 		// and nothing starts one on its own.
-		Origin: runnerwire.OriginPerson,
+		Origin:  runnerwire.OriginPerson,
+		RepoKey: repoKey,
+	}
+
+	var record Record
+	var outcome BusyOutcome
+	err = d.store.db.Tx(ctx, func(tx *sql.Tx) error {
+		if err := lockBusy(ctx, tx, "repo:"+repoKey); err != nil {
+			return err
+		}
+		var err error
+		outcome, err = d.applyBusy(ctx, tx, BusyRequest{
+			Query:      BusyQuery{ActorID: req.ActorID, RepoKey: repoKey, Global: true},
+			OnBusy:     body.OnBusy,
+			HolderIDs:  body.HolderIDs,
+			RunnerCaps: runner.Info.Capabilities,
+		})
+		if err != nil {
+			return err
+		}
+		if !outcome.Proceed {
+			return nil
+		}
+		in.AfterRun = outcome.AfterRun
+		in.BusyChoice = outcome.Choice
+		record, err = d.store.createWith(ctx, tx, in)
+		return err
 	})
 	if err != nil {
 		return Record{}, err
 	}
-	d.record(AuditEntry{ActorID: req.ActorID, ActorName: name, Action: "run.global.start", Target: record.ID,
+	d.afterBusy(ctx, identity.Actor{ID: req.ActorID, Name: v.actorName}, outcome)
+	if err := d.store.UserFirst(ctx, record.ID, v.task); err != nil {
+		return Record{}, err
+	}
+	d.record(AuditEntry{ActorID: req.ActorID, ActorName: v.actorName, Action: "run.global.start", Target: record.ID,
 		Detail: map[string]any{
 			"runner": runner.ID, "repo": repo.ID, "agent": record.Agent, "model": record.Model, "mode": record.Mode,
-			"base": record.Base, "slug": slug, "noPR": record.NoPR, "taskBytes": len(task), "simple": body.Simple,
+			"base": record.Base, "slug": v.slug, "noPR": record.NoPR, "taskBytes": len(v.task), "simple": body.Simple,
 		}})
 	return d.Submit(ctx, record), nil
 }

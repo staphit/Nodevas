@@ -79,6 +79,8 @@ const AntigravityCommandRule = "command(*)"
 
 func (Antigravity) Kind() string { return "antigravity" }
 
+func (Antigravity) SupportsResume(interactive bool) bool { return true }
+
 func (Antigravity) NewParser() Parser { return &antigravityParser{} }
 
 func (a Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
@@ -92,6 +94,9 @@ func (a Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) 
 func (Antigravity) CommandRelay(job runnerwire.Job, env RunEnv) (*exec.Cmd, bool, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, false, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
+	}
+	if err := validateSessionID("antigravity", "resume session id", env.Resume); err != nil {
+		return nil, false, err
 	}
 	// Headless, nobody can approve a command: the gate turns what agy would
 	// refuse, ending the turn, into a denial the agent can work around.
@@ -131,10 +136,17 @@ func (Antigravity) CommandRelay(job runnerwire.Job, env RunEnv) (*exec.Cmd, bool
 	if settings != "" {
 		args = append(args, "--settings="+settings)
 	}
+	if env.Resume != "" {
+		args = append(args, "--conversation="+env.Resume)
+	}
 	args = append(args, "-p=")
+	prompt := Prompt(job, env.Branch)
+	if env.Resume != "" {
+		prompt = ResumePrompt(job, env.Branch)
+	}
 	input, err := json.Marshal(map[string]any{
 		"event":   "user",
-		"message": map[string]string{"content": Prompt(job, env.Branch)},
+		"message": map[string]string{"content": prompt},
 	})
 	if err != nil {
 		return nil, false, err
@@ -303,6 +315,8 @@ func writeAntigravityRelaySettings(tempDir string) (string, error) {
 // usage and any actions headless mode denied.
 type antigravityParser struct {
 	outcome Outcome
+	// session is the validated conversation_id from init.
+	session string
 	// model is the model the init line named.
 	model string
 	// textStep is the agent_response step whose deltas are in pending.
@@ -314,6 +328,8 @@ type antigravityParser struct {
 	// called holds the steps whose tool_call went out at ACTIVE.
 	called map[int]bool
 }
+
+func (p *antigravityParser) Session() string { return p.session }
 
 type antigravityLine struct {
 	Event          string `json:"event"`
@@ -395,6 +411,9 @@ func (p *antigravityParser) Parse(line []byte) []runnerwire.RunEvent {
 	}
 	switch msg.Event {
 	case "init":
+		if id := strings.TrimSpace(msg.ConversationID); runnerwire.ValidSessionID(id) {
+			p.session = id
+		}
 		if msg.Init != nil {
 			p.model = strings.TrimSpace(msg.Init.Model)
 		}

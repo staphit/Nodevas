@@ -338,10 +338,42 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		if d.pumpWaitsBehind(ctx, r) || d.pumpHeldByOther(ctx, r) {
 			continue
 		}
+		// Re-check cost and token budget before offering (§10.2).
+		if d.cancelIfOverCostOrTokens(ctx, r) {
+			continue
+		}
 		if d.offer(ctx, r) {
 			room--
 		}
 	}
+}
+
+// cancelIfOverCostOrTokens cancels a queued run with FailureCode FailureBudget
+// if its owner's daily cost or token budget has been reached (§10.2). DailyRuns
+// is intentionally not re-checked here because queued runs are already counted
+// in Used.Runs from creation.
+func (d *Dispatcher) cancelIfOverCostOrTokens(ctx context.Context, r Record) bool {
+	if r.OwnerID == "" {
+		return false
+	}
+	budget, err := d.store.BudgetStatus(ctx, r.OwnerID)
+	if err != nil {
+		return false
+	}
+	ex := exceededCostOrTokens(budget)
+	if ex == "" {
+		return false
+	}
+	budget.Exceeded = ex
+	next, err := d.store.Transition(ctx, r.ID, runnerwire.RunCancelled, Change{
+		Error: BudgetMessage(budget), FailureCode: FailureBudget,
+	})
+	if err != nil {
+		return false
+	}
+	d.notifyChanged(next)
+	d.afterEnd(ctx, next, false)
+	return true
 }
 
 // offer marks a queued run offered and sends it. If the send fails the run
@@ -579,6 +611,15 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 	r, err := d.store.Finish(ctx, runID, runnerID, result)
 	if err != nil {
 		return err
+	}
+	// A group member that hits a quota or rate limit pauses the group before
+	// afterEnd's global early return and before Pump offers the next member (§10.2).
+	if r.GroupID != "" && r.Status == runnerwire.RunFailed &&
+		(r.FailureKind == runnerwire.FailureQuota || r.FailureKind == runnerwire.FailureRateLimit) {
+		at := resetTime(r, d.clockNow())
+		if err := d.store.SetGroupHold(ctx, r.GroupID, formatStamp(at)); err != nil {
+			slog.Warn("runs: set group hold", slog.String("group", r.GroupID), slog.Any("error", err))
+		}
 	}
 	d.finished(r)
 	// The follow-up (a fallback, a wait for a usage limit, a pipeline's next

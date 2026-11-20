@@ -328,6 +328,9 @@ export function GameDialog({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Let Escape reach an embedded xterm TUI (e.g. "Open large" RunDialog)
+      // instead of closing the modal underneath it.
+      if (event.target instanceof Element && event.target.closest(".xterm")) return;
       event.stopPropagation();
       onClose();
     };

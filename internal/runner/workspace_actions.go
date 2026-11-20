@@ -181,6 +181,14 @@ func (j *jobs) runWorkspaceAction(ownerID string, job runnerwire.WorkspaceAction
 	if outcome.Code == "" {
 		// Applied or thrown away: its preview (preview.go) ends now.
 		j.c.revokePreview(job.RunID)
+		if job.WorkRoot != "" {
+			j.c.revokePreview(job.WorkRoot)
+		}
+		if dataDir, err := j.c.cfg().RunDataDir(); err == nil {
+			if root := resolveWorkRoot(dataDir, job.RunID); root != "" {
+				j.c.revokePreview(root)
+			}
+		}
 	}
 	if j.ctx.Err() != nil {
 		// The runner is stopping; git may have been killed half way. Not
@@ -252,6 +260,9 @@ func (j *jobs) doWorkspaceAction(ownerID string, job runnerwire.WorkspaceActionJ
 	if !validRunID.MatchString(job.RunID) {
 		return refusedWith(runnerwire.WorkspaceErrRefused, "run id is not usable on this runner")
 	}
+	if job.WorkRoot != "" && !validRunID.MatchString(job.WorkRoot) {
+		return refusedWith(runnerwire.WorkspaceErrRefused, "work root is not usable on this runner")
+	}
 	if job.Action != runnerwire.WorkspaceMergeLocal && job.Action != runnerwire.WorkspaceDiscard {
 		return refusedWith(runnerwire.WorkspaceErrRefused, "unknown workspace action %q", job.Action)
 	}
@@ -259,19 +270,42 @@ func (j *jobs) doWorkspaceAction(ownerID string, job runnerwire.WorkspaceActionJ
 	if err != nil {
 		return refusedWith(runnerwire.WorkspaceErrRefused, "repository %q is not on this runner", job.RepoID)
 	}
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		return refusedWith(runnerwire.WorkspaceErrGit, "%v", err)
+	}
+	if entry, ok := lookupWorkForRun(dataDir, job.RunID); ok {
+		if entry.LastRunID != "" && entry.LastRunID != job.RunID {
+			return refusedWith(runnerwire.WorkspaceGateContinued, "this work continued in run %s; act on the latest turn", entry.LastRunID)
+		}
+		if entry.RepoID != "" && entry.RepoID != job.RepoID {
+			return refusedWith(runnerwire.WorkspaceErrRefused, "work %s does not belong to repository %q", entry.Root, job.RepoID)
+		}
+		job.WorkRoot = entry.Root
+	} else if job.WorkRoot != "" {
+		if entry, ok, _ := lookupWork(dataDir, job.WorkRoot); ok {
+			if entry.LastRunID != job.RunID {
+				return refusedWith(runnerwire.WorkspaceGateContinued, "this work continued in run %s; act on the latest turn", entry.LastRunID)
+			}
+			if entry.RepoID != "" && entry.RepoID != job.RepoID {
+				return refusedWith(runnerwire.WorkspaceErrRefused, "work %s does not belong to repository %q", entry.Root, job.RepoID)
+			}
+		} else if job.WorkRoot != job.RunID {
+			return refusedWith(runnerwire.WorkspaceErrRefused, "run %s is not a recorded continuation of %s", job.RunID, job.WorkRoot)
+		}
+	}
+	root := job.RunID
+	if job.WorkRoot != "" {
+		root = job.WorkRoot
+	}
 	j.mu.Lock()
-	r := j.runs[job.RunID]
-	running := r != nil && r.finish == nil
+	running := j.workRootActiveLocked(job.RunID, "") || j.workRootActiveLocked(root, "")
 	j.mu.Unlock()
 	if running {
 		return refusedWith(runnerwire.WorkspaceErrRunning, "this runner is still running the run")
 	}
 	if other := j.sharedWith(job); other != "" {
 		return refusedWith(runnerwire.WorkspaceErrRunning, "run %s on this runner is still working on %s or its pull request", other, job.Branch)
-	}
-	dataDir, err := cfg.RunDataDir()
-	if err != nil {
-		return refusedWith(runnerwire.WorkspaceErrGit, "%v", err)
 	}
 	if job.Action == runnerwire.WorkspaceMergeLocal {
 		ctx, cancel := context.WithTimeout(j.ctx, workspaceMergeTimeout)
@@ -290,15 +324,22 @@ func (j *jobs) doWorkspaceAction(ownerID string, job runnerwire.WorkspaceActionJ
 func (j *jobs) sharedWith(job runnerwire.WorkspaceActionJob) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	root := job.RunID
+	if job.WorkRoot != "" {
+		root = job.WorkRoot
+	}
 	pr := ""
 	if w := j.watched[job.RunID]; w != nil {
+		pr = w.URL
+	} else if w := j.watched[root]; w != nil {
 		pr = w.URL
 	}
 	for id, r := range j.runs {
 		if id == job.RunID || r.finish != nil {
 			continue
 		}
-		if (job.Branch != "" && r.job.Branch == job.Branch) || (pr != "" && r.job.PRURL == pr) {
+		if r.workRoot == root || workRootOfJob(r.job) == root ||
+			(job.Branch != "" && r.job.Branch == job.Branch) || (pr != "" && r.job.PRURL == pr) {
 			return id
 		}
 	}
@@ -317,6 +358,16 @@ func (j *jobs) openWatch(runID string) *watchedPR {
 	return &copied
 }
 
+func (j *jobs) openWatchForJob(job runnerwire.WorkspaceActionJob) *watchedPR {
+	if w := j.openWatch(job.RunID); w != nil {
+		return w
+	}
+	if job.WorkRoot != "" && job.WorkRoot != job.RunID {
+		return j.openWatch(job.WorkRoot)
+	}
+	return nil
+}
+
 // discardRun removes a run's worktree and its own branch, closing its PR
 // first. Everything that could refuse without changing anything is checked
 // before the PR is closed; if gh fails, nothing is removed and asking again
@@ -332,11 +383,15 @@ func (j *jobs) discardRun(ctx context.Context, job runnerwire.WorkspaceActionJob
 		}
 		return o
 	}
-	plain := filepath.Join(dataDir, "worktrees", job.RunID)
+	root := job.RunID
+	if job.WorkRoot != "" {
+		root = job.WorkRoot
+	}
+	plain := filepath.Join(dataDir, "worktrees", root)
 	_, statErr := os.Lstat(plain)
 	hadWorktree := statErr == nil
 
-	wt, err := findRunWorktree(ctx, dataDir, repo, job.RunID)
+	wt, err := findRunWorktreeDirect(ctx, dataDir, repo, root)
 	if err != nil && !wt.Link {
 		return refusedWith(runnerwire.WorkspaceErrForeign, "%v; nothing was removed", err)
 	}
@@ -347,7 +402,7 @@ func (j *jobs) discardRun(ctx context.Context, job runnerwire.WorkspaceActionJob
 		}
 	}
 
-	if w := j.openWatch(job.RunID); w != nil {
+	if w := j.openWatchForJob(job); w != nil {
 		if ownBranch(job) && w.Branch == job.Branch {
 			gh, err := j.c.gh()
 			if err != nil {
@@ -367,12 +422,12 @@ func (j *jobs) discardRun(ctx context.Context, job runnerwire.WorkspaceActionJob
 		} else {
 			// A revise or review run's entry: the PR is the implement
 			// run's, never closed from here.
-			j.unwatch(job.RunID)
+			j.unwatch(w.RunID)
 		}
 	}
 
 	// Looked at again: the watcher may have removed it meanwhile.
-	wt, err = findRunWorktree(ctx, dataDir, repo, job.RunID)
+	wt, err = findRunWorktreeDirect(ctx, dataDir, repo, root)
 	switch {
 	case wt.Link:
 		// Only the link goes; whatever it points at is not the run's.
@@ -409,6 +464,7 @@ func (j *jobs) discardRun(ctx context.Context, job runnerwire.WorkspaceActionJob
 	if err := DropKept(ctx, dataDir, plain); err != nil {
 		out.Note = "could not update " + keptFile + ": " + err.Error()
 	}
+	dropWork(dataDir, root)
 	// A handoff branch (nodevas/handoff/<run>) stays: a queued fallback run
 	// may continue from it, and it expires on its own.
 	if !out.PRClosed && !out.WorktreeRemoved && !out.BranchDeleted && out.Note == "" {
@@ -491,10 +547,14 @@ func busyOr(err error, what string) runnerwire.WorkspaceOutcome {
 // machine, then removes the run's worktree and branch. See the top of the
 // file for where it merges and when it refuses.
 func (j *jobs) mergeRunLocal(ctx context.Context, job runnerwire.WorkspaceActionJob, repo, dataDir string) runnerwire.WorkspaceOutcome {
+	root := job.RunID
+	if job.WorkRoot != "" {
+		root = job.WorkRoot
+	}
 	if !ownBranch(job) || checkBase(job.Branch) != nil {
 		return refusedWith(runnerwire.WorkspaceErrNotOwnBranch, "%s is not the branch run %s made", job.Branch, job.RunID)
 	}
-	if w := j.openWatch(job.RunID); w != nil {
+	if w := j.openWatchForJob(job); w != nil {
 		return refusedWith(runnerwire.WorkspaceErrHasPR, "the run has an open pull request (%s); merge it there", w.URL)
 	}
 	if job.Base == "" || checkBase(job.Base) != nil || !refExists(ctx, repo, "refs/heads/"+job.Base) {
@@ -510,7 +570,7 @@ func (j *jobs) mergeRunLocal(ctx context.Context, job runnerwire.WorkspaceAction
 		return refusedWith(runnerwire.WorkspaceErrHeadMoved, "%s is at %s, not %s", job.Branch, short(tip), short(job.HeadSHA))
 	}
 
-	wt, err := findRunWorktree(ctx, dataDir, repo, job.RunID)
+	wt, err := findRunWorktreeDirect(ctx, dataDir, repo, root)
 	if err != nil {
 		return refusedWith(runnerwire.WorkspaceErrForeign, "%v", err)
 	}
@@ -563,9 +623,10 @@ func (j *jobs) mergeRunLocal(ctx context.Context, job runnerwire.WorkspaceAction
 			out.BranchDeleted = true
 		}
 	}
-	if err := DropKept(ctx, dataDir, filepath.Join(dataDir, "worktrees", job.RunID)); err != nil {
+	if err := DropKept(ctx, dataDir, filepath.Join(dataDir, "worktrees", root)); err != nil {
 		notes = append(notes, "could not update "+keptFile+": "+err.Error())
 	}
+	dropWork(dataDir, root)
 	if len(notes) > 0 {
 		out.Note = "merged; " + strings.Join(notes, "; ")
 	}

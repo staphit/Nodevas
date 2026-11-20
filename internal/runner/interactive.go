@@ -2,8 +2,10 @@ package runner
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -37,12 +39,25 @@ const (
 	termTail = 32 << 10
 	// summaryLines is how many lines of the final screen the summary keeps.
 	summaryLines = 20
+	// waitingCheckLines is how many non-empty tail lines screenWaiting checks
+	// for a question, permission or trust menu (§6.3 smoke test).
+	waitingCheckLines = 15
 	// termDrainQuiet / termDrainMax: after the program exits, its last output
 	// is read until the terminal has been quiet this long, at most that long.
 	termDrainQuiet = 150 * time.Millisecond
 	termDrainMax   = 2 * time.Second
 	// termCloseWait bounds waiting for the reader after the terminal closes.
 	termCloseWait = 5 * time.Second
+	// interactiveQuiet ends an idle interactive session after 20 minutes with
+	// no visible output and no user input (§7.2).
+	interactiveQuiet = 20 * time.Minute
+	// endQuitGap spaces the Ctrl+C presses sent by End / quiet timeout. Live
+	// CLI smoke tests (§5.2) showed 300ms stays within Claude Code's double
+	// Ctrl+C confirmation window while 1s expires it.
+	endQuitGap = 300 * time.Millisecond
+	// endGrace is how long End waits for the CLI to exit on its own (Codex
+	// takes ~5.2s to shut down MCP servers) before killing the process tree.
+	endGrace = 10 * time.Second
 )
 
 // capabilities is the hello's Capabilities: headless always, interactive when
@@ -163,6 +178,13 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	}
 
 	cfg := j.runCfg(r)
+	var sessionID string
+	if job.Agent == "claude" {
+		sessionID = newUUIDv4()
+		j.mu.Lock()
+		r.session = sessionID
+		j.mu.Unlock()
+	}
 	cmd, err := ia.InteractiveCommand(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
@@ -174,6 +196,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		AllowedTools:   cfg.AllowedTools,
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:        j.agentVersion(job.Agent),
+		SessionID:      sessionID,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -185,8 +208,12 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	s := j.terms.open(job.RunID, term)
 	j.mu.Lock()
 	typing := r.remoteTyping
+	pendingEnd := r.pendingEnd
 	j.mu.Unlock()
 	s.typing.Store(typing)
+	if pendingEnd {
+		s.requestEnd()
+	}
 	if !typing {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 			Text: "view only: the runner's owner did not allow typing into this terminal from the hub"})
@@ -224,22 +251,68 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 
 	expired, stopTimer := j.c.startRunTimer(timeout)
 	defer stopTimer()
+
+	quiet := j.c.quietTimeout()
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+
 	var waitErr error
 	stopped := ""
-	select {
-	case waitErr = <-done:
-	case <-ctx.Done():
-		stopped = "cancel"
-		term.Kill()
-		waitErr = <-done
-	case <-expired:
-		stopped = "timeout"
-		term.Kill()
-		waitErr = <-done
+	endReason := ""
+waitLoop:
+	for {
+		rem := quiet - time.Since(s.lastActivity())
+		if rem <= 0 {
+			stopped = "ended"
+			if s.waiting(job.Agent) {
+				endReason = runnerwire.EndReasonQuietWaiting
+			} else {
+				endReason = runnerwire.EndReasonQuiet
+			}
+			j.emit(r, runnerwire.RunEvent{
+				Type: runnerwire.EventLog,
+				Text: fmt.Sprintf("ending interactive session after %s of inactivity", minutesText(quiet)),
+			})
+			var override string
+			waitErr, override = j.quitInteractive(ctx, job.Agent, s, term, done, expired)
+			if override != "" {
+				stopped = override
+				endReason = ""
+			}
+			break
+		}
+		quietTimer.Reset(rem)
+		select {
+		case waitErr = <-done:
+			break waitLoop
+		case <-ctx.Done():
+			stopped = "cancel"
+			term.Kill()
+			waitErr = <-done
+			break waitLoop
+		case <-expired:
+			stopped = "timeout"
+			term.Kill()
+			waitErr = <-done
+			break waitLoop
+		case <-s.endCh:
+			stopped = "ended"
+			endReason = runnerwire.EndReasonEnded
+			var override string
+			waitErr, override = j.quitInteractive(ctx, job.Agent, s, term, done, expired)
+			if override != "" {
+				stopped = override
+				endReason = ""
+			}
+			break waitLoop
+		case <-quietTimer.C:
+		}
 	}
 	s.finish(readerDone)
 
-	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})
+	if stopped != "ended" || exitCode >= 0 {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})
+	}
 	result := runnerwire.RunResult{ExitCode: exitCode, Summary: s.summary()}
 	switch {
 	case stopped == "cancel":
@@ -248,6 +321,9 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	case stopped == "timeout":
 		result.Status = runnerwire.RunFailed
 		result.Error = "timed out after " + minutesText(timeout)
+	case stopped == "ended":
+		result.Status = runnerwire.RunSucceeded
+		result.EndReason = endReason
 	case exitCode == 0:
 		result.Status = runnerwire.RunSucceeded
 	default:
@@ -259,6 +335,192 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		result.Error = adapter.Truncate(result.Error, runnerwire.MaxSummaryBytes)
 	}
 	return result
+}
+
+// endRun handles a TypeEnd: asks an interactive run's CLI to quit cleanly,
+// waits a grace period, then kills it if needed, keeping and publishing its
+// work as a succeeded run (§7.1). If the terminal has not opened yet,
+// pendingEnd remembers the request until it does.
+func (j *jobs) endRun(runID string) {
+	if runID == "" {
+		return
+	}
+	j.mu.Lock()
+	r := j.runs[runID]
+	if r == nil || r.finish != nil || r.publishing || r.job.Mode != runnerwire.ModeInteractive {
+		j.mu.Unlock()
+		j.c.logf("run %s: end for a run that is not running interactively here; ignored", runID)
+		return
+	}
+	r.pendingEnd = true
+	j.mu.Unlock()
+	if s := j.terms.get(runID); s != nil {
+		j.c.logf("run %s: ending interactive session on request from the hub", runID)
+		s.requestEnd()
+	} else {
+		j.c.logf("run %s: end requested before terminal opened; recorded pending end", runID)
+	}
+}
+
+// quitSequence returns the key sequence used to ask agent's TUI to quit
+// gracefully. Live smoke testing across Claude Code, Codex, OpenCode and
+// Antigravity (§5.2) showed 3× Ctrl+C spaced 300ms apart interrupts any active
+// turn on the first press and triggers double-Ctrl+C exit on the next two.
+func quitSequence(agent string) []string {
+	switch agent {
+	default:
+		return []string{"\x03", "\x03", "\x03"}
+	}
+}
+
+// quitInteractive sends agent's quit sequence spaced by quitGap, stopping as
+// soon as the process exits, then waits up to quitGrace before hard-killing the
+// process tree. If ctx is cancelled or the run timeout expires meanwhile, it
+// kills immediately and returns that override reason ("cancel" or "timeout").
+func (j *jobs) quitInteractive(ctx context.Context, agent string, s *termSession, term Terminal, done <-chan error, expired <-chan time.Time) (error, string) {
+	keys := quitSequence(agent)
+	gap := j.c.quitGap()
+	grace := j.c.quitGrace()
+	for i, key := range keys {
+		if i > 0 {
+			wait := gap
+			if i == 2 && wait < 100*time.Millisecond {
+				// Give a process exiting on press 2 a beat to be reaped in fast
+				// unit tests before queuing press 3.
+				wait = 2 * gap
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case err := <-done:
+				timer.Stop()
+				return err, ""
+			case <-ctx.Done():
+				timer.Stop()
+				term.Kill()
+				return <-done, "cancel"
+			case <-expired:
+				timer.Stop()
+				term.Kill()
+				return <-done, "timeout"
+			case <-timer.C:
+			}
+		}
+		s.input([]byte(key))
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err, ""
+	case <-ctx.Done():
+		term.Kill()
+		return <-done, "cancel"
+	case <-expired:
+		term.Kill()
+		return <-done, "timeout"
+	case <-timer.C:
+		term.Kill()
+		return <-done, ""
+	}
+}
+
+// newUUIDv4 generates a random RFC 4122 UUID v4 string.
+func newUUIDv4() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+var (
+	claudeMenuOptionRe = regexp.MustCompile(`(?i)❯\s*(?:1\.|yes\b|no\b)`)
+	codexMenuOptionRe  = regexp.MustCompile(`(?i)›\s*1\.`)
+)
+
+// screenWaiting reports whether the last visible lines of raw PTY output match
+// a known question, permission or folder-trust prompt for agent (§6.3 smoke
+// test table, §7.2). plainText expands Ink's CSI cursor-forward (\x1b[NC) into
+// spaces before matching.
+func screenWaiting(agent string, raw []byte) bool {
+	tail := lastLines(plainText(raw), waitingCheckLines)
+	if tail == "" {
+		return false
+	}
+	lower := strings.ToLower(tail)
+	switch agent {
+	case "claude":
+		for _, marker := range []string{
+			"enter to confirm",
+			"esc to cancel",
+			"quick safety check",
+			"yes, i trust this folder",
+			"do you want to proceed",
+			"allow once",
+			"allow always",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+		return claudeMenuOptionRe.MatchString(tail)
+	case "codex":
+		for _, marker := range []string{
+			"press enter to continue",
+			"do you trust the contents",
+			"yes, continue",
+			"would you like to run",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+		if strings.Contains(lower, "approve") && strings.Contains(lower, "deny") {
+			return true
+		}
+		return codexMenuOptionRe.MatchString(tail)
+	case "opencode":
+		for _, marker := range []string{
+			"permission required",
+			"allow once",
+			"allow always",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+		return strings.Contains(lower, "update available") &&
+			strings.Contains(lower, "skip") &&
+			strings.Contains(lower, "confirm")
+	case "antigravity":
+		for _, marker := range []string{
+			"enter confirm",
+			"do you trust the contents",
+			"> yes, i trust this folder",
+			"allow once",
+			"allow always",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+		return false
+	default:
+		for _, marker := range []string{
+			"enter to confirm",
+			"press enter to continue",
+			"yes, i trust this folder",
+			"do you want to proceed",
+			"permission required",
+			"allow once",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // termInput handles a TypeTermIn: keystrokes for an interactive run that is
@@ -284,7 +546,9 @@ func (j *jobs) termInput(runID string, chunk *runnerwire.TermChunk) {
 	j.c.logf("run %s: terminal input from the hub: %d bytes", runID, len(chunk.Data))
 	if !s.input(chunk.Data) {
 		j.c.logf("run %s: terminal input dropped: the agent is not reading it", runID)
+		return
 	}
+	s.recordInput()
 }
 
 // termResize handles a TypeTermResize, clamped to the contract's bounds.
@@ -326,10 +590,13 @@ func (t *termRelay) wake() {
 }
 
 func (t *termRelay) open(runID string, term Terminal) *termSession {
+	now := time.Now().UnixNano()
 	s := &termSession{runID: runID, term: term, relay: t,
-		in: make(chan []byte, termInputQueue), stop: make(chan struct{})}
+		in: make(chan []byte, termInputQueue), stop: make(chan struct{}),
+		endCh: make(chan struct{})}
 	s.tail.max = termTail
-	s.lastOutput.Store(time.Now().UnixNano())
+	s.lastOutput.Store(now)
+	s.lastActive.Store(now)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.sessions == nil {
@@ -387,10 +654,15 @@ type termSession struct {
 	relay *termRelay
 	in    chan []byte
 	stop  chan struct{}
-	// lastOutput is when output last arrived, as UnixNano.
+	endCh chan struct{}
+	// lastOutput is when output last arrived, as UnixNano (for post-exit drain).
 	lastOutput atomic.Int64
+	// lastActive is when non-repaint output or user input last arrived, as
+	// UnixNano (for the 20-minute quiet timeout, §7.2).
+	lastActive atomic.Int64
 	// typing: input from the hub reaches the program (remote typing allowed).
-	typing atomic.Bool
+	typing  atomic.Bool
+	endOnce sync.Once
 
 	mu        sync.Mutex
 	pending   []byte
@@ -402,8 +674,53 @@ type termSession struct {
 	// ended: its last output has been read, so once pending is out the
 	// session is done. Set after closed, at the end of finish: until then
 	// the final screen may still be arriving.
-	ended bool
-	tail  tailBuffer
+	ended     bool
+	tail      tailBuffer
+	seenLines map[string]bool
+}
+
+func (s *termSession) requestEnd() {
+	s.endOnce.Do(func() { close(s.endCh) })
+}
+
+func (s *termSession) recordInput() {
+	s.lastActive.Store(time.Now().UnixNano())
+	s.mu.Lock()
+	clear(s.seenLines)
+	s.mu.Unlock()
+}
+
+func (s *termSession) lastActivity() time.Time {
+	return time.Unix(0, s.lastActive.Load())
+}
+
+func (s *termSession) waiting(agent string) bool {
+	s.mu.Lock()
+	raw := append([]byte(nil), s.tail.buf...)
+	s.mu.Unlock()
+	return screenWaiting(agent, raw)
+}
+
+func (s *termSession) recordVisibleLocked(p []byte) bool {
+	text := plainText(p)
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	if s.seenLines == nil || len(s.seenLines) > 512 {
+		s.seenLines = map[string]bool{}
+	}
+	changed := false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !s.seenLines[line] {
+			s.seenLines[line] = true
+			changed = true
+		}
+	}
+	return changed
 }
 
 // readLoop copies the terminal's output into the pending buffer until the
@@ -435,6 +752,9 @@ func (s *termSession) readLoop(state func(string), wake func()) {
 func (s *termSession) output(p []byte, wake func()) {
 	s.mu.Lock()
 	_, _ = s.tail.Write(p)
+	if s.recordVisibleLocked(p) {
+		s.lastActive.Store(time.Now().UnixNano())
+	}
 	s.pending = append(s.pending, p...)
 	if over := len(s.pending) - maxPendingTerm; over > 0 {
 		// The hub has been unreachable for a while: keep the newest output.

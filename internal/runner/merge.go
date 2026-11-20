@@ -226,19 +226,31 @@ func (j *jobs) tryMerge(req runnerwire.MergeJob) (reason string, merged *watched
 	if req.HeadSHA == "" {
 		return "the merge request names no head commit", nil
 	}
+	root := req.RunID
+	if dataDir, err := cfg.RunDataDir(); err == nil {
+		root = resolveWorkRoot(dataDir, req.RunID)
+	}
 	j.mu.Lock()
 	var w *watchedPR
 	if current := j.watched[req.RunID]; current != nil {
 		copied := *current
 		w = &copied
+	} else if current := j.watched[root]; current != nil {
+		copied := *current
+		w = &copied
 	}
+	active := j.workRootActiveLocked(req.RunID, "") || j.workRootActiveLocked(root, "") ||
+		(w != nil && j.workRootActiveLocked(w.RunID, ""))
 	alreadyMerged := false
 	for _, rec := range j.merges {
-		if rec.RunID == req.RunID && rec.Error == "" && rec.HeadSHA == req.HeadSHA {
+		if (rec.RunID == req.RunID || rec.RunID == root) && rec.Error == "" && rec.HeadSHA == req.HeadSHA {
 			alreadyMerged = true
 		}
 	}
 	j.mu.Unlock()
+	if active {
+		return fmt.Sprintf("a turn of run %s is still running on this runner; merge after it ends", root), nil
+	}
 	if w == nil {
 		if alreadyMerged {
 			// Another approval of the same head got there first.

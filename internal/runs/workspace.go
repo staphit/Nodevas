@@ -120,6 +120,8 @@ func WorkspaceGate(r Record, runner WorkspaceRunner) WorkspaceGates {
 	switch {
 	case !runnerwire.RunFinal(r.Status):
 		return both(runnerwire.WorkspaceGateRunning)
+	case r.ContinuedBy != "":
+		return both(runnerwire.WorkspaceGateContinued)
 	case r.Workspace == runnerwire.RunWorkspaceDiscarded:
 		g.DiscardDone = true
 		g = both(runnerwire.WorkspaceGateDiscarded)
@@ -215,6 +217,8 @@ func CheckWorkspaceAction(r Record, runner WorkspaceRunner, action, headSHA stri
 		switch {
 		case !runnerwire.RunFinal(r.Status):
 			return blocked(runnerwire.WorkspaceGateRunning)
+		case r.ContinuedBy != "":
+			return blocked(runnerwire.WorkspaceGateContinued)
 		case r.Status != runnerwire.RunSucceeded || r.ContestID == "" || r.ContestLabel == "" || r.ContestLabel == "J":
 			return blocked(runnerwire.WorkspaceGateKind)
 		case r.Workspace == runnerwire.RunWorkspaceDiscarded:
@@ -257,9 +261,9 @@ WHERE id = ? AND runner_id = ? AND branch = ''`,
 	return s.Get(ctx, runID)
 }
 
-// WorkspaceInUse reports whether other work still needs r's branch or PR:
-// an unfinished run on the same PR or branch (a revise or review run, a
-// later stage), or r's pipeline still running.
+// WorkspaceInUse reports whether other work still needs r's branch, PR or
+// work_root: an unfinished run on the same PR, branch or work_root (a revise,
+// review or follow-up run, a later stage), or r's pipeline still running.
 func (s *Store) WorkspaceInUse(ctx context.Context, r Record) (bool, error) {
 	pr := r.PRURL
 	if pr == "" {
@@ -269,15 +273,21 @@ func (s *Store) WorkspaceInUse(ctx context.Context, r Record) (bool, error) {
 	if branch == "" {
 		branch = r.JobBranch
 	}
+	workRoot := r.WorkRoot
+	if workRoot == "" {
+		workRoot = r.ID
+	}
 	var n int
 	err := s.db.QueryRowContext(ctx, `
 SELECT
   (SELECT COUNT(*) FROM runs
    WHERE id <> ? AND status IN (?, ?, ?)
-     AND ((? <> '' AND (job_pr_url = ? OR pr_url = ?)) OR (? <> '' AND (job_branch = ? OR branch = ?))))
+     AND ((? <> '' AND (job_pr_url = ? OR pr_url = ?))
+       OR (? <> '' AND (job_branch = ? OR branch = ?))
+       OR (? <> '' AND (id = ? OR work_root = ?))))
 + (SELECT COUNT(*) FROM run_pipelines WHERE ? <> '' AND id = ? AND status = ?)`,
 		r.ID, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning,
-		pr, pr, pr, branch, branch, branch,
+		pr, pr, pr, branch, branch, branch, workRoot, workRoot, workRoot,
 		r.PipelineID, r.PipelineID, runnerwire.PipelineRunning).Scan(&n)
 	return n > 0, err
 }
@@ -600,11 +610,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return r, a, err
 }
 
-// BlockedCode is the gate code err carries (a WorkspaceBlocked), or "".
+// BlockedCode is the gate code err carries (a WorkspaceBlocked or a StartError
+// with Reason), or "".
 func BlockedCode(err error) string {
 	var b *WorkspaceBlocked
 	if errors.As(err, &b) {
 		return b.Code
+	}
+	var s *StartError
+	if errors.As(err, &s) && s.Reason != "" {
+		return s.Reason
 	}
 	return ""
 }
