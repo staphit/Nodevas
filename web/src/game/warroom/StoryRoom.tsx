@@ -18,7 +18,7 @@ import { useSimpleMode } from "../../simple/simpleMode";
 import type { ControlRow } from "../../station/control";
 import { StationMenu, type StationMenuItem } from "../../station/StationMenu";
 import { useApp, usePreference } from "../../store";
-import { THEME_PLACES, type ThemePlaceId, type ThemeScene } from "../../theme-pack/themeManifest";
+import { THEME_PLACES, type ThemePlaceId } from "../../theme-pack/themeManifest";
 import { useGameActions } from "../GameActions";
 import {
   agentName,
@@ -34,6 +34,7 @@ import {
   type Translate,
 } from "../labels";
 import type { Actor, Building, Meeting, ProjectOffice, Rack } from "../world";
+import { Face, skinVars, still } from "./castArt";
 import { EnergyHud } from "./EnergyHud";
 import { menuItem } from "./PixelDesk";
 import { MAX_RACKS } from "./ServerRoom";
@@ -48,7 +49,6 @@ import {
 } from "./storyPlaces";
 import { personLabel, personWhat, StoryTalk } from "./StoryTalk";
 import { useStoryWords } from "./storyWords";
-import type { CastFigure } from "./themeCast";
 import type { ThemeCast } from "./themeCastContext";
 import { ThemeFigure } from "./ThemeFigure";
 
@@ -65,12 +65,6 @@ const BUILT_IN: Record<ThemePlaceId, string> = {
 /** Figures drawn to either side of the one in front; the last of them is
  * already out of sight, so one that comes in has somewhere to come from. */
 const SIDES = 3;
-/** A face in the roster, in CSS px: warroom.css has the same. */
-const FACE_PX = 38;
-/** How much of the canvas's width a face takes, and how far under her sign
- * it starts, as a share of the canvas's height. */
-const FACE_REACH = 0.29;
-const FACE_UNDER_SIGN = 0.025;
 /** Slots of a runner drawn as bars. */
 const MAX_SLOTS = 8;
 /** The ways a place can be laid out, as its switch offers them. */
@@ -95,45 +89,6 @@ function groupLabel(t: Translate, group: StoryGroup, simple = false): string {
   });
   const who = shared(whos) || shared(namesOf(group));
   return who ? t("game.group.label", { who, count }) : t("game.group.mixed", { count });
-}
-
-/** A scene's still as a background: the first frame of its strip, as wide as
- * what it fills. */
-function still(cast: ThemeCast, scene: ThemeScene, down: string): CSSProperties {
-  return {
-    backgroundImage: `url(${JSON.stringify(cast.url(scene.image))})`,
-    backgroundSize: `${(scene.frames?.count ?? 1) * 100}% auto`,
-    backgroundPosition: `0 ${down}`,
-  };
-}
-
-/** A character's face, cut from her picture: under her sign where she has
- * one, else the top of what is drawn of her. */
-function Face({ figure, cast }: { figure?: CastFigure; cast: ThemeCast }) {
-  if (!figure) {
-    return (
-      <span className="px-story-face is-unnamed" aria-hidden="true">
-        ?
-      </span>
-    );
-  }
-  const { scene } = figure;
-  const [width, height] = cast.canvas;
-  const reach = FACE_REACH * width;
-  const scale = FACE_PX / reach;
-  const centre = scene.sign ? scene.sign[0] : (scene.box[0] + scene.box[2]) / 2;
-  const top = scene.sign ? scene.sign[1] + FACE_UNDER_SIGN * height : scene.box[1];
-  return (
-    <span
-      className="px-story-face"
-      aria-hidden="true"
-      style={{
-        backgroundImage: `url(${JSON.stringify(cast.url(scene.image))})`,
-        backgroundSize: `${(scene.frames?.count ?? 1) * scene.w * scale}px ${scene.h * scale}px`,
-        backgroundPosition: `${-(centre - reach / 2 - scene.x) * scale}px ${-(top - scene.y) * scale}px`,
-      }}
-    />
-  );
 }
 
 /** What a card shows: her picture, or the mark of the unnamed; and how many
@@ -180,23 +135,6 @@ function RackCard({ rack }: { rack: Rack }) {
       <span className="px-story-rack-load">{rack.slots ? `${rack.busy}/${rack.slots}` : `▶ ${rack.busy}`}</span>
     </button>
   );
-}
-
-/** What the pack's skin gives the stage: its accent, and under a dark skin
- * its night, ink and panels. A light skin keeps the stage's own night: the
- * pictures are lit for one. */
-function skinVars(cast: ThemeCast): CSSProperties {
-  const skin = cast.skin;
-  if (!skin) return {};
-  const vars: Record<string, string> = {};
-  if (skin.colors.accent) vars["--story-accent"] = skin.colors.accent;
-  if (skin.scheme === "dark") {
-    if (skin.colors.bg) vars["--story-night"] = skin.colors.bg;
-    if (skin.colors.text) vars["--story-ink"] = skin.colors.text;
-    if (skin.colors["text-2"]) vars["--story-soft"] = skin.colors["text-2"];
-    if (skin.colors.surface) vars["--story-deep"] = skin.colors.surface;
-  }
-  return vars as CSSProperties;
 }
 
 export function StoryRoom({

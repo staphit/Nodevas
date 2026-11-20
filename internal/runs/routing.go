@@ -28,6 +28,7 @@ const (
 var jobKinds = map[string]bool{
 	runnerwire.JobImplement: true, runnerwire.JobReview: true, runnerwire.JobRevise: true,
 	runnerwire.JobPlan: true, runnerwire.JobTest: true, runnerwire.JobVerify: true, runnerwire.JobJudge: true,
+	runnerwire.JobCompare: true,
 }
 
 var routeMatches = map[string]bool{

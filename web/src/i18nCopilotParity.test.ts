@@ -6,7 +6,17 @@ import { hasMessage, translate } from "./i18n";
 // There is no global en/zh-TW parity check, and translate() falls back to
 // English, so a key missing from one catalog ships half-translated without
 // a sound. The copilot's and its drafts' keys are held to both catalogs.
-const FAMILIES = ["copilot.", "draft.", "undo.label."];
+const FAMILIES = [
+  "copilot.",
+  "draft.",
+  "undo.label.",
+  "runDialog.",
+  "picker.",
+  "globalAgents.group.",
+  "busy.",
+  "overlap.",
+  "contest.",
+];
 
 /** Keys of one catalog, read from the source so none is missed. */
 function catalogKeys(language: "en" | "zh-TW"): string[] {
@@ -116,5 +126,22 @@ describe("copilot and draft keys in both catalogs", () => {
     }
     expect(translate("draft.presenter.lineOne", "en")).not.toMatch(/\b1 steps\b/);
     expect(translate("draft.plan.tagsOne", "en")).toBe("1 tag");
+  });
+
+  it("covers the terminal dialog, picker, group, busy, overlap and contest keys and keeps globalAgents.noAsk intact", () => {
+    for (const family of ["runDialog.", "picker.", "globalAgents.group.", "busy.", "overlap.", "contest."]) {
+      expect(catalogKeys("en").some((key) => key.startsWith(family)), family).toBe(true);
+    }
+    expect(hasMessage("en", "globalAgents.replyNote")).toBe(true);
+    expect(hasMessage("zh-TW", "globalAgents.replyNote")).toBe(true);
+    expect(translate("terminal.modeNoteLocal", "en")).toBe(
+      "Runs the agent's own terminal on this computer and shows it here; you can type to it.",
+    );
+    expect(translate("terminal.modeNote", "en")).toBe(
+      "Runs the agent's own terminal on the runner and shows it here; you can type to it.",
+    );
+    expect(translate("globalAgents.noAsk", "en")).toBe(
+      "Runs in the background: it cannot ask you anything. Start one Interactive to talk with it.",
+    );
   });
 });

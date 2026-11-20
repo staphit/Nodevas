@@ -83,6 +83,9 @@ type Dispatcher struct {
 	asksMu sync.Mutex
 	asks   map[string]pendingAsk
 	asked  map[string]bool
+
+	// coord holds coordination hooks and claim release callback (coordhooks.go).
+	coord coordHooks
 }
 
 // UsageAnnounceInterval is the least time between two runs changes a running
@@ -319,6 +322,22 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		if ok, err := d.store.roleHasRoom(ctx, r); err != nil || !ok {
 			continue
 		}
+		// A queued follow-up waits until its prior run is final (§6.3).
+		if r.ContinueOf != "" {
+			if done, err := d.store.PriorFinal(ctx, r.ContinueOf); err != nil || !done {
+				continue
+			}
+		}
+		// A group member waits while its group's usage-limit hold is active (§10.2).
+		if r.GroupID != "" {
+			if held, err := d.store.GroupHeld(ctx, r.GroupID, d.clockNow()); err != nil || held {
+				continue
+			}
+		}
+		// Busy queue / pipeline ordering (§C.2.3).
+		if d.pumpWaitsBehind(ctx, r) || d.pumpHeldByOther(ctx, r) {
+			continue
+		}
 		if d.offer(ctx, r) {
 			room--
 		}
@@ -334,6 +353,7 @@ func (d *Dispatcher) offer(ctx context.Context, r Record) bool {
 	}
 	job := offered.Job()
 	job.SteppedUp = d.SteppedUp(offered)
+	d.coordJob(ctx, offered, &job)
 	if err := d.reg.Send(r.RunnerID, runnerwire.Envelope{Type: runnerwire.TypeOffer, Job: &job}); err != nil {
 		slog.Warn("runs: send offer", slog.String("run", r.ID), slog.Any("error", err))
 		if back, err := d.store.Transition(ctx, r.ID, runnerwire.RunQueued, Change{}); err == nil {
@@ -425,6 +445,7 @@ func (d *Dispatcher) Accept(ctx context.Context, runnerID string, accept runnerw
 	if err != nil {
 		return err
 	}
+	d.callAcceptViewOnly(ctx, r, accept)
 	d.notifyChanged(r)
 	return nil
 }
@@ -521,6 +542,7 @@ func (d *Dispatcher) Changes(ctx context.Context, runnerID, runID string, change
 		return err
 	}
 	if stored {
+		d.changesTouched(ctx, r, changes.Files)
 		d.notifyChanged(r)
 	}
 	return nil

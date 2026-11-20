@@ -114,6 +114,13 @@ type run struct {
 
 	// trail is what a handoff note needs from the events (handoff.go).
 	trail handoffTrail
+
+	// Continue and interactive End (R1, R2): CLI session id captured from the
+	// parser or chosen for interactive Claude, the chain's work root id, and
+	// an End that arrived before the PTY opened.
+	session    string
+	workRoot   string
+	pendingEnd bool
 }
 
 const (

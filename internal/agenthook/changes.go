@@ -249,7 +249,7 @@ func Snapshot(ctx context.Context, cwd string) (runnerwire.RunChanges, bool) {
 func withoutSecretFiles(list string) string {
 	var kept []string
 	for _, path := range strings.Split(list, "\x00") {
-		if path != "" && !secretFile(path) {
+		if path != "" && !SecretPath(path) {
 			kept = append(kept, path)
 		}
 	}
@@ -259,8 +259,8 @@ func withoutSecretFiles(list string) string {
 	return strings.Join(kept, "\x00") + "\x00"
 }
 
-// secretFile reports whether path's name is one secrets are kept under.
-func secretFile(path string) bool {
+// SecretPath reports whether path's name is one secrets are kept under.
+func SecretPath(path string) bool {
 	name := strings.ToLower(filepath.Base(filepath.FromSlash(path)))
 	switch name {
 	case ".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials":

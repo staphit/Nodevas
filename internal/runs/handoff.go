@@ -37,8 +37,8 @@ func canHandOff(r Record) bool {
 // again for when the limit resets: headless implement, test and revise runs
 // (a revise starts again from its pull request's head).
 func canWaitForReset(r Record) bool {
-	if r.Global {
-		return false // no usage-limit wait for a global agent (global.go)
+	if r.Global || r.ContestID != "" {
+		return false // no usage-limit wait for a global agent (global.go) or contest entry (§C.4.1)
 	}
 	switch r.Kind {
 	case runnerwire.JobImplement, runnerwire.JobTest, runnerwire.JobRevise:
@@ -156,6 +156,8 @@ func (d *Dispatcher) RunRetries(ctx context.Context, interval time.Duration) {
 	defer ticker.Stop()
 	for {
 		d.ReleaseDue(ctx)
+		d.tickReleaseWaiting(ctx)
+		d.tickReleaseGroupHolds(ctx)
 		select {
 		case <-ctx.Done():
 			return

@@ -59,6 +59,7 @@ func RunFinal(status string) bool {
 // Event types: the normalised stream every agent adapter produces, so the UI
 // never needs to know which CLI ran.
 const (
+	EventUser       = "user"        // person's task or follow-up message (seq 0, hub-written); Text
 	EventText       = "text"        // assistant prose; Text
 	EventThinking   = "thinking"    // reasoning summary; Text
 	EventToolCall   = "tool_call"   // Tool, ToolID, Input
@@ -160,6 +161,21 @@ type Job struct {
 	// Draft (P6): the planner's prompt says its writes are a draft; an older
 	// runner ignores it, and the hub holds the writes either way.
 	Draft bool `json:"draft,omitempty"`
+
+	// Continue (follow-up turns): ContinueOf names the prior run, WorkRoot the
+	// root run whose worktree folder and branch are reused in place;
+	// ContinueTask, ContinueSummary (already redacted, <= 4 KiB) and ContinuePR
+	// feed the fallback carry-over prompt when CLI session resume is unavailable.
+	ContinueOf      string `json:"continueOf,omitempty"`
+	WorkRoot        string `json:"workRoot,omitempty"`
+	ContinueTask    string `json:"continueTask,omitempty"`
+	ContinueSummary string `json:"continueSummary,omitempty"`
+	ContinuePR      string `json:"continuePR,omitempty"`
+
+	// Coordination (§C): Coordinated switches a node job to --toolset coordinated
+	// (no claim/status tools); Contest names the contest entry or reviewer.
+	Coordinated bool        `json:"coordinated,omitempty"`
+	Contest     *JobContest `json:"contest,omitempty"`
 }
 
 // Job origins (Job.Origin), set by the hub at run creation.
@@ -189,13 +205,46 @@ const (
 	DeclineOther          = "other"
 	// DeclineAgentSignedOut: the agent's CLI is there but not signed in.
 	DeclineAgentSignedOut = "agent_signed_out"
+	// Continue / open-PR decline codes (§6.2, §6.5).
+	DeclinePREnded     = "pr_ended"
+	DeclinePRMoved     = "pr_moved"
+	DeclineBranchMoved = "branch_moved"
 )
+
+// Interactive end reasons (RunResult.EndReason, Run.EndReason).
+const (
+	EndReasonEnded        = "ended"
+	EndReasonQuiet        = "quiet"
+	EndReasonQuietWaiting = "quiet_waiting"
+)
+
+// ValidSessionID reports whether id matches ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$,
+// safe to store in work.json and pass as an argv session identifier.
+func ValidSessionID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	isAlnum := func(c byte) bool {
+		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+	}
+	if !isAlnum(id[0]) {
+		return false
+	}
+	for i := 1; i < len(id); i++ {
+		c := id[i]
+		if !isAlnum(c) && c != '_' && c != '.' && c != ':' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
 
 // Accept reports an accepted job: the worktree and branch it runs in.
 type Accept struct {
-	RunID  string `json:"runId"`
-	Base   string `json:"base"`
-	Branch string `json:"branch"`
+	RunID    string `json:"runId"`
+	Base     string `json:"base"`
+	Branch   string `json:"branch"`
+	ViewOnly bool   `json:"viewOnly,omitempty"`
 }
 
 // RunEvent is one normalised step of a run.
@@ -255,6 +304,11 @@ type RunResult struct {
 	Verify   *VerifyResult `json:"verify,omitempty"`
 	Checks   []CheckResult `json:"checks,omitempty"`
 	GuardAck bool          `json:"guardAck,omitempty"`
+	// Continue / interactive end (§6.2, §7): EndReason is "", "ended", "quiet"
+	// or "quiet_waiting"; PushRefused is true when a succeeded follow-up turn's
+	// fast-forward push to its open PR branch was rejected.
+	EndReason   string `json:"endReason,omitempty"`
+	PushRefused bool   `json:"pushRefused,omitempty"`
 }
 
 // Run is a run as the HTTP API returns it.
@@ -344,6 +398,21 @@ type Run struct {
 	// Draft (P6): a plan run whose create_subgraph is held as a draft for
 	// the person (runs.draft).
 	Draft bool `json:"draft,omitempty"`
+	// Continue, interactive end, groups (§6.2, §7, §10.2).
+	ContinueOf  string `json:"continueOf,omitempty"`
+	WorkRoot    string `json:"workRoot,omitempty"`
+	ContinuedBy string `json:"continuedBy,omitempty"`
+	ViewOnly    bool   `json:"viewOnly,omitempty"`
+	GroupID     string `json:"groupId,omitempty"`
+	ResetAt     string `json:"resetAt,omitempty"`
+	EndReason   string `json:"endReason,omitempty"`
+	PushRefused bool   `json:"pushRefused,omitempty"`
+	// Coordination (§C.5, §C.6).
+	AfterRun     string `json:"afterRun,omitempty"`
+	BusyChoice   string `json:"busyChoice,omitempty"`
+	OverlapCount int    `json:"overlapCount,omitempty"`
+	ContestID    string `json:"contestId,omitempty"`
+	ContestLabel string `json:"contestLabel,omitempty"`
 	// Offer asks (offerask.go): what started the run (Origin*), the runner's
 	// pending ask while the run is offered, and why it was declined
 	// (Decline*).
@@ -399,6 +468,10 @@ type CreateRunRequest struct {
 	// Draft (P6) is only for a person's plain plan run (kind plan, no
 	// revision) the copilot starts; runs.Start refuses it otherwise.
 	Draft bool `json:"draft,omitempty"`
+	// Coordination (§C.2.2): how to handle an active holder, and the visible
+	// holder IDs the person saw (takeOver / continue).
+	OnBusy    string   `json:"onBusy,omitempty"`
+	HolderIDs []string `json:"holderIds,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

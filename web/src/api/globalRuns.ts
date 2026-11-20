@@ -1,5 +1,12 @@
 import { send } from "./http";
-import { rememberGlobalRuns, type Run } from "./runs";
+import {
+  busyErrorFromBody,
+  rememberGlobalRuns,
+  unwrapStartedRun,
+  type GlobalBusyResponse,
+  type OnBusy,
+  type Run,
+} from "./runs";
 
 // Mirrors internal/runnerwire/global.go (agent workspace, phase 2). A global
 // agent is a run in one of the owner's runner's registered repositories for
@@ -9,6 +16,10 @@ import { rememberGlobalRuns, type Run } from "./runs";
 
 /** runnerwire.MaxGlobalTaskBytes: the whole task, UTF-8 bytes after trim. */
 export const MAX_GLOBAL_TASK_BYTES = 32 << 10;
+/** runnerwire.MaxFollowUpBytes: matches MaxGlobalTaskBytes. */
+export const MAX_FOLLOW_UP_BYTES = MAX_GLOBAL_TASK_BYTES;
+/** runnerwire.MaxGroupRepos: maximum repositories in one global group. */
+export const MAX_GROUP_REPOS = 30;
 /** runnerwire.MaxGlobalTitleRunes: the task's first line, as the title. */
 export const MAX_GLOBAL_TITLE_CHARS = 120;
 /** runnerwire.MaxSlugBytes: a branch slug's length. */
@@ -36,6 +47,78 @@ export interface CreateGlobalRunRequest {
   /** Simple mode: the hub adds its fixed plain-words instruction for someone
    * who does not write code (runs.SimpleInstruction). Lifts no gate. */
   simple?: boolean;
+  /** Coordination layer 1: what to do when this repo already has an active run. */
+  onBusy?: OnBusy;
+  /** Coordination layer 1: visible holder ids the person saw (takeOver / continue). */
+  holderIds?: string[];
+}
+
+/** POST /api/global-runs/:id/follow-up. */
+export interface FollowUpRequest {
+  message: string;
+  mode?: "" | "interactive";
+}
+
+/** GET /api/global-runs/:id/thread: oldest first, at most 50 turns. */
+export interface RunThreadResponse {
+  runs: Run[] | null;
+}
+
+/** Mirrors runnerwire.RunGroup: one multi-repo fan-out group. */
+export interface RunGroup {
+  id: string;
+  ownerId?: string;
+  runnerId: string;
+  createdBy: string;
+  createdByName?: string;
+  title: string;
+  agent: string;
+  model: string;
+  noPR: boolean;
+  repoCount: number;
+  heldUntil?: string;
+  createdAt: string;
+}
+
+/** POST /api/global-runs/groups: 2..30 repositories on one runner. */
+export interface CreateGlobalGroupRequest {
+  runnerId: string;
+  repoIds: string[];
+  agent: string;
+  model?: string;
+  base?: string;
+  task: string;
+  slug?: string;
+  openPR: boolean;
+  simple?: boolean;
+  onBusy?: "" | "both" | "skip";
+}
+
+/** 201 POST /api/global-runs/groups and GET /api/global-runs/groups/:id. */
+export interface GlobalGroupResponse {
+  group: RunGroup;
+  runs: Run[] | null;
+}
+
+/** POST /api/global-runs/groups/:id/resume. */
+export interface ResumeGlobalGroupResponse {
+  group: RunGroup;
+}
+
+/** POST /api/global-runs/groups/:id/follow-up. */
+export interface GroupFollowUpRequest {
+  message: string;
+  only: "failed" | "all";
+}
+
+export interface GroupFollowUpSkipped {
+  runId: string;
+  code: string;
+}
+
+export interface GroupFollowUpResponse {
+  started: Run[] | null;
+  skipped: GroupFollowUpSkipped[] | null;
 }
 
 /** Why a runner cannot take global runs now: "" when it can. */
@@ -99,6 +182,10 @@ export class GlobalRunError extends Error {
   field: string;
   max: number;
   exceeded: string;
+  /** Latest turn id returned by 409 CONTINUED on follow-up. */
+  latestId: string;
+  /** Remaining run budget slots returned by 429 on multi-run starts. */
+  room: number;
   constructor(
     status: number,
     code: string,
@@ -107,6 +194,8 @@ export class GlobalRunError extends Error {
     max: number,
     message: string,
     exceeded = "",
+    latestId = "",
+    room = 0,
   ) {
     super(message);
     this.name = "GlobalRunError";
@@ -116,30 +205,44 @@ export class GlobalRunError extends Error {
     this.field = field;
     this.max = max;
     this.exceeded = exceeded;
+    this.latestId = latestId;
+    this.room = room;
   }
+}
+
+/** Builds a GlobalRunError from a parsed JSON error body. */
+function globalRunErrorFromBody(status: number, parsed: Record<string, unknown>): GlobalRunError {
+  const text = (key: string) => (typeof parsed[key] === "string" ? (parsed[key] as string) : "");
+  const num = (key: string) => (typeof parsed[key] === "number" && Number.isFinite(parsed[key]) ? (parsed[key] as number) : 0);
+  return new GlobalRunError(
+    status,
+    text("code"),
+    text("blocked"),
+    text("field"),
+    num("max"),
+    text("error") || text("message") || `${status}`,
+    text("exceeded"),
+    text("latestId"),
+    num("room"),
+  );
 }
 
 /** Reads a refusal's body into a GlobalRunError. */
 export async function globalRunError(res: Response): Promise<GlobalRunError> {
   const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  const text = (key: string) => (typeof parsed[key] === "string" ? (parsed[key] as string) : "");
-  const max = typeof parsed.max === "number" && Number.isFinite(parsed.max) ? parsed.max : 0;
-  return new GlobalRunError(
-    res.status,
-    text("code"),
-    text("blocked"),
-    text("field"),
-    max,
-    text("error") || `${res.status}`,
-    text("exceeded"),
-  );
+  return globalRunErrorFromBody(res.status, parsed);
 }
 
-/** Sends a JSON request and reads its JSON answer; a refusal is a
- * GlobalRunError. */
+/** Sends a JSON request and reads its JSON answer; 409 BUSY becomes BusyError,
+ * every other refusal becomes a GlobalRunError. */
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await send(url, init);
-  if (!res.ok) throw await globalRunError(res);
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const busy = busyErrorFromBody(res.status, parsed);
+    if (busy) throw busy;
+    throw globalRunErrorFromBody(res.status, parsed);
+  }
   return (await res.json()) as T;
 }
 
@@ -191,9 +294,13 @@ export function globalTitle(task: string): string {
 
 export const globalRunsApi = {
   /** Starts a global agent on one of the viewer's own runners: 201 with the
-   * run, queued until the runner (or someone at it) accepts the offer. */
+   * run (or `{run, stopped}` on takeOver), queued until the runner accepts. */
   createGlobalRun: async (body: CreateGlobalRunRequest): Promise<Run> => {
-    const run = await call<Run>("/api/global-runs", { method: "POST", body: JSON.stringify(body) });
+    const res = await call<Run | { run: Run; stopped?: string[] }>("/api/global-runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const run = unwrapStartedRun(res);
     rememberGlobalRuns([run]);
     return run;
   },
@@ -212,6 +319,69 @@ export const globalRunsApi = {
   cancelAllGlobalRuns: async (): Promise<CancelAllResponse> => {
     const res = await call<CancelAllResponse>("/api/global-runs/cancel-all", { method: "POST", body: "{}" });
     rememberGlobalRuns(res.runs ?? []);
+    return res;
+  },
+  /** Continues a global run (or queues a reply while a background run works). */
+  followUpGlobalRun: async (id: string, body: FollowUpRequest): Promise<Run> => {
+    const run = await call<Run>(`/api/global-runs/${encodeURIComponent(id)}/follow-up`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    rememberGlobalRuns([run]);
+    return run;
+  },
+  /** Every turn in a global run's follow-up chain, oldest first (up to 50). */
+  getGlobalRunThread: async (id: string): Promise<RunThreadResponse> => {
+    const res = await call<RunThreadResponse>(`/api/global-runs/${encodeURIComponent(id)}/thread`, {
+      cache: "no-store",
+    });
+    rememberGlobalRuns(res.runs ?? []);
+    return res;
+  },
+  /** Coordination layer 1 preflight for one or more repos on a runner. */
+  getGlobalRunBusy: (runnerId: string, repoIds: string[]): Promise<GlobalBusyResponse> => {
+    const query = new URLSearchParams({ runnerId, repoIds: repoIds.join(",") });
+    return call<GlobalBusyResponse>(`/api/global-runs/busy?${query.toString()}`, { cache: "no-store" });
+  },
+  /** Starts a multi-repo fan-out group (2..30 repos, background only). */
+  createGlobalGroup: async (body: CreateGlobalGroupRequest): Promise<GlobalGroupResponse> => {
+    const res = await call<GlobalGroupResponse>("/api/global-runs/groups", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    rememberGlobalRuns(res.runs ?? []);
+    return res;
+  },
+  /** Fetches a group and its member runs. */
+  getGlobalGroup: async (id: string): Promise<GlobalGroupResponse> => {
+    const res = await call<GlobalGroupResponse>(`/api/global-runs/groups/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
+    rememberGlobalRuns(res.runs ?? []);
+    return res;
+  },
+  /** Cancels every active member of a group. */
+  cancelGlobalGroup: async (id: string): Promise<CancelAllResponse> => {
+    const res = await call<CancelAllResponse>(`/api/global-runs/groups/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: "{}",
+    });
+    rememberGlobalRuns(res.runs ?? []);
+    return res;
+  },
+  /** Clears a usage-limit hold on a group so queued members can pump now. */
+  resumeGlobalGroup: (id: string): Promise<ResumeGlobalGroupResponse> =>
+    call<ResumeGlobalGroupResponse>(`/api/global-runs/groups/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
+      body: "{}",
+    }),
+  /** Sends a follow-up to eligible latest member turns ("failed" or "all"). */
+  followUpGlobalGroup: async (id: string, body: GroupFollowUpRequest): Promise<GroupFollowUpResponse> => {
+    const res = await call<GroupFollowUpResponse>(`/api/global-runs/groups/${encodeURIComponent(id)}/follow-up`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    rememberGlobalRuns(res.started ?? []);
     return res;
   },
 };

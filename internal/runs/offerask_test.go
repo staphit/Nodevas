@@ -251,6 +251,18 @@ func TestCleanDeclineCode(t *testing.T) {
 	}
 }
 
+func TestCleanDeclineCodeKeepsContinueCodes(t *testing.T) {
+	for _, code := range []string{
+		runnerwire.DeclinePREnded,
+		runnerwire.DeclinePRMoved,
+		runnerwire.DeclineBranchMoved,
+	} {
+		if got := CleanDeclineCode(code); got != code {
+			t.Errorf("CleanDeclineCode(%q) = %q, want %q", code, got, code)
+		}
+	}
+}
+
 // The answer from the app reaches only the built-in runner that asked in
 // the app, from its owner, while the run waits; and it is audited.
 func TestAnswerOfferRelaysOnlyToTheBuiltInRunner(t *testing.T) {

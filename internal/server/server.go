@@ -411,6 +411,7 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		// External sessions' action log is analytics history, kept even
 		// where the agent network itself runs in memory.
 		s.agents.SetActionLog(database)
+		s.runs.SetRunClaimRelease(s.agents.ReleaseRunClaim)
 	}
 	s.startAnalytics(database)
 	s.useRunnerLinks()

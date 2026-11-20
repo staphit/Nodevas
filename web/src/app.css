@@ -42,6 +42,9 @@
 @import "./styles/29-run-workspace.css"; /* agent workspace: a run's worktree, changes and terminal, merge and discard */
 @import "./styles/30-global-agents.css"; /* global agents: Station's tabs, the start form, runner load, the list */
 @import "./styles/31-this-computer.css"; /* single-user edition: This computer, add a repo, the "Start this run?" card */
+@import "./styles/32-run-dialog.css"; /* themed terminal dialog: transcript, tool lines, composer, Simple frame */
+@import "./styles/33-pickers.css"; /* picture-card pickers: agent, model, folder and mode cards */
+@import "./styles/34-coordination.css"; /* coordination: busy choice, overlap notice, contests */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

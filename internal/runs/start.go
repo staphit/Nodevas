@@ -82,6 +82,8 @@ const (
 	StartBudget       = "budget"
 	// StartNodeType: the node's type does not let agents work it.
 	StartNodeType = "node_type"
+	// StartBusy: an active or waiting run already holds the node or repository (§C.2).
+	StartBusy = "busy"
 )
 
 // StartError is why Start refused a run, worded for a person.
@@ -105,6 +107,8 @@ type StartError struct {
 	// it is about one (global runs: task, slug, base, mode, agent, model,
 	// repoId).
 	Field string
+	// Busy is the holders/choices payload for StartBusy (§C.2.2).
+	Busy *runnerwire.BusyResponse
 }
 
 func (e *StartError) Error() string { return e.Msg }
@@ -120,7 +124,7 @@ func (e *StartError) Is(target error) bool {
 		return target == ErrInvalid
 	case StartNotFound:
 		return target == ErrNotFound
-	case StartPrecondition, StartBudget, StartNodeType, StartOutdated:
+	case StartPrecondition, StartBudget, StartNodeType, StartOutdated, StartBusy:
 		return target == ErrPrecondition
 	}
 	return false

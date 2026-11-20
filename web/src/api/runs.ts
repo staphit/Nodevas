@@ -1,5 +1,5 @@
 import { explorerGet, forgetReads, remembered, type RepoFile, type RepoGitStatus, type RepoListing } from "./explorer";
-import { req, RequestError, send } from "./http";
+import { AuthError, ConflictError, req, RequestError, send } from "./http";
 
 // Mirrors internal/runnerwire/runs.go. A run is one agent CLI invocation on a
 // runner, for one board node, in its own git worktree. The hub records and
@@ -91,6 +91,7 @@ export interface RunUsage {
 }
 
 export type RunEventType =
+  | "user"
   | "text"
   | "thinking"
   | "tool_call"
@@ -242,11 +243,164 @@ export interface Run {
   /** A declined run: why, as a runnerwire decline code (declined_in_app,
    * timed_out, repo_not_added…). */
   declineCode?: string;
+  /** Follow-up: the prior run id this turn continues. */
+  continueOf?: string;
+  /** Follow-up: the root run id of this worktree chain. */
+  workRoot?: string;
+  /** Follow-up: the next non-withdrawn turn after this one, when one exists. */
+  continuedBy?: string;
+  /** Interactive: the runner accepted this run without remote typing. */
+  viewOnly?: boolean;
+  /** Multi-repo global run group id. */
+  groupId?: string;
+  /** Usage-limit reset time (RFC3339), persisted when a run stops at a limit. */
+  resetAt?: string;
+  /** Why an interactive run ended cleanly ("ended", "quiet", "quiet_waiting"). */
+  endReason?: RunEndReason | string;
+  /** True when a good follow-up turn's fast-forward push to an open PR was rejected. */
+  pushRefused?: boolean;
+  /** Coordination layer 1: the run this run queued behind (display and carry-over). */
+  afterRun?: string;
+  /** Coordination layer 1: the busy decision that started this run. */
+  busyChoice?: BusyChoice | string;
+  /** Coordination layer 2: number of active overlap pairs with strong_count >= 1. */
+  overlapCount?: number;
+  /** Coordination layer 3: the contest this run belongs to. */
+  contestId?: string;
+  /** Coordination layer 3: "A", "B", "C" for entries; "J" for the reviewer. */
+  contestLabel?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+/** Why an interactive run ended cleanly (runnerwire.RunResult.EndReason). */
+export type RunEndReason = "" | "ended" | "quiet" | "quiet_waiting";
+
+// ---- Coordination layers 1 & 2 (mirrors internal/runnerwire/coordination.go).
+
+/** What to do when a node or repo is already held by another run. */
+export type OnBusy = "" | "queue" | "takeOver" | "both" | "continue" | "skip";
+/** Busy decision persisted on a started run (runs.busy_choice). */
+export type BusyChoice = "" | "queue" | "takeOver" | "both";
+/** Server-offered busy choice values. */
+export type BusyOption = "queue" | "takeOver" | "both" | "continue" | "skip";
+
+/** Maximum visible holders returned or named in holderIds (runnerwire.MaxHolderIDs). */
+export const MAX_HOLDER_IDS = 8;
+
+/** One visible unfinished run holding a node or repository (runnerwire.RunHolder). */
+export interface RunHolder {
+  runId: string;
+  title: string;
+  agent: string;
+  model: string;
+  mode?: RunMode | string;
+  status: RunStatus | string;
+  waiting?: boolean;
+  since: string;
+  by?: string;
+  nodeId?: string;
+  repoName?: string;
+  mayStop: boolean;
+  sameNode?: boolean;
+}
+
+/** What `onBusy: "continue"` will continue into (runnerwire.BusyContinue). */
+export interface BusyContinue {
+  runId: string;
+  agent: string;
+  model: string;
+  openPR: boolean;
+}
+
+/** One repo's busy state inside a group busy refusal or global preflight. */
+export interface BusyRepo {
+  repoId: string;
+  holders: RunHolder[] | null;
+  others: number;
+  choices?: (BusyOption | string)[] | null;
+  continue?: BusyContinue | null;
+}
+
+/** 409 BUSY payload and GET /api/runs/busy response (runnerwire.BusyResponse). */
+export interface BusyResponse {
+  holders: RunHolder[] | null;
+  others: number;
+  choices: (BusyOption | string)[] | null;
+  continue?: BusyContinue | null;
+  /** Group starts carry per-repo busy details here. */
+  repos?: BusyRepo[] | null;
+}
+
+/** GET /api/global-runs/busy response. */
+export interface GlobalBusyResponse {
+  repos: BusyRepo[] | null;
+}
+
+/** One file-overlap pair returned by GET /api/(global-)?runs/:id/overlaps. */
+export interface RunOverlap {
+  runId?: string;
+  title?: string;
+  nodeId?: string;
+  agent?: string;
+  status?: RunStatus | string;
+  mine?: boolean;
+  hidden: boolean;
+  paths?: string[] | null;
+  pathCount?: number;
+  strongCount?: number;
+  since: string;
+}
+
+export interface RunOverlapsResponse {
+  overlaps: RunOverlap[] | null;
+}
+
+/** Raised when a start endpoint answers 409 with code "BUSY". */
+export class BusyError extends Error {
+  status: number;
+  code: string;
+  busy: BusyResponse;
+  constructor(message: string, busy: BusyResponse, status = 409, code = "BUSY") {
+    super(message);
+    this.name = "BusyError";
+    this.status = status;
+    this.code = code;
+    this.busy = busy;
+  }
+}
+
+/** Extracts a BusyResponse from a parsed JSON error body. */
+export function parseBusyResponse(parsed: Record<string, unknown>): BusyResponse {
+  const holders = Array.isArray(parsed.holders) ? (parsed.holders as RunHolder[]) : [];
+  const others = typeof parsed.others === "number" && Number.isFinite(parsed.others) ? parsed.others : 0;
+  const choices = Array.isArray(parsed.choices) ? (parsed.choices as string[]) : [];
+  const busy: BusyResponse = { holders, others, choices };
+  if (parsed.continue && typeof parsed.continue === "object" && !Array.isArray(parsed.continue)) {
+    busy.continue = parsed.continue as BusyContinue;
+  }
+  if (Array.isArray(parsed.repos)) {
+    busy.repos = parsed.repos as BusyRepo[];
+  }
+  return busy;
+}
+
+/** Returns a BusyError when a 409 JSON body carries code "BUSY", else null. */
+export function busyErrorFromBody(status: number, parsed: Record<string, unknown>): BusyError | null {
+  if (status !== 409 || parsed.code !== "BUSY") return null;
+  const message =
+    (typeof parsed.error === "string" && parsed.error) ||
+    (typeof parsed.message === "string" && parsed.message) ||
+    "BUSY";
+  return new BusyError(message, parseBusyResponse(parsed), status, "BUSY");
+}
+
+/** Unwraps either a bare Run or a take-over `{run, stopped}` 201 payload. */
+export function unwrapStartedRun(body: Run | { run: Run; stopped?: string[] }): Run {
+  return "run" in body && body.run ? body.run : (body as Run);
 }
 
 /** Mirrors runnerwire.RoleSettings: one owner's concurrency and budget for a
@@ -312,7 +466,7 @@ export interface RunMergeRequest {
 // ---- Agent workspace (phase 1). Mirrors internal/runnerwire/workspace.go.
 
 export type RunWorkspaceState = "" | "merged_local" | "discarded";
-export type WorkspaceActionKind = "merge_local" | "discard";
+export type WorkspaceActionKind = "merge_local" | "discard" | "open_pr";
 export type WorkspaceActionStatus = "pending" | "done" | "failed" | "expired";
 
 /** Why the hub will not offer an action now (RunWorkspaceView gates). */
@@ -329,6 +483,7 @@ export const WORKSPACE_GATE_CODES = [
   "actions_off",
   "offline",
   "in_use",
+  "continued",
 ] as const;
 export type WorkspaceGateCode = (typeof WORKSPACE_GATE_CODES)[number];
 
@@ -588,6 +743,10 @@ export interface CreateRunRequest {
    * who does not write code (implement runs only). Lifts no gate: a run a
    * gate blocks still needs `override`. */
   simple?: boolean;
+  /** Coordination layer 1: what to do if the node or repo is already busy. */
+  onBusy?: OnBusy;
+  /** Coordination layer 1: visible holder ids the person saw (for takeOver). */
+  holderIds?: string[];
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.
@@ -695,7 +854,7 @@ export function pipelineEnded(status: string | undefined): boolean {
   return Boolean(status) && status !== "running" && status !== "waiting_human";
 }
 
-export type RunKind = "" | "review" | "revise" | "plan";
+export type RunKind = "" | "review" | "revise" | "plan" | "compare";
 export type FailureKind =
   | "rate_limit"
   | "quota"
@@ -781,9 +940,60 @@ export function forgetRunWorkspace(runId: string): void {
   forgetReads(`${workspacePath(runId)}/`);
 }
 
+/** Like req(), but turns 409 BUSY into BusyError (preserving ConflictError,
+ * AuthError and RequestError for every other refusal). */
+export async function runStartReq<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await send(url, init);
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const busy = busyErrorFromBody(res.status, body);
+    if (busy) throw busy;
+    throw new ConflictError(
+      typeof body.diskRev === "string" ? body.diskRev : "",
+      typeof body.diskContent === "string" ? body.diskContent : "",
+      typeof body.error === "string" ? body.error : "",
+      typeof body.code === "string" ? body.code : "",
+      body && typeof body === "object" ? body : {},
+    );
+  }
+  if (!res.ok) {
+    let msg = `${res.status}`;
+    let code = "";
+    try {
+      const body = (await res.json()) as Record<string, unknown>;
+      if (typeof body.error === "string" && body.error) msg = body.error;
+      if (typeof body.code === "string") code = body.code;
+    } catch {
+      /* keep status text */
+    }
+    if (res.status === 403) throw new AuthError(403, msg, code);
+    throw new RequestError(res.status, msg, code);
+  }
+  return (await res.json()) as T;
+}
+
 export const runsApi = {
-  createRun: (body: CreateRunRequest) =>
-    req<Run>("/api/runs", { method: "POST", body: JSON.stringify(body) }),
+  createRun: async (body: CreateRunRequest): Promise<Run> => {
+    const res = await runStartReq<Run | { run: Run; stopped?: string[] }>("/api/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return unwrapStartedRun(res);
+  },
+  /** Coordination layer 1 preflight: who currently holds this repo / node. */
+  getRunBusy: (params: { runnerId: string; repoId: string; nodeId?: string }): Promise<BusyResponse> => {
+    const query = new URLSearchParams({ runnerId: params.runnerId, repoId: params.repoId });
+    if (params.nodeId) query.set("nodeId", params.nodeId);
+    return req<BusyResponse>(`/api/runs/busy?${query.toString()}`);
+  },
+  /** Coordination layer 2: active file overlaps for a node or global run. */
+  getRunOverlaps: (id: string) => req<RunOverlapsResponse>(`${runPath(id)}/overlaps`),
+  /** Gracefully ends a running interactive run and publishes/keeps its work. */
+  endRun: async (id: string): Promise<Run> => {
+    const run = await req<Run>(`${runPath(id)}/end`, { method: "POST" });
+    rememberGlobalRuns([run]);
+    return run;
+  },
   listRuns: (nodeId: string) =>
     req<RunListResponse>(`/api/runs?nodeId=${encodeURIComponent(nodeId)}`),
   /** The project's most recent runs (the hub caps the list at 50). */

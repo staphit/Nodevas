@@ -97,6 +97,36 @@ type RunEnv struct {
 	// Version is the CLI's `--version` line as the runner detected it; ""
 	// when unknown. OpenCode reads it (1.x and 2.x take different commands).
 	Version string
+	// SessionID is a runner-chosen session UUID passed to an interactive CLI
+	// that accepts one at start (e.g. Claude --session-id), so the runner can
+	// resume it or tail its transcript. Never supplied by the hub.
+	SessionID string
+	// Resume is a runner-verified session ID from work.json to resume on a
+	// follow-up turn. Never supplied by the hub.
+	Resume string
+}
+
+// SessionReporter is optionally implemented by a Parser that captures the
+// CLI's own session ID from its output stream.
+type SessionReporter interface {
+	Session() string
+}
+
+// Resumer is optionally implemented by an Adapter that can resume an earlier
+// CLI session on a follow-up turn (using RunEnv.Resume).
+type Resumer interface {
+	SupportsResume(interactive bool) bool
+}
+
+// ContinueInput holds the context for building a follow-up turn's fallback
+// prompt section when CLI session resume is not used.
+type ContinueInput struct {
+	Branch       string
+	Base         string
+	PriorTask    string
+	PriorSummary string
+	PRURL        string
+	Message      string
 }
 
 // MCPServer is a stdio MCP server: a command and its arguments.

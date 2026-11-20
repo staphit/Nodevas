@@ -21,6 +21,10 @@ export interface RunnerAgent {
   /** On its machine but not signed in: not installed (usable) until someone
    * signs in there. Only for a CLI that can say so without a run. */
   signedOut?: boolean;
+  /** Whether this CLI supports interactive (PTY) runs. */
+  interactive?: boolean;
+  /** Whether this CLI would show a folder-trust screen for a new worktree. */
+  untrusted?: boolean;
 }
 
 export interface RunnerRepo {
@@ -45,6 +49,12 @@ export interface AutoAcceptPolicy {
   agents?: string[] | null;
   /** "" (headless) and/or "interactive"; empty means headless only. */
   modes?: string[] | null;
+  /** Auto-accept runs even when the agent may run arbitrary shell commands. */
+  allowShell?: boolean;
+  /** The dispatcher may type into an auto-accepted interactive run's terminal. */
+  allowRemoteTyping?: boolean;
+  /** Auto-accept verify jobs (the repo's own test command). */
+  allowVerify?: boolean;
 }
 
 export interface RunnerInfo {
@@ -165,6 +175,12 @@ export const CAP_REMOTE_SETTINGS = "remote-settings";
  * only. */
 export const CAP_REPO_ADMIN = "repo-admin";
 export const CAP_APP_ACCEPT = "app-accept";
+/** Follow-up, End, view-only, work registry and PR-update rules (runnerwire.CapContinue). */
+export const CAP_CONTINUE = "continue";
+/** Runner reports touched files for overlap detection (runnerwire.CapTouched). */
+export const CAP_TOUCHED = "touched";
+/** Coordinated node runs, contests, compare jobs and open_pr (runnerwire.CapCoord). */
+export const CAP_COORD = "coord";
 
 /** Mirrors the extended runnerwire.SettingsRequest: PUT
  * /api/runners/:id/settings. Only maxConcurrent reaches a classic runner;

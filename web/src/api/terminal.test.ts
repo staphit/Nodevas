@@ -99,6 +99,38 @@ describe("connectTerminal", () => {
     expect(other.sendInput("x")).toBe(false);
   });
 
+  it("starts and stays read-only when viewOnly is set, and switches on setViewOnly", () => {
+    const h = handlers();
+    const conn = connectTerminal("run1", "p", h, { viewOnly: true, resizeDelayMs: 50 });
+    conn.resize(100, 30);
+    vi.advanceTimersByTime(50);
+
+    const first = FakeWebSocket.last();
+    first.serverOpen();
+    expect(h.onReadonly).toHaveBeenLastCalledWith(true);
+    expect(conn.sendInput("ls\r")).toBe(false);
+    expect(first.controls()).toEqual([]);
+
+    // Stays read-only across reconnects.
+    first.serverClose();
+    vi.advanceTimersByTime(1_000);
+    const second = FakeWebSocket.last();
+    second.serverOpen();
+    expect(h.onReadonly).toHaveBeenLastCalledWith(true);
+    expect(conn.sendInput("x")).toBe(false);
+
+    // Live flip via setViewOnly on an initially writable connection.
+    const h2 = handlers();
+    const writable = connectTerminal("run2", "p", h2);
+    const sock2 = FakeWebSocket.last();
+    sock2.serverOpen();
+    expect(h2.onReadonly).toHaveBeenLastCalledWith(false);
+    expect(writable.sendInput("ok")).toBe(true);
+    writable.setViewOnly(true);
+    expect(h2.onReadonly).toHaveBeenLastCalledWith(true);
+    expect(writable.sendInput("nope")).toBe(false);
+  });
+
   it("debounces resizes, clamps them and skips repeats", () => {
     const conn = connectTerminal("run1", "p", handlers(), { resizeDelayMs: 100 });
     const socket = FakeWebSocket.last();

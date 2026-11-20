@@ -66,4 +66,19 @@ func TestWorkspaceContract(t *testing.T) {
 	if strings.Contains(string(raw), "workspace") {
 		t.Fatalf("a plain run mentions the workspace: %s", raw)
 	}
+
+	// Follow-up WorkRoot and contest open_pr outcome PRURL round-trip.
+	if WorkspaceGateContinued != "continued" || WorkspaceOpenPR != "open_pr" {
+		t.Fatal("workspace continue/open_pr constants changed")
+	}
+	job := WorkspaceActionJob{ID: "a1", RunID: "r2", Action: WorkspaceOpenPR, WorkRoot: "r1"}
+	rawJob, err := json.Marshal(job)
+	if err != nil || !strings.Contains(string(rawJob), `"workRoot":"r1"`) || !strings.Contains(string(rawJob), `"action":"open_pr"`) {
+		t.Fatalf("WorkspaceActionJob = %s, %v", rawJob, err)
+	}
+	outcome := WorkspaceOutcome{ID: "a1", RunID: "r2", Action: WorkspaceOpenPR, PRURL: "https://github.com/org/repo/pull/7"}
+	rawOut, err := json.Marshal(outcome)
+	if err != nil || !strings.Contains(string(rawOut), `"prUrl":"https://github.com/org/repo/pull/7"`) {
+		t.Fatalf("WorkspaceOutcome = %s, %v", rawOut, err)
+	}
 }

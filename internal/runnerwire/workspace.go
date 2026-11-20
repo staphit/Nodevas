@@ -27,6 +27,7 @@ const (
 
 	WorkspaceMergeLocal = "merge_local"
 	WorkspaceDiscard    = "discard"
+	WorkspaceOpenPR     = "open_pr"
 
 	// Action statuses (RunWorkspaceAction.Status).
 	WorkspacePending = "pending"
@@ -88,6 +89,9 @@ const (
 	// WorkspaceGateInUse: another unfinished run works on the same PR or
 	// branch (a revise or review run, a later pipeline stage).
 	WorkspaceGateInUse = "in_use"
+	// WorkspaceGateContinued: this run has a non-withdrawn follow-up turn;
+	// workspace actions apply to the latest turn only.
+	WorkspaceGateContinued = "continued"
 )
 
 // Merge modes (RunWorkspaceView.Merge.Mode).
@@ -116,6 +120,9 @@ type WorkspaceActionJob struct {
 	// commit the owner saw and merges; for discard the commit that may go
 	// with the branch (commits past it that are on no other ref stop it).
 	HeadSHA string `json:"headSha,omitempty"`
+	// WorkRoot is the root run ID for a follow-up chain whose worktree lives
+	// under worktrees/<workRoot>.
+	WorkRoot string `json:"workRoot,omitempty"`
 }
 
 // WorkspaceOutcome is Envelope.WorkspaceResult. Code "" means done.
@@ -127,6 +134,7 @@ type WorkspaceOutcome struct {
 	// Error is English, at most MaxWorkspaceReason.
 	Error           string `json:"error,omitempty"`
 	MergeCommit     string `json:"mergeCommit,omitempty"`
+	PRURL           string `json:"prUrl,omitempty"`
 	WorktreeRemoved bool   `json:"worktreeRemoved,omitempty"`
 	BranchDeleted   bool   `json:"branchDeleted,omitempty"`
 	PRClosed        bool   `json:"prClosed,omitempty"`

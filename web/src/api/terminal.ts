@@ -31,6 +31,9 @@ export interface TerminalHandlers {
 export interface TerminalOptions {
   /** The run is already final: attach once for the scrollback, never retry. */
   final?: boolean;
+  /** The runner accepted this run without remote typing: start read-only
+   * immediately and stay read-only across reconnects. */
+  viewOnly?: boolean;
   /** How long a resize waits for the next one before it is sent. */
   resizeDelayMs?: number;
 }
@@ -42,6 +45,8 @@ export interface TerminalConnection {
   resize: (cols: number, rows: number) => void;
   /** The run reached a final status: stop reconnecting. */
   setFinal: (final: boolean) => void;
+  /** The run was accepted view-only: switch to read-only immediately. */
+  setViewOnly: (viewOnly: boolean) => void;
   close: () => void;
 }
 
@@ -78,7 +83,8 @@ export function connectTerminal(
   let ws: WebSocket | null = null;
   let closed = false;
   let final = Boolean(options.final);
-  let readonly = false;
+  let viewOnly = Boolean(options.viewOnly);
+  let readonly = viewOnly;
   let retry = 500;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -108,8 +114,8 @@ export function connectTerminal(
       if (ws !== socket) return;
       retry = 500;
       sentSize = "";
-      readonly = false;
-      handlers.onReadonly?.(false);
+      readonly = viewOnly;
+      handlers.onReadonly?.(readonly);
       handlers.onReset();
       setState("open");
       sendSize();
@@ -188,6 +194,13 @@ export function connectTerminal(
         clearTimeout(retryTimer);
         retryTimer = null;
         if (!ws) setState("closed");
+      }
+    },
+    setViewOnly: (next) => {
+      viewOnly = viewOnly || next;
+      if (viewOnly && !readonly) {
+        readonly = true;
+        handlers.onReadonly?.(true);
       }
     },
     close: () => {

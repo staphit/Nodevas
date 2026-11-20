@@ -1249,6 +1249,125 @@ CREATE TABLE IF NOT EXISTS run_plan_drafts (
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS failure_code TEXT COLLATE "C" NOT NULL DEFAULT '';
 `,
 	},
+	{
+		// Follow-up turns, view-only interactive sessions, stored reset_at,
+		// interactive end reason and open-PR push refusal (§6, §7, §13).
+		name: "0043_run_continue",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS continue_of TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS work_root   TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS view_only   BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS reset_at    TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS end_reason  TEXT NOT NULL DEFAULT ''
+    CHECK (end_reason IN ('', 'ended', 'quiet', 'quiet_waiting'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS push_refused BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS runs_one_continuation ON runs (continue_of)
+    WHERE continue_of <> '' AND NOT (status IN ('cancelled', 'declined') AND started_at = '');
+CREATE INDEX IF NOT EXISTS runs_work_root ON runs (work_root) WHERE work_root <> '';
+`,
+	},
+	{
+		// Multi-repo global agent fan-out groups (§10.2, §13).
+		name: "0044_run_groups",
+		stmt: `
+CREATE TABLE IF NOT EXISTS run_groups (
+    id              TEXT COLLATE "C" PRIMARY KEY,
+    owner_id        TEXT NOT NULL,
+    runner_id       TEXT NOT NULL,
+    created_by      TEXT NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    title           TEXT NOT NULL,
+    agent           TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    no_pr           BOOLEAN NOT NULL,
+    repo_count      INTEGER NOT NULL,
+    held_until      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS group_id TEXT COLLATE "C" NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS runs_group ON runs (group_id, created_at) WHERE group_id <> '';
+`,
+	},
+	{
+		// Three-layer coordination (§C.5): busy queue/holders, touched-file
+		// overlaps, contests (比稿), and open_pr workspace action.
+		name: "0045_run_coordination",
+		stmt: `
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS after_run TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS busy_choice TEXT NOT NULL DEFAULT ''
+    CHECK (busy_choice IN ('', 'queue', 'takeOver', 'both'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS repo_key TEXT COLLATE "C" NOT NULL DEFAULT ''
+    CHECK (repo_key = '' OR repo_key ~ '^[0-9a-f]{32}$');
+CREATE INDEX IF NOT EXISTS runs_after ON runs (after_run) WHERE after_run <> '';
+CREATE INDEX IF NOT EXISTS runs_busy_waiting ON runs (runner_id)
+    WHERE status = 'queued' AND busy_choice IN ('queue', 'takeOver');
+CREATE INDEX IF NOT EXISTS runs_active_node ON runs (project, node_id)
+    WHERE status IN ('queued', 'offered', 'running') AND NOT is_global;
+CREATE INDEX IF NOT EXISTS runs_active_repo ON runs (repo_key)
+    WHERE repo_key <> '' AND status IN ('queued', 'offered', 'running');
+
+CREATE TABLE IF NOT EXISTS run_touched_files (
+    run_id   TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    path     TEXT COLLATE "C" NOT NULL CHECK (length(path) BETWEEN 1 AND 1024),
+    add_only BOOLEAN NOT NULL DEFAULT FALSE,
+    at       TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (run_id, path)
+);
+CREATE INDEX IF NOT EXISTS run_touched_files_path ON run_touched_files (path);
+CREATE TABLE IF NOT EXISTS run_overlaps (
+    run_a        TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    run_b        TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    paths        TEXT NOT NULL DEFAULT '[]',
+    path_count   INTEGER NOT NULL DEFAULT 0,
+    strong_count INTEGER NOT NULL DEFAULT 0,
+    cross_member BOOLEAN NOT NULL DEFAULT FALSE,
+    mailed_a     BOOLEAN NOT NULL DEFAULT FALSE,
+    mailed_b     BOOLEAN NOT NULL DEFAULT FALSE,
+    first_at     TEXT COLLATE "C" NOT NULL,
+    updated_at   TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (run_a, run_b),
+    CHECK (run_a < run_b)
+);
+CREATE INDEX IF NOT EXISTS run_overlaps_b ON run_overlaps (run_b);
+
+CREATE TABLE IF NOT EXISTS run_contests (
+    id              TEXT COLLATE "C" PRIMARY KEY,
+    owner_id        TEXT NOT NULL,
+    created_by      TEXT NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    project         TEXT COLLATE "C" NOT NULL DEFAULT '',
+    node_id         TEXT COLLATE "C" NOT NULL DEFAULT '',
+    is_global       BOOLEAN NOT NULL DEFAULT FALSE,
+    title           TEXT NOT NULL,
+    entry_count     INTEGER NOT NULL CHECK (entry_count BETWEEN 2 AND 3),
+    reviewer        TEXT NOT NULL DEFAULT '',
+    state           TEXT NOT NULL DEFAULT 'running'
+        CHECK (state IN ('running', 'judging', 'ready', 'decided', 'cancelled')),
+    judge_run_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    scores          TEXT NOT NULL DEFAULT '',
+    winner_run_id   TEXT COLLATE "C" NOT NULL DEFAULT '',
+    decided_by      TEXT NOT NULL DEFAULT '',
+    decided_at      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at      TEXT COLLATE "C" NOT NULL,
+    CHECK (is_global = (project = '' AND node_id = ''))
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS contest_id    TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS contest_label TEXT NOT NULL DEFAULT ''
+    CHECK (contest_label IN ('', 'A', 'B', 'C', 'J'));
+CREATE INDEX IF NOT EXISTS runs_contest ON runs (contest_id) WHERE contest_id <> '';
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_contest_shape;
+ALTER TABLE runs ADD CONSTRAINT runs_contest_shape CHECK (contest_id = '' OR
+    (mode = '' AND pipeline_id = '' AND retry_of = ''
+     AND (kind = '' OR (kind = 'compare' AND contest_label = 'J'))));
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_global_shape;
+ALTER TABLE runs ADD CONSTRAINT runs_global_shape CHECK (NOT is_global OR
+    (project = '' AND node_id = '' AND pipeline_id = '' AND retry_of = '' AND role = '' AND branch_slug <> ''
+     AND (kind = '' OR (kind = 'compare' AND contest_id <> ''))));
+ALTER TABLE run_workspace_actions DROP CONSTRAINT IF EXISTS run_workspace_actions_action_check;
+ALTER TABLE run_workspace_actions ADD CONSTRAINT run_workspace_actions_action_check
+    CHECK (action IN ('merge_local', 'discard', 'open_pr'));
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

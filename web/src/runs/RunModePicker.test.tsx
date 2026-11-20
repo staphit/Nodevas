@@ -61,7 +61,7 @@ const created: Run = {
   createdAt: "2026-10-24T08:00:00Z",
 };
 
-const NOTE = /Opens the agent's own terminal UI on the runner/;
+const NOTE = /Runs the agent's own terminal on the runner/;
 
 beforeEach(() => {
   viewer.current = alice;

@@ -96,6 +96,13 @@ type NewPipeline struct {
 
 // CreatePipeline records a running pipeline at round 1.
 func (s *Store) CreatePipeline(ctx context.Context, in NewPipeline) (PipelineRecord, error) {
+	return s.createPipelineWith(ctx, s.db, in)
+}
+
+// createPipelineWith inserts a running pipeline using q (*db.DB or *sql.Tx)
+// and reads the created row back through q so callers inside a busy
+// transaction never touch the reader pool or deadlock the single writer.
+func (s *Store) createPipelineWith(ctx context.Context, q querier, in NewPipeline) (PipelineRecord, error) {
 	if in.OwnerID == "" || in.CreatedBy == "" || in.Project == "" || in.NodeID == "" {
 		return PipelineRecord{}, invalidf("missing pipeline field", "缺少管線欄位")
 	}
@@ -123,7 +130,7 @@ func (s *Store) CreatePipeline(ctx context.Context, in NewPipeline) (PipelineRec
 		stages = string(rawConfig)
 	}
 	now := s.stamp()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := q.ExecContext(ctx, `
 INSERT INTO run_pipelines (id, owner_id, created_by, project, node_id, pipeline, fallbacks,
                            job_prompt, prompt, round, status, created_at, updated_at, stages, phase)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
@@ -131,19 +138,23 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 		in.JobPrompt, in.Prompt, runnerwire.PipelineRunning, now, now, stages, in.Phase); err != nil {
 		return PipelineRecord{}, err
 	}
-	return s.Pipeline(ctx, id)
-}
-
-// Pipeline returns one pipeline with its runs' IDs, oldest first.
-func (s *Store) Pipeline(ctx context.Context, id string) (PipelineRecord, error) {
-	var p PipelineRecord
-	var raw, fallbacks, stages, testFiles, guard, tries string
-	var round int64
-	err := s.db.QueryRowContext(ctx, `
+	p, err := scanPipelineRow(q.QueryRowContext(ctx, `
 SELECT id, owner_id, created_by, project, node_id, pipeline, fallbacks, job_prompt, prompt,
        branch, pr_url, round, status, reason, awaiting, created_at, updated_at,
        stages, phase, test_files, guard, tries
-FROM run_pipelines WHERE id = ?`, id).Scan(
+FROM run_pipelines WHERE id = ?`, id))
+	if err != nil {
+		return PipelineRecord{}, err
+	}
+	p.RunIDs = []string{}
+	return p, nil
+}
+
+func scanPipelineRow(row interface{ Scan(...any) error }) (PipelineRecord, error) {
+	var p PipelineRecord
+	var raw, fallbacks, stages, testFiles, guard, tries string
+	var round int64
+	err := row.Scan(
 		&p.ID, &p.OwnerID, &p.CreatedBy, &p.Project, &p.NodeID, &raw, &fallbacks, &p.JobPrompt, &p.Prompt,
 		&p.Branch, &p.PRURL, &round, &p.Status, &p.Reason, &p.Awaiting, &p.CreatedAt, &p.UpdatedAt,
 		&stages, &p.Phase, &testFiles, &guard, &tries)
@@ -179,6 +190,19 @@ FROM run_pipelines WHERE id = ?`, id).Scan(
 	}
 	if p.Status == runnerwire.PipelineRunning && p.Awaiting == AwaitingHuman {
 		p.Status = runnerwire.PipelineWaitingHuman
+	}
+	return p, nil
+}
+
+// Pipeline returns one pipeline with its runs' IDs, oldest first.
+func (s *Store) Pipeline(ctx context.Context, id string) (PipelineRecord, error) {
+	p, err := scanPipelineRow(s.db.QueryRowContext(ctx, `
+SELECT id, owner_id, created_by, project, node_id, pipeline, fallbacks, job_prompt, prompt,
+       branch, pr_url, round, status, reason, awaiting, created_at, updated_at,
+       stages, phase, test_files, guard, tries
+FROM run_pipelines WHERE id = ?`, id))
+	if err != nil {
+		return PipelineRecord{}, err
 	}
 	votes, err := s.Votes(ctx, id)
 	if err != nil {

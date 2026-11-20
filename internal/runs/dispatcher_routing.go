@@ -44,6 +44,7 @@ func (d *Dispatcher) afterEnd(ctx context.Context, r Record, notified bool) {
 	if !runnerwire.RunFinal(r.Status) {
 		return
 	}
+	defer d.ended(ctx, r)
 	// A global agent has no fallback chain, no wait for a usage limit and no
 	// pipeline: it just ends, its partial work on its branch (global.go).
 	if r.Global {
@@ -70,6 +71,9 @@ func (d *Dispatcher) afterEnd(ctx context.Context, r Record, notified bool) {
 // fallback queues the run again on the next usable entry of its chain. It
 // reports whether it did; if not, the reason is noted on the run.
 func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
+	if r.ContestID != "" {
+		return false // contest entries never fall back (§C.4.1)
+	}
 	if r.PipelineID != "" {
 		p, err := d.store.Pipeline(ctx, r.PipelineID)
 		if err != nil || p.Status != runnerwire.PipelineRunning {

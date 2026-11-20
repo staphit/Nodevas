@@ -18,9 +18,14 @@ const (
 	// CapGlobalRunsOn: its owner allows global runs (runner setting
 	// globalRuns, on unless turned off).
 	CapGlobalRunsOn = "global-runs-on"
+	// CapContinue: the runner supports follow-up turns, graceful End,
+	// view-only reporting, work.json and open-PR turn updates.
+	CapContinue = "continue"
 
 	// MaxGlobalTaskBytes caps the whole task, UTF-8 bytes after trimming.
 	MaxGlobalTaskBytes = 32 << 10
+	// MaxFollowUpBytes caps a follow-up message.
+	MaxFollowUpBytes = MaxGlobalTaskBytes
 	// MaxGlobalTitleRunes caps its first line, the run's title.
 	MaxGlobalTitleRunes = 120
 	// MaxSlugBytes caps a branch slug.
@@ -28,6 +33,9 @@ const (
 	// DefaultGlobalSlug names the branch of a task whose title gives no
 	// ASCII letters or digits.
 	DefaultGlobalSlug = "task"
+	// MinGroupRepos and MaxGroupRepos bound a multi-repo group start.
+	MinGroupRepos = 2
+	MaxGroupRepos = 30
 
 	// Realtime, sent to the run's dispatcher and runner owner accounts only
 	// (never a project room); the id is the run's.
@@ -134,6 +142,93 @@ type CreateGlobalRunRequest struct {
 	// Simple adds the hub's fixed instruction for a person who is not a
 	// programmer (runs.SimpleInstruction) to the task. It lifts no gate.
 	Simple bool `json:"simple,omitempty"`
+	// Coordination (§C.2.2): how to handle an active holder, and the visible
+	// holder IDs the person saw (takeOver / continue).
+	OnBusy    string   `json:"onBusy,omitempty"`
+	HolderIDs []string `json:"holderIds,omitempty"`
+}
+
+// FollowUpRequest is POST /api/global-runs/:id/follow-up.
+type FollowUpRequest struct {
+	Message string `json:"message"`
+	Mode    string `json:"mode,omitempty"`
+}
+
+// RunThreadResponse is GET /api/global-runs/:id/thread (oldest first, <= 50).
+type RunThreadResponse struct {
+	Runs []Run `json:"runs"`
+}
+
+// CreateGlobalGroupRequest is POST /api/global-runs/groups.
+type CreateGlobalGroupRequest struct {
+	RunnerID  string   `json:"runnerId"`
+	RepoIDs   []string `json:"repoIds"`
+	Agent     string   `json:"agent"`
+	Model     string   `json:"model,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
+	Base      string   `json:"base,omitempty"`
+	Task      string   `json:"task"`
+	Slug      string   `json:"slug,omitempty"`
+	OpenPR    bool     `json:"openPR,omitempty"`
+	Simple    bool     `json:"simple,omitempty"`
+	OnBusy    string   `json:"onBusy,omitempty"`
+	HolderIDs []string `json:"holderIds,omitempty"`
+}
+
+// ValidGroupRepoIDs reports whether repoIDs holds between MinGroupRepos and
+// MaxGroupRepos distinct, non-empty repository IDs.
+func ValidGroupRepoIDs(repoIDs []string) bool {
+	if len(repoIDs) < MinGroupRepos || len(repoIDs) > MaxGroupRepos {
+		return false
+	}
+	seen := make(map[string]bool, len(repoIDs))
+	for _, id := range repoIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
+// RunGroup is a multi-repo fan-out group as the HTTP API returns it.
+type RunGroup struct {
+	ID            string `json:"id"`
+	RunnerID      string `json:"runnerId"`
+	Title         string `json:"title"`
+	Agent         string `json:"agent"`
+	Model         string `json:"model"`
+	NoPR          bool   `json:"noPR,omitempty"`
+	RepoCount     int    `json:"repoCount"`
+	HeldUntil     string `json:"heldUntil,omitempty"`
+	CreatedBy     string `json:"createdBy"`
+	CreatedByName string `json:"createdByName"`
+	CreatedAt     string `json:"createdAt"`
+}
+
+// GlobalGroupResponse is POST/GET /api/global-runs/groups(/:id).
+type GlobalGroupResponse struct {
+	Group RunGroup `json:"group"`
+	Runs  []Run    `json:"runs"`
+}
+
+// GroupFollowUpRequest is POST /api/global-runs/groups/:id/follow-up.
+type GroupFollowUpRequest struct {
+	Message string `json:"message"`
+	Only    string `json:"only,omitempty"` // "failed" | "all"
+}
+
+// GroupFollowUpSkipped names one group member a group follow-up skipped.
+type GroupFollowUpSkipped struct {
+	RunID string `json:"runId"`
+	Code  string `json:"code"`
+}
+
+// GroupFollowUpResponse is POST /api/global-runs/groups/:id/follow-up.
+type GroupFollowUpResponse struct {
+	Started []Run                  `json:"started"`
+	Skipped []GroupFollowUpSkipped `json:"skipped"`
 }
 
 // GlobalRunsResponse is the body of GET /api/global-runs: the viewer's

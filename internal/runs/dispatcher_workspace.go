@@ -10,10 +10,14 @@ import (
 
 // workspaceVerb is an action's word in audit names: run.workspace.<verb>.*.
 func workspaceVerb(action string) string {
-	if action == runnerwire.WorkspaceMergeLocal {
+	switch action {
+	case runnerwire.WorkspaceMergeLocal:
 		return "merge"
+	case runnerwire.WorkspaceOpenPR:
+		return "open_pr"
+	default:
+		return "discard"
 	}
-	return "discard"
 }
 
 // WorkspaceRunnerOf is what the gates need to know of r's runner now, and

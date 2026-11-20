@@ -19,6 +19,10 @@ const FAMILIES = [
   "globalAgents.simple.",
   "result.",
   "simple.",
+  "runDialog.simple.",
+  "picker.simple.",
+  "busy.simple.",
+  "overlap.simple.",
 ];
 const SINGLE_KEYS = ["start.describeHeading", "lane.emptyAskAgent", "dispatch.simpleNoChecksLocal"];
 
