@@ -409,7 +409,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
 			case runnerwire.TypeEnd:
-				c.jobs.endRun(msg.RunID)
+				c.jobs.endRun(msg.RunID, msg.NoPR)
 			case runnerwire.TypeMerge:
 				c.jobs.merge(msg.RunID, msg.Merge)
 			case runnerwire.TypeWorkspaceAction:

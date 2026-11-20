@@ -116,14 +116,16 @@ type run struct {
 	// trail is what a handoff note needs from the events (handoff.go).
 	trail handoffTrail
 
-	// Continue and interactive End (R1, R2): CLI session id captured from the
-	// parser or chosen for interactive Claude, the session id from work.json to
-	// resume on this turn, the chain's work root id, and an End that arrived
-	// before the PTY opened.
+	// Continue and interactive End (R1, R2, C3r): CLI session id captured from
+	// the parser or chosen for interactive Claude, the session id from work.json
+	// to resume on this turn, the chain's work root id, an End that arrived
+	// before the PTY opened, and whether End asked to keep the branch without
+	// opening a PR (node take-over).
 	session       string
 	resumeSession string
 	workRoot      string
 	pendingEnd    bool
+	endNoPR       bool
 
 	// watcher tracks files modified in the run's worktree while the agent runs (§C.3.1).
 	watcher *touchedWatcher
@@ -391,7 +393,11 @@ func (j *jobs) checkLocked(job *runnerwire.Job, cfg *Config) (runnerwire.Repo, s
 	if len(job.Prompt) > runnerwire.MaxPromptBytes {
 		return repo, other, "prompt is too long"
 	}
-	if reason := checkKind(job, cfg); reason != "" {
+	if job.Kind == runnerwire.JobCompare {
+		if reason := checkCompareJob(job); reason != "" {
+			return repo, other, reason
+		}
+	} else if reason := checkKind(job, cfg); reason != "" {
 		return repo, other, reason
 	}
 	if job.Kind == runnerwire.JobRevise {
@@ -505,6 +511,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	case runnerwire.JobJudge:
 		j.executeJudge(ctx, r)
 		return
+	case runnerwire.JobCompare:
+		j.executeCompare(ctx, r)
+		return
 	}
 
 	var wt Worktree
@@ -574,6 +583,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	}
 	j.mu.Lock()
 	r.publishing = true
+	if r.endNoPR {
+		r.job.NoPR = true
+	}
 	j.mu.Unlock()
 	if job.ContinueOf != "" {
 		changes, pr, result := j.publishTurn(r, wt, &workEntry, result)
@@ -1002,6 +1014,8 @@ func runPermission(cfg *Config, job runnerwire.Job, acp bool) (mode, text string
 		text = strings.Replace(text, "for a review", "for a plan", 1)
 	case runnerwire.JobJudge:
 		text = strings.Replace(text, "for a review", "for a judge", 1)
+	case runnerwire.JobCompare:
+		text = strings.Replace(text, "for a review", "for a compare", 1)
 	}
 	return mode, text
 }
@@ -1110,9 +1124,17 @@ func mcpArgs(serverFile string, job runnerwire.Job, repo runnerwire.Repo, relayT
 		"--session-name", repoName + "-" + job.Agent + "-" + slug(model) + "-" + runID,
 	}
 	// A role job is served its role's tools only (the hub's allowlist); a
-	// legacy job keeps the run toolset, exactly as before.
-	if role := roleArgs(job, relayTools...); role != nil {
+	// coordinated or compare job drops claim/status tools; a legacy job keeps
+	// the run toolset, exactly as before.
+	roleJob := job
+	if job.Coordinated && len(roleJob.Tools) > 0 {
+		roleJob.Tools = filterCoordinatedTools(roleJob.Tools)
+	}
+	if role := roleArgs(roleJob, relayTools...); role != nil {
 		return append(args, role...)
+	}
+	if job.Coordinated || job.Kind == runnerwire.JobCompare {
+		return append(args, "--toolset", "coordinated")
 	}
 	return append(args, "--toolset", "run")
 }

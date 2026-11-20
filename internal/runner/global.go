@@ -33,11 +33,24 @@ func checkGlobal(job *runnerwire.Job, cfg *Config) string {
 		}
 		return ""
 	}
-	if job.Project != "" || job.NodeID != "" || job.Kind != runnerwire.JobImplement || job.Role != "" ||
+	kindOK := job.Kind == runnerwire.JobImplement ||
+		(job.Kind == runnerwire.JobCompare && job.Contest != nil && job.Contest.ID != "")
+	if job.Project != "" || job.NodeID != "" || !kindOK || job.Role != "" ||
 		len(job.Tools) > 0 || len(job.TestFiles) > 0 || len(job.Acceptance) > 0 || job.Verify != nil ||
 		job.HandoffBranch != "" || job.Branch != "" || job.PRURL != "" || job.Review != "" ||
 		!runnerwire.ValidSlug(job.Slug) {
 		return "malformed global job"
+	}
+	if job.Contest != nil {
+		if job.Contest.ID == "" || !validContestLabel(job.Contest.Label) {
+			return "malformed global job"
+		}
+		if job.Kind == runnerwire.JobCompare && job.Contest.Label != "J" {
+			return "malformed global job"
+		}
+		if job.Kind != runnerwire.JobCompare && job.Contest.Label == "J" {
+			return "malformed global job"
+		}
 	}
 	if job.ContinueOf != "" && !validRunID.MatchString(job.ContinueOf) {
 		return "malformed global job"

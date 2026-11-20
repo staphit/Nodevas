@@ -178,7 +178,7 @@ func (j *jobs) runWorkspaceAction(ownerID string, job runnerwire.WorkspaceAction
 	}
 	j.c.logf("run %s: workspace action %s: %s asked for", job.RunID, job.ID, oneLine(job.Action))
 	outcome := j.doWorkspaceAction(ownerID, job)
-	if outcome.Code == "" {
+	if outcome.Code == "" && job.Action != runnerwire.WorkspaceOpenPR {
 		// Applied or thrown away: its preview (preview.go) ends now.
 		j.c.revokePreview(job.RunID)
 		if job.WorkRoot != "" {
@@ -263,7 +263,8 @@ func (j *jobs) doWorkspaceAction(ownerID string, job runnerwire.WorkspaceActionJ
 	if job.WorkRoot != "" && !validRunID.MatchString(job.WorkRoot) {
 		return refusedWith(runnerwire.WorkspaceErrRefused, "work root is not usable on this runner")
 	}
-	if job.Action != runnerwire.WorkspaceMergeLocal && job.Action != runnerwire.WorkspaceDiscard {
+	if job.Action != runnerwire.WorkspaceMergeLocal && job.Action != runnerwire.WorkspaceDiscard &&
+		job.Action != runnerwire.WorkspaceOpenPR {
 		return refusedWith(runnerwire.WorkspaceErrRefused, "unknown workspace action %q", job.Action)
 	}
 	repo, err := repoRoot(cfg, job.RepoID)
@@ -307,14 +308,20 @@ func (j *jobs) doWorkspaceAction(ownerID string, job runnerwire.WorkspaceActionJ
 	if other := j.sharedWith(job); other != "" {
 		return refusedWith(runnerwire.WorkspaceErrRunning, "run %s on this runner is still working on %s or its pull request", other, job.Branch)
 	}
-	if job.Action == runnerwire.WorkspaceMergeLocal {
+	switch job.Action {
+	case runnerwire.WorkspaceMergeLocal:
 		ctx, cancel := context.WithTimeout(j.ctx, workspaceMergeTimeout)
 		defer cancel()
 		return j.mergeRunLocal(ctx, job, repo, dataDir)
+	case runnerwire.WorkspaceOpenPR:
+		ctx, cancel := context.WithTimeout(j.ctx, workspaceOpenPRTimeout)
+		defer cancel()
+		return j.openPRForWorkspace(ctx, job, repo, dataDir)
+	default:
+		ctx, cancel := context.WithTimeout(j.ctx, workspaceDiscardTimeout)
+		defer cancel()
+		return j.discardRun(ctx, job, repo, dataDir)
 	}
-	ctx, cancel := context.WithTimeout(j.ctx, workspaceDiscardTimeout)
-	defer cancel()
-	return j.discardRun(ctx, job, repo, dataDir)
 }
 
 // sharedWith names another run this runner still holds that works on the

@@ -91,7 +91,7 @@ func capabilities(cfg *Config) []string {
 	if cfg.GlobalRunsOn() {
 		caps = append(caps, runnerwire.CapGlobalRunsOn)
 	}
-	caps = append(caps, runnerwire.CapContinue, runnerwire.CapTouched)
+	caps = append(caps, runnerwire.CapContinue, runnerwire.CapTouched, runnerwire.CapCoord)
 	if cfg.RemoteSettingsOn() {
 		caps = append(caps, runnerwire.CapRemoteSettings)
 	}
@@ -348,12 +348,15 @@ waitLoop:
 
 // endRun handles a TypeEnd: asks an interactive run's CLI to quit cleanly,
 // waits a grace period, then kills it if needed, keeping and publishing its
-// work as a succeeded run (§7.1). If the terminal has not opened yet,
-// pendingEnd remembers the request until it does.
-func (j *jobs) endRun(runID string) {
+// work as a succeeded run (§7.1). When noPR is true (node take-over, §C.0.8),
+// its changes are committed and kept on its branch without opening a pull
+// request. If the terminal has not opened yet, pendingEnd remembers the
+// request until it does.
+func (j *jobs) endRun(runID string, noPR ...bool) {
 	if runID == "" {
 		return
 	}
+	keepNoPR := len(noPR) > 0 && noPR[0]
 	j.mu.Lock()
 	r := j.runs[runID]
 	if r == nil || r.finish != nil || r.publishing || r.job.Mode != runnerwire.ModeInteractive {
@@ -362,6 +365,9 @@ func (j *jobs) endRun(runID string) {
 		return
 	}
 	r.pendingEnd = true
+	if keepNoPR {
+		r.endNoPR = true
+	}
 	j.mu.Unlock()
 	if s := j.terms.get(runID); s != nil {
 		j.c.logf("run %s: ending interactive session on request from the hub", runID)

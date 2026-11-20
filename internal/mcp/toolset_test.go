@@ -115,3 +115,49 @@ func TestUnknownToolsetIsRefused(t *testing.T) {
 		t.Fatalf("NewServer with toolset tiny: %v", err)
 	}
 }
+
+func TestCoordinatedToolsetDropsClaimAndStatus(t *testing.T) {
+	if !ValidToolset(ToolsetCoordinated) {
+		t.Fatalf("ValidToolset(%q) = false, want true", ToolsetCoordinated)
+	}
+	url, _ := liveServer(t)
+	coord := toolsetSession(t, url, ToolsetCoordinated)
+	names, defs := listedTools(t, coord)
+
+	dropped := []string{"claim_task", "release_task", "set_node_status", "create_subgraph"}
+	want := slices.Clone(RunTools)
+	want = slices.DeleteFunc(want, func(name string) bool { return slices.Contains(dropped, name) })
+	slices.Sort(want)
+	if !slices.Equal(names, want) {
+		t.Fatalf("coordinated toolset lists %q, want %q", names, want)
+	}
+	if !slices.Equal(slices.Sorted(slices.Values(CoordinatedTools)), want) {
+		t.Fatalf("CoordinatedTools = %q, want %q", CoordinatedTools, want)
+	}
+
+	// Definitions match the full toolset byte-for-byte.
+	_, full := listedTools(t, toolsetSession(t, url, ToolsetFull))
+	for name, def := range defs {
+		if full[name] != def {
+			t.Errorf("%s differs from the full toolset's definition", name)
+		}
+	}
+
+	// Dropped tools are refused with a clear message naming the coordinated toolset.
+	for _, name := range dropped {
+		result, err := coord.CallTool(context.Background(), &sdk.CallToolParams{Name: name, Arguments: map[string]any{}})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if text := errorText(result); !result.IsError || !strings.Contains(text, "not available") ||
+			!strings.Contains(text, "--toolset coordinated") {
+			t.Errorf("%s under the coordinated toolset: isError %v, %q", name, result.IsError, text)
+		}
+	}
+
+	// Allowed tools (read and coordination mail) remain usable.
+	var node getNodeOutput
+	if result := call(t, coord, "get_node", map[string]any{"id": "design"}, &node); result.IsError || node.ID != "design" {
+		t.Fatalf("get_node under the coordinated toolset: %s", errorText(result))
+	}
+}

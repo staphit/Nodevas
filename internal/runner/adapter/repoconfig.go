@@ -50,12 +50,12 @@ import "nodevas/internal/runnerwire"
 // Implement and revise runs work on the owner's own branches, as trusted as
 // the repository itself, and keep its config.
 
-// ReadOnly reports whether job is a read-only run: a review, a plan or a
-// judge. Its worktree is thrown away after, and its agent is told to change
-// nothing.
+// ReadOnly reports whether job is a read-only run: a review, a plan, a judge
+// or a contest comparison. Its worktree is thrown away after, and its agent is
+// told to change nothing.
 func ReadOnly(job runnerwire.Job) bool {
 	switch job.Kind {
-	case runnerwire.JobReview, runnerwire.JobPlan, runnerwire.JobJudge:
+	case runnerwire.JobReview, runnerwire.JobPlan, runnerwire.JobJudge, runnerwire.JobCompare:
 		return true
 	}
 	return false

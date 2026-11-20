@@ -23,10 +23,13 @@ const (
 	// ToolsetRun is what a runner's implement, revise, review, plan and
 	// interactive runs need.
 	ToolsetRun = "run"
+	// ToolsetCoordinated is ToolsetRun without board claim, status or
+	// subgraph-creation tools, used when multiple runs share a node (§C.2.5).
+	ToolsetCoordinated = "coordinated"
 )
 
 // Toolsets lists the valid --toolset values.
-var Toolsets = []string{ToolsetFull, ToolsetRun}
+var Toolsets = []string{ToolsetFull, ToolsetRun, ToolsetCoordinated}
 
 // RunTools is ToolsetRun's tools, and why each is there:
 //
@@ -66,6 +69,22 @@ var RunTools = []string{
 	"submit_verdict",
 }
 
+// CoordinatedTools is ToolsetCoordinated's tools: RunTools minus claim_task,
+// release_task, set_node_status and create_subgraph, so concurrent or contest
+// runs on the same node never fight over claims or move the node's status (§C.2.5).
+var CoordinatedTools = []string{
+	"get_node",
+	"create_node",
+	"link_nodes",
+	"ask_user",
+	"approve_tool",
+	"check_inbox",
+	"send_message",
+	"list_team",
+	"save_attachment",
+	"submit_verdict",
+}
+
 // ValidToolset reports whether name is a --toolset value; empty is full.
 func ValidToolset(name string) bool {
 	return name == "" || slices.Contains(Toolsets, name)
@@ -78,6 +97,8 @@ func toolsetTools(toolset string) ([]string, error) {
 		return nil, nil
 	case ToolsetRun:
 		return RunTools, nil
+	case ToolsetCoordinated:
+		return CoordinatedTools, nil
 	}
 	return nil, fmt.Errorf("toolset %q is not one this server knows: use %s",
 		toolset, strings.Join(Toolsets, " or "))

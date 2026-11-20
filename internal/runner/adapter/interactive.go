@@ -49,11 +49,20 @@ func InteractivePrompt(job runnerwire.Job, branch string) string {
 	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. The person who dispatched this run "+
 		"may be watching this terminal and may type to you.\n\n", branch)
 	b.WriteString("Rules for this run:\n")
-	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node.\n", job.NodeID)
+	if job.Coordinated {
+		b.WriteString(coordinatedReadRule(job.NodeID, false))
+	} else {
+		fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node.\n", job.NodeID)
+	}
 	b.WriteString("2. Work only inside this worktree (the current directory). Do not touch other checkouts.\n")
 	b.WriteString("3. Do not push, and do not open pull requests: the runner handles that after the session ends.\n")
-	b.WriteString("4. When you are done, report the outcome with set_node_status and say so; " +
-		"the session ends when the person quits it.\n\n")
+	if job.Coordinated {
+		b.WriteString("4. When you are done, finish with a short summary and say so; " +
+			"the person updates the board, and the session ends when the person quits it.\n\n")
+	} else {
+		b.WriteString("4. When you are done, report the outcome with set_node_status and say so; " +
+			"the session ends when the person quits it.\n\n")
+	}
 	b.WriteString("The task:\n\n")
 	b.WriteString(job.Prompt)
 	b.WriteString("\n")

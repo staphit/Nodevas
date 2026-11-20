@@ -237,6 +237,9 @@ func describeOffer(o Offer) string {
 			b.WriteString("  tests:        first runs this repository's test command (runner.json) at that base,\n" +
 				"                outside the agent's sandbox, as you\n")
 		}
+	case runnerwire.JobCompare:
+		b.WriteString("  kind:         COMPARE: scores contest entries; reads, changes no files\n")
+		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
 	case runnerwire.JobTest:
 		b.WriteString("  kind:         TEST: writes failing tests only, opens a draft pull request\n")
 	case runnerwire.JobPlan:
@@ -249,6 +252,13 @@ func describeOffer(o Offer) string {
 		}
 	default:
 		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
+		if job.Contest != nil && job.Contest.Label != "" {
+			if job.Contest.Of > 1 {
+				fmt.Fprintf(&b, "  contest:      entry %s of %d\n", terminalText(job.Contest.Label), job.Contest.Of)
+			} else {
+				fmt.Fprintf(&b, "  contest:      entry %s\n", terminalText(job.Contest.Label))
+			}
+		}
 		if job.Global {
 			root := job.RunID
 			if job.WorkRoot != "" {
@@ -264,9 +274,9 @@ func describeOffer(o Offer) string {
 				}
 				fmt.Fprintf(&b, "  follow-up:    %s\n", line)
 			}
-			if job.NoPR {
-				b.WriteString("  pull request: no (kept on this machine)\n")
-			}
+		}
+		if job.NoPR {
+			b.WriteString("  pull request: no (kept on this machine)\n")
 		}
 	}
 	fmt.Fprintf(&b, "  run:          %s\n", terminalText(job.RunID))
