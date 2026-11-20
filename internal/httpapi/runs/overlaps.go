@@ -5,12 +5,29 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/locale"
+	"nodevas/internal/runnerwire"
 )
 
-// Stub handler in Wave 0 (F1); filled by C2.
-
+// runOverlaps serves GET /api/runs/:id/overlaps and GET /api/global-runs/:id/overlaps
+// (§C.6). Both routes sit behind personOnly, and a.visible enforces canSee plus
+// project vs global route scoping.
 func (a *API) runOverlaps(c *gin.Context) {
-	httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if a.d == nil {
+		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+		return
+	}
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	overlaps, err := a.d.Overlaps(c.Request.Context(), auth.ActorFrom(c.Request), r)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.OverlapsResponse{Overlaps: overlaps})
 }

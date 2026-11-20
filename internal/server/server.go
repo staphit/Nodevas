@@ -413,6 +413,7 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		s.agents.SetActionLog(database)
 		s.agents.SetClaimStore(s.claimStoreFor)
 		s.runs.SetRunClaimRelease(s.releaseRunClaim)
+		s.runs.SetCoordinationMail(s.sendCoordinationMail)
 	}
 	s.runs.SetNodeCoordCheck(s.nodeDoneOrClaimed)
 	s.startAnalytics(database)
@@ -579,6 +580,19 @@ func (s *Server) releaseRunClaim(ctx context.Context, project, nodeID, runID str
 		}
 	}
 	s.agents.ReleaseRunClaim(ctx, projectKey, nodeID, runID)
+}
+
+func (s *Server) sendCoordinationMail(ctx context.Context, project, runID, body string) error {
+	if s.agents == nil {
+		return agents.ErrNoSession
+	}
+	projectKey := project
+	if s.pm != nil {
+		if st, err := s.pm.StoreFor(project); err == nil && st != nil {
+			projectKey = st.Root()
+		}
+	}
+	return s.agents.CoordinationNotice(ctx, projectKey, runID, body)
 }
 
 func (s *Server) nodeDoneOrClaimed(_ context.Context, project, nodeID string) bool {

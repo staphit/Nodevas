@@ -36,6 +36,7 @@ function useRowOf(): (runId: string) => ControlRow | undefined {
   const runsByNode = useRuns((s) => s.runsByNode);
   const globalById = useRuns((s) => s.globalById);
   const listedGlobal = useGlobalAgents((s) => s.runs);
+  const groupRuns = useGlobalAgents((s) => s.groupRuns);
   const recent = useStation((s) => s.runs);
   const views = useAutopilot((s) => s.views);
   return useMemo(() => {
@@ -43,13 +44,21 @@ function useRowOf(): (runId: string) => ControlRow | undefined {
     const runs: Run[] = [
       ...recent,
       ...mergeRuns(active, latestByNode, runsByNode),
+      ...Object.values(groupRuns).flat(),
       ...listedGlobal,
       ...Object.values(globalById),
     ];
     const rows = new Map<string, ControlRow>();
-    for (const run of runs) rows.set(run.id, { run, autopilot: run.global ? undefined : autopilotOf(index, run) });
+    for (const run of runs) {
+      const normalized =
+        !run.global && !run.project && !run.nodeId ? { ...run, global: true } : run;
+      rows.set(normalized.id, {
+        run: normalized,
+        autopilot: normalized.global ? undefined : autopilotOf(index, normalized),
+      });
+    }
     return (runId: string) => rows.get(runId);
-  }, [active, latestByNode, runsByNode, listedGlobal, globalById, recent, views]);
+  }, [active, latestByNode, runsByNode, groupRuns, listedGlobal, globalById, recent, views]);
 }
 
 export function StationWarRoom({ world }: { world: World }) {

@@ -63,6 +63,23 @@ describe("waitingRuns", () => {
     const plain = run({ id: "p", status: "failed", failureKind: "task" });
     expect(waitingRuns([stale, plain], NOW)).toEqual([]);
   });
+
+  it("ignores stale PRs on earlier turns and tracks a follow-up that took over a usage limit", () => {
+    const earlierPr = run({
+      id: "g1",
+      nodeId: "",
+      global: true,
+      continuedBy: "g2",
+      prUrl: "https://x/pull/9",
+      prNumber: 9,
+      prState: "open",
+      ciStatus: "success",
+      finishedAt: min(5),
+    });
+    const limited = run({ id: "l1", nodeId: "", global: true, status: "failed", failureKind: "quota", finishedAt: min(10) });
+    const followUp = run({ id: "l2", nodeId: "", global: true, continueOf: "l1", status: "running", finishedAt: undefined });
+    expect(waitingRuns([earlierPr, limited, followUp], NOW)).toEqual([{ kind: "limit", run: limited, tookOver: followUp }]);
+  });
 });
 
 describe("waitingOnYou", () => {
@@ -134,6 +151,23 @@ describe("waitingOnYou", () => {
       const items = waitingOnYou({ ...base, runs: [], active: [], results: [one, two, one] });
       expect(items.map(waitingKey)).toEqual(["apply:g1", "apply:g2"]);
       expect(items[0]).toEqual({ kind: "apply", run: one });
+    });
+
+    it("excludes earlier turns and undecided contest entries, and includes decided contest winners", () => {
+      const earlier = result({ id: "g1", global: true, nodeId: "", continuedBy: "g2" });
+      const undecided = result({ id: "c1a", global: true, nodeId: "", contestId: "c1", contestLabel: "A" });
+      const winner = result({ id: "c2a", global: true, nodeId: "", contestId: "c2", contestLabel: "A" });
+      const items = waitingOnYou({
+        ...base,
+        runs: [],
+        active: [],
+        results: [earlier, undecided, winner],
+        contests: {
+          c1: { state: "ready" },
+          c2: { state: "decided", winnerRunId: "c2a" },
+        },
+      });
+      expect(items.map(waitingKey)).toEqual(["apply:c2a"]);
     });
   });
 });

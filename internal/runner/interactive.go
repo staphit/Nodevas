@@ -91,7 +91,7 @@ func capabilities(cfg *Config) []string {
 	if cfg.GlobalRunsOn() {
 		caps = append(caps, runnerwire.CapGlobalRunsOn)
 	}
-	caps = append(caps, runnerwire.CapContinue)
+	caps = append(caps, runnerwire.CapContinue, runnerwire.CapTouched)
 	if cfg.RemoteSettingsOn() {
 		caps = append(caps, runnerwire.CapRemoteSettings)
 	}
@@ -231,6 +231,14 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 	j.c.logf("run %s: %s", job.RunID, text)
+
+	// Interactive runs emit no tool events, so touched files rely on polling (§C.3.1).
+	watcher := newTouchedWatcher(wt.Path, func(t runnerwire.Touched) {
+		j.queueTouched(r, t)
+	}, touchedOptions{interactive: true})
+	r.watcher = watcher
+	watcher.start(ctx)
+	defer watcher.close()
 
 	readerDone := make(chan struct{})
 	go func() {

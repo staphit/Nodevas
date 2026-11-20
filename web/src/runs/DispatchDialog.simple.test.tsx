@@ -16,6 +16,7 @@ import { SIMPLE_OVERRIDE_REASON } from "../simple/simpleMode";
 import { useApp } from "../store";
 import type { Acceptance, Graph, Workflow } from "../types";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { DispatchDialog } from "./DispatchDialog";
 import { useRuns } from "./runStore";
 
@@ -75,7 +76,7 @@ function fakeStorage(initial: Record<string, string> = {}) {
 function setup(experience: "simple" | "full", acceptance: Acceptance | undefined, verify: boolean) {
   configurePreferenceStorage(fakeStorage({ "vised-experience": experience }));
   useApp.setState({
-    preferences: { ...readPreferences(), language: "en" },
+    preferences: { ...readPreferences(), language: "en", runMode: "auto" },
     graph: {
       version: 1,
       workflow: standard,
@@ -111,17 +112,19 @@ beforeEach(() => {
   useRunners.setState({ loaded: false, loading: false, runners: [], error: null, creating: false, revoking: {} });
   useRuns.getState().reset();
   useBudget.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue({
     budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
     used: { runs: 0, costUsd: 0, tokens: 0 },
     exceeded: "",
   });
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("DispatchDialog in Simple mode", () => {
-  it("starts a task with no criteria without checks, through the override", async () => {
+  it("starts a task with no criteria without checks, through the override, with no contest toggle", async () => {
     setup("simple", undefined, true);
     open();
     expect(await screen.findByText(NO_CHECKS)).toBeInTheDocument();
@@ -129,7 +132,8 @@ describe("DispatchDialog in Simple mode", () => {
     expect(screen.queryByText(/acceptance criteria/i)).toBeNull();
     expect(screen.queryByRole("list", { name: "Stages" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: /Skip the stages/ })).toBeNull();
-    await screen.findByRole("combobox", { name: "Agent" });
+    expect(screen.queryByRole("checkbox", { name: /Compare agents/ })).toBeNull();
+    await screen.findByRole("radiogroup", { name: "Who works" });
     expect(dispatchButton()).toBeEnabled();
     const body = await dispatch();
     expect(body.override).toBe(SIMPLE_OVERRIDE_REASON);
@@ -142,7 +146,7 @@ describe("DispatchDialog in Simple mode", () => {
     setup("simple", criteria, false);
     open();
     expect(await screen.findByText(NO_CHECKS)).toBeInTheDocument();
-    await screen.findByRole("combobox", { name: "Agent" });
+    await screen.findByRole("radiogroup", { name: "Who works" });
     expect(screen.queryByText(translate("dispatch.noTestCommandLocal", "en"))).toBeNull();
     expect(screen.queryByRole("list", { name: "Stages" })).toBeNull();
     expect(dispatchButton()).toBeEnabled();
@@ -157,7 +161,7 @@ describe("DispatchDialog in Simple mode", () => {
     setup("simple", criteria, true);
     open();
     await screen.findByRole("list", { name: "Stages" });
-    await screen.findByRole("combobox", { name: "Agent" });
+    await screen.findByRole("radiogroup", { name: "Who works" });
     expect(screen.queryByText(NO_CHECKS)).toBeNull();
     const body = await dispatch();
     expect(body.override).toBeUndefined();
@@ -169,7 +173,7 @@ describe("DispatchDialog in Simple mode", () => {
     setup("full", undefined, true);
     open();
     expect(await screen.findByRole("alert")).toHaveTextContent(/acceptance criteria/i);
-    await screen.findByRole("combobox", { name: "Agent" });
+    await screen.findByRole("radiogroup", { name: "Who works" });
     expect(screen.queryByText(NO_CHECKS)).toBeNull();
     expect(dispatchButton()).toBeDisabled();
   });
@@ -180,7 +184,7 @@ describe("DispatchDialog in Simple mode", () => {
     open("team");
     expect(await screen.findByRole("alert")).toHaveTextContent(/acceptance criteria/i);
     expect(screen.queryByText(NO_CHECKS)).toBeNull();
-    await screen.findByRole("combobox", { name: "Agent" });
+    await screen.findByRole("radiogroup", { name: "Who works" });
     expect(dispatchButton()).toBeDisabled();
 
     // With the criteria there it starts, as any team dispatch: no simple.

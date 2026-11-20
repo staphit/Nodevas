@@ -8,6 +8,7 @@ import { readPreferences } from "../preferences";
 import { EditionProvider, type Edition } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
+import { useCoordStore } from "./coord/coordStore";
 import { ResultActions } from "./ResultActions";
 import { useRuns } from "./runStore";
 import { makeAction, makeInfo, makeView, makeWorkspaceRun } from "./workspaceFixtures";
@@ -32,6 +33,7 @@ beforeEach(() => {
   useRunners.setState({ runners: [localRunner()], loaded: true });
   useRuns.getState().reset();
   useWorkspace.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunWorkspace").mockResolvedValue(makeView({ info: makeInfo({ baseCheckout: "repo" }) }));
   vi.spyOn(api, "getRun").mockImplementation(async (id) => result({ id }));
 });
@@ -219,5 +221,116 @@ describe("ResultActions", () => {
     show(result());
     expect(screen.getByRole("button", { name: "打開看看" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "套用到我的資料夾" })).toBeInTheDocument();
+  });
+
+  it("acts on the latest turn only and says continued-below on earlier turns", () => {
+    const earlier = result({ id: "g1", global: true, continuedBy: "g2" });
+    const { unmount } = show(earlier);
+    expect(screen.getByText("Continued below")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply to my folder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Take a look" })).toBeNull();
+    unmount();
+
+    act(() => useApp.setState({ preferences: { ...readPreferences(), language: "en", experience: "simple" } }));
+    const simpleView = show(earlier);
+    expect(screen.getByText("It went on below")).toBeInTheDocument();
+    simpleView.unmount();
+
+    act(() => useApp.setState({ preferences: { ...readPreferences(), language: "en", experience: "full" } }));
+    show(result({ id: "g2", global: true, continueOf: "g1", workRoot: "g1" }));
+    expect(screen.getByRole("button", { name: "Apply to my folder" })).toBeEnabled();
+  });
+
+  it("shows TURN_RUNNING message when merge is refused while a turn is running", async () => {
+    vi.spyOn(api, "mergeRunLocal").mockRejectedValue(
+      new WorkspaceActionError(409, "TURN_RUNNING", "turn_running", "a turn of this work is still running"),
+    );
+    show(result());
+    fireEvent.click(screen.getByRole("button", { name: "Apply to my folder" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Apply" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A turn of this work is still running; merge after it ends",
+    );
+  });
+
+  it("offers Start new work on a PR-ended run and starts a new global run on click", async () => {
+    const ended = result({
+      id: "g1",
+      global: true,
+      title: "Upgrade React",
+      prUrl: "https://github.com/o/r/pull/12",
+      prState: "merged",
+      noPR: false,
+    });
+    const created = result({ id: "g2", global: true, status: "queued", prUrl: undefined, prState: undefined });
+    const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(created);
+    show(ended);
+
+    expect(screen.getByText("Its pull request was merged or closed; start new work instead")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply to my folder" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Start new work with this" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runnerId: "local1",
+          repoId: ended.repoId,
+          agent: ended.agent,
+          task: "Upgrade React",
+          openPR: true,
+        }),
+      ),
+    );
+  });
+
+  it("locks ResultActions on an undecided contest entry and unlocks on a decided winner", () => {
+    const entry = result({ id: "e1", global: true, contestId: "c1", contestLabel: "A" });
+    useCoordStore.setState({
+      contests: {
+        c1: {
+          contest: {
+            id: "c1",
+            title: "Compare",
+            global: true,
+            state: "ready",
+            entryCount: 2,
+            createdBy: "u1",
+            createdAt: "2026-11-20T08:00:00Z",
+          },
+          runs: [entry],
+          compare: { entries: [], scores: null },
+        },
+      },
+    });
+    const { rerender } = show(entry);
+    expect(screen.getByRole("button", { name: "Apply to my folder" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Ready to compare");
+
+    act(() => {
+      useCoordStore.setState({
+        contests: {
+          c1: {
+            contest: {
+              id: "c1",
+              title: "Compare",
+              global: true,
+              state: "decided",
+              entryCount: 2,
+              winnerRunId: "e1",
+              createdBy: "u1",
+              createdAt: "2026-11-20T08:00:00Z",
+            },
+            runs: [entry],
+            compare: { entries: [], scores: null },
+          },
+        },
+      });
+    });
+    rerender(
+      <EditionProvider edition="single">
+        <ResultActions run={entry} />
+        <ConfirmDialogHost />
+      </EditionProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Apply to my folder" })).toBeEnabled();
   });
 });

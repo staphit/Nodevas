@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type AutopilotRun, type AutopilotView, type Run } from "../api";
+import { api, type AutopilotRun, type AutopilotView, type Run, type ThemePack } from "../api";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { buildWorld } from "../game/buildWorld";
@@ -12,6 +12,8 @@ import { useRunners } from "../runners/runnerStore";
 import { useRuns } from "../runs/runStore";
 import { useSettingsRequest } from "../settings/openSettings";
 import { useApp } from "../store";
+import { parseThemeManifest } from "../theme-pack/themeManifest";
+import { useThemePacks } from "../theme-pack/themePackStore";
 import { controlRows, formatElapsed, pauseAllPlan } from "./control";
 import { useControl } from "./controlStore";
 import { useGlobalAgents } from "./globalAgentsStore";
@@ -510,6 +512,74 @@ describe("StationWarRoom", () => {
     fireEvent.click(within(block).getByRole("button", { name: "Open This computer" }));
     expect(useApp.getState().preferences.settingsSection).toBe("runners");
     expect(useSettingsRequest.getState().add).toBe(false);
+  });
+
+  // Screenshot bug check (§16.5 W5): a global run resolves through useRowOf with
+  // global=true normalised, so StoryRoom choices never show "Open run" (開啟執行)
+  // or "Open “…”" (開啟「…」) for a global run.
+  it("resolves a global run through useRowOf so story choices never show Open run or Open node", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    vi.spyOn(api, "getRunAsks").mockResolvedValue({ asks: [] });
+    vi.spyOn(api, "getGlobalRunThread").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listThemePacks").mockResolvedValue({ packs: [], default: "" });
+
+    const manifest = parseThemeManifest({
+      schema: 1,
+      id: "magic",
+      name: { en: "Magic" },
+      version: "1.0.0",
+      author: "someone",
+      canvas: [100, 120],
+      characters: {
+        sage: {
+          match: { agents: ["claude"], models: ["claude*"] },
+          scenes: {
+            write: { image: "sage/write.webp", x: 0, y: 0, w: 100, h: 120, box: [10, 10, 90, 110] },
+            idle: { image: "sage/idle.webp", x: 0, y: 0, w: 100, h: 120, box: [10, 10, 90, 110] },
+          },
+        },
+      },
+    })!;
+    const pack: ThemePack = {
+      id: "magic",
+      name: { en: "Magic" },
+      version: "1.0.0",
+      author: "someone",
+      owner: "u1",
+      sizeBytes: 1,
+      createdAt: "2026-10-27T08:00:00Z",
+      updatedAt: "2026-10-27T08:00:00Z",
+      mine: true,
+      canDelete: true,
+    };
+    useThemePacks.getState().reset();
+    useThemePacks.setState({ loaded: true, error: null, packs: [pack], defaultId: pack.id, manifest: { id: pack.id, value: manifest } });
+
+    // Even if global wasn't set on the run object stored in globalAgents, project="" & nodeId="" marks it global.
+    const globalRun = makeRun({
+      id: "g-story-1",
+      project: "",
+      nodeId: "",
+      global: undefined,
+      title: "Upgrade dependencies",
+      status: "running",
+      startedAt: "2026-10-27T08:01:00Z",
+    });
+    useGlobalAgents.setState({ runs: [globalRun] });
+
+    try {
+      const { container } = mount();
+      await waitFor(() => expect(container.querySelector(".px-story-choices")).not.toBeNull());
+      const choices = [...container.querySelectorAll(".px-story-choices button")].map((b) => b.textContent);
+      expect(choices).toContain("Open workspace");
+      expect(choices).toContain("Show in Global agents");
+      expect(choices).not.toContain("Open run");
+      expect(choices.some((label) => label?.startsWith("Open “"))).toBe(false);
+    } finally {
+      useThemePacks.getState().reset();
+    }
   });
 });
 

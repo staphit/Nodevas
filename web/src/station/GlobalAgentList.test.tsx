@@ -7,6 +7,7 @@ import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
 import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { useRuns } from "../runs/runStore";
 import { makeView } from "../runs/workspaceFixtures";
 import { useWorkspace } from "../runs/workspaceStore";
@@ -92,7 +93,12 @@ beforeEach(() => {
   useWorkspace.getState().reset();
   useWorkspace.setState({ open: null });
   useRunners.setState({ runners: [], loaded: false });
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunWorkspace").mockResolvedValue(makeView({ runId: "g1" }));
+  vi.spyOn(api, "getGlobalRunThread").mockResolvedValue({ runs: [] });
+  vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+  vi.spyOn(api, "getRunAsks").mockResolvedValue({ asks: [] });
+  vi.spyOn(api, "getRunOverlaps").mockResolvedValue({ overlaps: [] });
 });
 
 afterEach(() => {
@@ -145,11 +151,11 @@ describe("GlobalAgentList", () => {
     expect(within(row).getByText("nodevas · agent/fix-the-flaky-login-test-g1aaaaaa ← main")).toBeInTheDocument();
     expect(within(row).getByText("desktop")).toBeInTheDocument();
     expect(within(row).getByText("12.3K tokens · $0.042")).toBeInTheDocument();
-    // Headless and at work: it cannot ask anything.
-    expect(within(row).getByText("Cannot ask")).toHaveAttribute(
-      "title",
-      "Runs in the background: it cannot ask you anything. Start one Interactive to talk with it.",
-    );
+    // The old noAsk chip is gone; replyNote takes its place in the list.
+    expect(within(row).queryByText("Cannot ask")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Background runs cannot ask you anything; reply here when it finishes to continue."),
+    ).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Copy the branch name" })).toBeInTheDocument();
 
     const interactive = rowOf("Talk it through");
@@ -556,6 +562,136 @@ describe("GlobalAgentList", () => {
       const row = rowOf("Bakery page");
       expect(within(row).getByRole("button", { name: "Merge locally" })).toBeInTheDocument();
       expect(within(row).queryByRole("button", { name: "Apply to my folder" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("chains, single expansion, overlap, waiting-behind, and contests", () => {
+    it("shows only the latest turn for a follow-up chain and expands one row at a time", () => {
+      const turn1 = makeGlobalRun({
+        id: "g1",
+        workRoot: "g1",
+        continuedBy: "g2",
+        title: "First draft",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:00:00Z",
+        startedAt: "2026-11-14T08:00:05Z",
+        finishedAt: "2026-11-14T08:05:00Z",
+      });
+      const turn2 = makeGlobalRun({
+        id: "g2",
+        continueOf: "g1",
+        workRoot: "g1",
+        title: "Make the button bigger",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:10:00Z",
+        startedAt: "2026-11-14T08:10:05Z",
+        finishedAt: "2026-11-14T08:15:00Z",
+      });
+      const other = makeGlobalRun({
+        id: "g3",
+        title: "Update README",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:20:00Z",
+        finishedAt: "2026-11-14T08:25:00Z",
+      });
+      useRuns.getState().putRuns([turn1, turn2, other]);
+      seed([turn1, turn2, other]);
+      show();
+
+      expect(screen.queryByText("First draft")).not.toBeInTheDocument();
+      expect(screen.getByText("Make the button bigger")).toBeInTheDocument();
+      expect(screen.getByText("Turn 2")).toBeInTheDocument();
+
+      fireEvent.click(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" }));
+      expect(screen.getAllByRole("region", { name: /session/i })).toHaveLength(1);
+      expect(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+
+      fireEvent.click(within(rowOf("Update README")).getByRole("button", { name: "Update README" }));
+      expect(screen.getAllByRole("region", { name: /session/i })).toHaveLength(1);
+      expect(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      expect(within(rowOf("Update README")).getByRole("button", { name: "Update README" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+
+    it("shows the overlap badge and the waiting-behind line", () => {
+      const overlapping = makeGlobalRun({
+        id: "g1",
+        title: "Touch auth",
+        overlapCount: 2,
+      });
+      const waiting = makeGlobalRun({
+        id: "g2",
+        title: "Queued task",
+        status: "queued",
+        afterRun: "g1",
+        startedAt: undefined,
+      });
+      seed([overlapping, waiting]);
+      show();
+
+      expect(within(rowOf("Touch auth")).getByText("2 overlap")).toBeInTheDocument();
+      expect(within(rowOf("Queued task")).getByText("Waiting for an earlier run to end")).toBeInTheDocument();
+    });
+
+    it("renders a contest row with entry pips and expands to ContestView", async () => {
+      const a = makeGlobalRun({
+        id: "ca",
+        contestId: "c1",
+        contestLabel: "A",
+        title: "Solve caching",
+        status: "succeeded",
+        commit: "aaa1111",
+        noPR: true,
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      const b = makeGlobalRun({
+        id: "cb",
+        contestId: "c1",
+        contestLabel: "B",
+        title: "Solve caching",
+        agent: "codex",
+        model: "o3",
+        status: "running",
+        noPR: true,
+      });
+      vi.spyOn(api, "getContest").mockResolvedValue({
+        contest: {
+          id: "c1",
+          title: "Solve caching",
+          global: true,
+          state: "running",
+          entryCount: 2,
+          createdBy: "u1",
+          createdAt: "2026-11-14T08:00:00Z",
+        },
+        runs: [a, b],
+        compare: {
+          entries: [
+            { label: "A", runId: "ca", agent: "claude", model: "opus", status: "succeeded", files: [], additions: 10, deletions: 2 },
+            { label: "B", runId: "cb", agent: "codex", model: "o3", status: "running", files: [], additions: 0, deletions: 0 },
+          ],
+          scores: null,
+        },
+      });
+      seed([a, b]);
+      show();
+
+      const contestRow = screen.getByTestId("global-contest-c1");
+      expect(contestRow).toHaveTextContent("Solve caching");
+      expect(contestRow).toHaveTextContent("2 agents on the same task");
+      expect(within(contestRow).getByLabelText(/Entry A/i)).toBeInTheDocument();
+      expect(within(contestRow).getByLabelText(/Entry B/i)).toBeInTheDocument();
+
+      fireEvent.click(within(contestRow).getByRole("button", { name: /Solve caching/i }));
+      await waitFor(() => expect(screen.getByTestId("contest-col-A")).toBeInTheDocument());
     });
   });
 });

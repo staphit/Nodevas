@@ -7,7 +7,7 @@
 
 import type { AgentAsk, AgentMessage, Run, RunBudgetLimit, WaitingRunLike } from "../api";
 import type { WaitingTask } from "../autopilot/autopilotStore";
-import { applyRuns } from "../runs/resultState";
+import { applyRuns, type ResultContestLike } from "../runs/resultState";
 
 /** Older than this is not waiting any more, just history. */
 export const WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -21,7 +21,7 @@ export type { WaitingRunLike };
 export interface WaitingRun<R extends WaitingRunLike = Run> {
   kind: WaitingRunKind;
   run: R;
-  /** A limit run: the fallback run that took over, if one did. */
+  /** A limit run: the fallback or follow-up run that took over, if one did. */
   tookOver?: R;
 }
 
@@ -29,15 +29,27 @@ function millis(value: string | undefined): number {
   return value ? Date.parse(value) : NaN;
 }
 
+interface TurnFields {
+  continueOf?: string;
+  continuedBy?: string;
+  workRoot?: string;
+  startedAt?: string;
+}
+
+function isWithdrawnTurn(run: WaitingRunLike): boolean {
+  const f = run as TurnFields;
+  return Boolean(f.continueOf) && (run.status === "cancelled" || run.status === "declined") && !f.startedAt;
+}
+
 /**
- * The runs worth a person's attention, newest first, one per node and kind:
+ * The runs worth a person's attention, newest first, one per node/chain and kind:
  * - limit: failed on its agent's usage limit (rate_limit or quota), with the
- *   run that took over named when there is one;
+ *   fallback or follow-up run that took over named when there is one;
  * - merge: succeeded with an open PR whose CI passed and no merge under way;
  * - ci: succeeded with an open PR whose CI failed.
- * A node's PR is listed once, as its newest run has it: an older run's green
- * PR is not "ready to merge" while a newer run is still going or came back
- * without one (pending CI, a failure).
+ * A node's (or follow-up chain's) PR is listed once, as its newest turn has it:
+ * an older turn's green PR is not "ready to merge" while a newer run is still
+ * going or came back without one (pending CI, a failure).
  */
 export function waitingRuns<R extends WaitingRunLike>(
   runs: R[],
@@ -45,27 +57,35 @@ export function waitingRuns<R extends WaitingRunLike>(
   windowMs = WAITING_WINDOW_MS,
 ): WaitingRun<R>[] {
   const byRetry = new Map<string, R>();
-  for (const run of runs) if (run.retryOf) byRetry.set(run.retryOf, run);
+  for (const run of runs) {
+    if (run.retryOf) byRetry.set(run.retryOf, run);
+    const f = run as TurnFields;
+    if (f.continueOf && !isWithdrawnTurn(run)) byRetry.set(f.continueOf, run);
+  }
   const seen = new Set<string>();
   const out: WaitingRun<R>[] = [];
   const sorted = [...runs].sort(
     (a, b) => (millis(b.finishedAt) || millis(b.createdAt)) - (millis(a.finishedAt) || millis(a.createdAt)),
   );
   for (const run of sorted) {
-    // The node's newest run claims its PR line before anything else is asked
-    // of it, whether or not it has a PR worth listing.
-    const prKey = `pr:${run.nodeId}`;
+    const f = run as TurnFields;
+    const scope = run.nodeId || f.workRoot || run.id;
+    // The node's or chain's newest run claims its PR line before anything else
+    // is asked of it, whether or not it has a PR worth listing.
+    const prKey = `pr:${scope}`;
     const newest = !seen.has(prKey);
     seen.add(prKey);
     const finished = millis(run.finishedAt);
     if (!Number.isFinite(finished) || now - finished > windowMs) continue;
     if (run.status === "failed" && (run.failureKind === "rate_limit" || run.failureKind === "quota")) {
-      const key = `limit:${run.nodeId}`;
+      const key = `limit:${scope}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ kind: "limit", run, tookOver: byRetry.get(run.id) });
       continue;
     }
+    // Earlier turns of a follow-up chain never surface a stale PR.
+    if (f.continuedBy) continue;
     if (!newest || run.status !== "succeeded" || !run.prUrl || run.prState !== "open") continue;
     const merging = run.merge && (run.merge.status === "pending" || run.merge.status === "merged");
     const kind = run.ciStatus === "success" && !merging ? "merge" : run.ciStatus === "failure" ? "ci" : null;
@@ -107,6 +127,9 @@ export interface WaitingInput<R extends WaitingRunLike = Run> {
   /** Single-user edition: the runs a result may come from (Station's, the
    * global agents'), freshest copy first; absent lists no results. */
   results?: Run[];
+  /** Known contest states keyed by contest id, so undecided contest entries stay
+   * out of Apply while decided winners appear. */
+  contests?: Record<string, ResultContestLike | undefined>;
 }
 
 /** Whether an offered run is simply starting: on the built-in runner, with
@@ -151,7 +174,9 @@ export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput
   for (const item of runs) if (item.kind === "merge") out.push(item);
   for (const item of runs) if (item.kind === "ci") out.push(item);
   if (input.results) {
-    for (const run of applyRuns(input.results, input.now, input.builtInRunnerId)) out.push({ kind: "apply", run });
+    for (const run of applyRuns(input.results, input.now, input.builtInRunnerId, undefined, input.contests)) {
+      out.push({ kind: "apply", run });
+    }
   }
   for (const run of input.active) {
     if (run.status === "offered" && !offerIsStarting(run, input.builtInRunnerId)) out.push({ kind: "offer", run });

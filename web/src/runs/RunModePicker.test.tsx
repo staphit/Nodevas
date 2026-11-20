@@ -1,18 +1,32 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ConflictError, type Actor, type Run, type Runner } from "../api";
+import { api, ConflictError, type Actor, type Run, type Runner, type RunnerAgent } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { DispatchDialog } from "./DispatchDialog";
-import { effectiveDispatchMode, runnerSupportsInteractive } from "./RunModePicker";
+import {
+  defaultDispatchMode,
+  effectiveDispatchMode,
+  runnerSupportsInteractive,
+  type DefaultDispatchModeContext,
+} from "./RunModePicker";
 import { useRuns } from "./runStore";
 
 const viewer = vi.hoisted(() => ({ current: null as Actor | null }));
 vi.mock("../components/SignIn", () => ({ useViewer: () => viewer.current }));
 
 const alice: Actor = { id: "u1", name: "alice", role: "admin" };
+const bob: Actor = { id: "u2", name: "bob", role: "member" };
+
+const interactiveAgent: RunnerAgent = {
+  kind: "claude",
+  installed: true,
+  interactive: true,
+  models: [{ id: "opus", default: true }],
+};
 
 const headlessOnly: Runner = {
   id: "r1",
@@ -28,7 +42,7 @@ const headlessOnly: Runner = {
     os: "windows",
     arch: "amd64",
     capabilities: ["headless"],
-    agents: [{ kind: "claude", installed: true, models: [{ id: "opus", default: true }] }],
+    agents: [interactiveAgent],
     repos: [{ id: "repo1", name: "nodevas" }],
   },
 };
@@ -63,17 +77,23 @@ const created: Run = {
 
 const NOTE = /Runs the agent's own terminal on the runner/;
 
+function group(name: string) {
+  return screen.getByRole("radiogroup", { name });
+}
+
 beforeEach(() => {
   viewer.current = alice;
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   useRunners.setState({ loaded: false, loading: false, runners: [], error: null, creating: false, revoking: {} });
   useRuns.getState().reset();
   useBudget.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue({
     budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
     used: { runs: 0, costUsd: 0, tokens: 0 },
     exceeded: "",
   });
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
 });
 
 afterEach(() => {
@@ -91,38 +111,160 @@ describe("mode helpers", () => {
   });
 });
 
-describe("DispatchDialog mode", () => {
-  it("gates Interactive on the selected runner's capability", async () => {
-    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [headlessOnly, desktop] });
-    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    const runner = (await screen.findByRole("combobox", { name: "Runner" })) as HTMLSelectElement;
+describe("defaultDispatchMode decision matrix", () => {
+  const base: DefaultDispatchModeContext = {
+    runner: desktop,
+    agent: interactiveAgent,
+    viewer: alice,
+    edition: "team",
+  };
 
-    expect(runner.value).toBe("r1");
-    expect(screen.getByRole("radio", { name: "Headless" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "Interactive" })).toBeDisabled();
-    expect(screen.getByText(/Interactive needs a runner version/)).toBeInTheDocument();
-
-    fireEvent.change(runner, { target: { value: "r2" } });
-    const interactive = screen.getByRole("radio", { name: "Interactive" });
-    expect(interactive).toBeEnabled();
-    expect(screen.queryByText(NOTE)).toBeNull();
-    fireEvent.click(interactive);
-    expect(interactive).toBeChecked();
-    expect(screen.getByText(NOTE)).toBeInTheDocument();
-
-    // Back to a runner without it: the pick falls back to headless.
-    fireEvent.change(runner, { target: { value: "r1" } });
-    expect(screen.getByRole("radio", { name: "Headless" })).toBeChecked();
+  it("defaults to interactive when all conditions hold", () => {
+    expect(defaultDispatchMode(base)).toEqual({ mode: "interactive" });
   });
 
-  it("sends mode interactive only when chosen", async () => {
+  it("falls back to background when runner lacks CapInteractive", () => {
+    expect(defaultDispatchMode({ ...base, runner: headlessOnly })).toEqual({
+      mode: "headless",
+      reason: "capability",
+    });
+    expect(defaultDispatchMode({ ...base, runner: undefined })).toEqual({
+      mode: "headless",
+      reason: "capability",
+    });
+  });
+
+  it("falls back to background when agent is missing or interactive flag is false/absent", () => {
+    expect(defaultDispatchMode({ ...base, agent: undefined })).toEqual({
+      mode: "headless",
+      reason: "agent",
+    });
+    expect(defaultDispatchMode({ ...base, agent: { ...interactiveAgent, interactive: false } })).toEqual({
+      mode: "headless",
+      reason: "agent",
+    });
+    expect(defaultDispatchMode({ ...base, agent: { ...interactiveAgent, interactive: undefined } })).toEqual({
+      mode: "headless",
+      reason: "agent",
+    });
+  });
+
+  it("falls back to background when agent is untrusted", () => {
+    expect(defaultDispatchMode({ ...base, agent: { ...interactiveAgent, untrusted: true } })).toEqual({
+      mode: "headless",
+      reason: "untrusted",
+    });
+  });
+
+  it("falls back to background on a teammate's runner on team hub, but allows single-user", () => {
+    expect(defaultDispatchMode({ ...base, viewer: bob, edition: "team" })).toEqual({
+      mode: "headless",
+      reason: "teammate",
+    });
+    expect(defaultDispatchMode({ ...base, viewer: bob, edition: "single" })).toEqual({
+      mode: "interactive",
+    });
+  });
+
+  it("handles auto-accept policy modes and allowRemoteTyping", () => {
+    // Auto-accept off -> interactive.
+    const aaOff: Runner = {
+      ...desktop,
+      info: { ...desktop.info!, autoAccept: { enabled: false, requireStepUp: false } },
+    };
+    expect(defaultDispatchMode({ ...base, runner: aaOff })).toEqual({ mode: "interactive" });
+
+    // Auto-accept on, modes empty (headless only) -> autoAccept fallback.
+    const aaHeadless: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        autoAccept: { enabled: true, requireStepUp: false, modes: [""], allowRemoteTyping: true },
+      },
+    };
+    expect(defaultDispatchMode({ ...base, runner: aaHeadless })).toEqual({
+      mode: "headless",
+      reason: "autoAccept",
+    });
+
+    // Auto-accept includes interactive, but allowRemoteTyping is false -> noTyping fallback.
+    const aaNoTyping: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        autoAccept: { enabled: true, requireStepUp: false, modes: ["", "interactive"], allowRemoteTyping: false },
+      },
+    };
+    expect(defaultDispatchMode({ ...base, runner: aaNoTyping })).toEqual({
+      mode: "headless",
+      reason: "noTyping",
+    });
+
+    // Auto-accept includes interactive AND allowRemoteTyping -> interactive.
+    const aaInteractiveTyping: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        autoAccept: { enabled: true, requireStepUp: false, modes: ["", "interactive"], allowRemoteTyping: true },
+      },
+    };
+    expect(defaultDispatchMode({ ...base, runner: aaInteractiveTyping })).toEqual({ mode: "interactive" });
+  });
+
+  it("falls back to background for staged, pipeline, fallbacks, group, and contest", () => {
+    expect(defaultDispatchMode({ ...base, staged: true })).toEqual({
+      mode: "headless",
+      reason: "staged",
+    });
+    expect(defaultDispatchMode({ ...base, pipeline: true })).toEqual({
+      mode: "headless",
+      reason: "pipeline",
+    });
+    expect(defaultDispatchMode({ ...base, fallbacks: true })).toEqual({
+      mode: "headless",
+      reason: "pipeline",
+    });
+    expect(defaultDispatchMode({ ...base, group: true })).toEqual({
+      mode: "headless",
+      reason: "group",
+    });
+    expect(defaultDispatchMode({ ...base, contest: true })).toEqual({
+      mode: "headless",
+      reason: "contest",
+    });
+  });
+});
+
+describe("DispatchDialog mode", () => {
+  it("gates Talk with it on the selected runner's capability and defaults interactive when supported", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [headlessOnly, desktop] });
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    const runners = await screen.findByRole("radiogroup", { name: "Which computer" });
+
+    expect(within(runners).getByRole("radio", { name: "laptop" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toBeDisabled();
+    expect(screen.getByText(/Interactive needs a runner version/)).toBeInTheDocument();
+
+    fireEvent.click(within(runners).getByRole("radio", { name: "desktop" }));
+    const interactive = screen.getByRole("radio", { name: "Talk with it" });
+    expect(interactive).toBeEnabled();
+    expect(interactive).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+
+    // Back to a runner without it: falls back to background.
+    fireEvent.click(within(runners).getByRole("radio", { name: "laptop" }));
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("sends mode interactive by default when supported, and remembers runMode preference when picked", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     const create = vi.spyOn(api, "createRun").mockResolvedValue(created);
     const onCreated = vi.fn();
-    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    const { unmount } = render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Interactive" }));
+    expect(within(group("Mode")).getByRole("radio", { name: "Talk with it" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created));
     expect(create).toHaveBeenCalledWith({
@@ -133,14 +275,28 @@ describe("DispatchDialog mode", () => {
       repoId: "repo1",
       mode: "interactive",
     });
+
+    // Picking Background stores runMode="background" so the next dialog opens in background.
+    fireEvent.click(within(group("Mode")).getByRole("radio", { name: "Background" }));
+    expect(useApp.getState().preferences.runMode).toBe("background");
+    unmount();
+
+    create.mockClear();
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("radiogroup", { name: "Which computer" });
+    expect(within(group("Mode")).getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).not.toHaveProperty("mode");
   });
 
-  it("sends no mode for a headless run", async () => {
+  it("sends no mode for a background run", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     const create = vi.spyOn(api, "createRun").mockResolvedValue({ ...created, mode: undefined });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
+    fireEvent.click(screen.getByRole("radio", { name: "Background" }));
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0]).not.toHaveProperty("mode");
@@ -152,11 +308,10 @@ describe("DispatchDialog mode", () => {
       new ConflictError("", "", "this runner cannot run interactive sessions", "FAILED_PRECONDITION"),
     );
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Interactive" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Talk with it" }));
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
-    // The hub's reason when it gives one; the generic line only without it.
     expect(await screen.findByRole("alert")).toHaveTextContent("this runner cannot run interactive sessions");
   });
 
@@ -164,9 +319,9 @@ describe("DispatchDialog mode", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     vi.spyOn(api, "createRun").mockRejectedValue(new ConflictError("", ""));
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Interactive" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Talk with it" }));
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/cannot run agents interactively/);
   });

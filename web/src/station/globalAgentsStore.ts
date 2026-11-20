@@ -6,12 +6,17 @@ import {
   GlobalRunError,
   runFinal,
   type CreateGlobalRunRequest,
+  type GlobalGroupResponse,
+  type GroupFollowUpRequest,
+  type GroupFollowUpResponse,
   type Run,
+  type RunGroup,
   type RunnerLoad,
 } from "../api";
 import { translate } from "../i18n";
 import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { useRuns } from "../runs/runStore";
 
 /**
@@ -27,6 +32,12 @@ export interface GlobalAgentsState {
   /** Every unfinished global run, then the newest ended ones, newest first. */
   runs: Run[];
   runners: RunnerLoad[];
+  /** Loaded multi-repo groups keyed by groupId. */
+  groups: Record<string, RunGroup>;
+  /** Member runs loaded for each group, keyed by groupId. */
+  groupRuns: Record<string, Run[]>;
+  groupLoading: Record<string, boolean>;
+  groupErrors: Record<string, string>;
   /** Older ended runs exist on the hub ("Load older"). */
   more: boolean;
   loaded: boolean;
@@ -47,6 +58,16 @@ export interface GlobalAgentsState {
   load: () => Promise<void>;
   /** Pages in older ended runs. */
   loadMore: () => Promise<void>;
+  /** Loads one multi-repo group and its member runs. */
+  loadGroup: (groupId: string) => Promise<GlobalGroupResponse | null>;
+  /** Refetches every currently loaded group (on global-runs-changed / resync). */
+  refreshLoadedGroups: () => void;
+  /** Cancels every active member of a group. */
+  cancelGroup: (groupId: string) => Promise<number | null>;
+  /** Clears a usage-limit hold on a group so queued members resume now. */
+  resumeGroup: (groupId: string) => Promise<RunGroup | null>;
+  /** Sends a follow-up to eligible latest turns of a group ("failed" or "all"). */
+  followUpGroup: (groupId: string, body: GroupFollowUpRequest) => Promise<GroupFollowUpResponse | null>;
   /** A global-runs-changed push: reload, coalesced; with nobody watching,
    * only a run some view holds is refreshed. */
   onChanged: (runId?: string) => void;
@@ -76,13 +97,70 @@ export const GLOBAL_PAGE = 50;
 export const GLOBAL_COALESCE_MS = 800;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let pendingGlobalRefresh = false;
 let inFlight: Promise<void> | null = null;
 let again = false;
+const groupInFlight = new Map<string, Promise<GlobalGroupResponse | null>>();
 // Bumped by reset(): an answer for a previous session is dropped.
 let generation = 0;
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Whether a follow-up turn was withdrawn before it ever started (§6.3, §13). */
+export function isWithdrawnFollowUp(run: Run): boolean {
+  return Boolean(run.continueOf) && (run.status === "cancelled" || run.status === "declined") && !run.startedAt;
+}
+
+/**
+ * Collapses follow-up chains to their latest non-withdrawn turn, keeping
+ * unfinished runs first and newest first, and reports the turn count of each
+ * surviving row.
+ */
+export function collapseGlobalChains(runs: readonly Run[]): {
+  latest: Run[];
+  turnCountById: Record<string, number>;
+} {
+  const byId = new Map<string, Run>();
+  for (const run of runs) {
+    if (run?.id && !byId.has(run.id)) byId.set(run.id, run);
+  }
+  const active = Array.from(byId.values()).filter((run) => !isWithdrawnFollowUp(run));
+
+  const rootOf = (run: Run): string => {
+    if (run.workRoot) return run.workRoot;
+    let cursor: Run = run;
+    const visited = new Set<string>([cursor.id]);
+    while (cursor.continueOf && byId.has(cursor.continueOf) && !visited.has(cursor.continueOf)) {
+      const parent = byId.get(cursor.continueOf)!;
+      visited.add(parent.id);
+      if (parent.workRoot) return parent.workRoot;
+      cursor = parent;
+    }
+    return cursor.id;
+  };
+
+  const chains = new Map<string, Run[]>();
+  for (const run of active) {
+    const key = rootOf(run);
+    const list = chains.get(key);
+    if (list) list.push(run);
+    else chains.set(key, [run]);
+  }
+
+  const latestRuns: Run[] = [];
+  const turnCountById: Record<string, number> = {};
+  for (const chain of chains.values()) {
+    chain.sort((a, b) =>
+      a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt),
+    );
+    const head = chain[chain.length - 1];
+    latestRuns.push(head);
+    turnCountById[head.id] = chain.length;
+  }
+
+  return { latest: orderGlobalRuns(latestRuns), turnCountById };
 }
 
 /** Unfinished global runs: the tab's count. */
@@ -134,6 +212,10 @@ export function capacityErrorText(error: unknown, runner: string): string {
 const initial = {
   runs: [] as Run[],
   runners: [] as RunnerLoad[],
+  groups: {} as Record<string, RunGroup>,
+  groupRuns: {} as Record<string, Run[]>,
+  groupLoading: {} as Record<string, boolean>,
+  groupErrors: {} as Record<string, string>,
   more: false,
   loaded: false,
   loadingMore: false,
@@ -145,8 +227,16 @@ const initial = {
   cancelAllError: "",
 };
 
+function mergeRunList(existing: Run[], incoming: Run[]): Run[] {
+  if (incoming.length === 0) return existing;
+  const byId = new Map(incoming.map((run) => [run.id, run]));
+  const kept = existing.map((run) => byId.get(run.id) ?? run);
+  const fresh = incoming.filter((run) => !existing.some((held) => held.id === run.id));
+  return [...kept, ...fresh];
+}
+
 export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
-  /** Holds runs in this list and in the run store. */
+  /** Holds runs in this list, any loaded group list, and in the run store. */
   const hold = (runs: Run[]) => {
     if (runs.length === 0) return;
     useRuns.getState().putRuns(runs);
@@ -154,16 +244,41 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
       const byId = new Map(runs.map((run) => [run.id, run]));
       const kept = state.runs.map((run) => byId.get(run.id) ?? run);
       const fresh = runs.filter((run) => !state.runs.some((held) => held.id === run.id));
-      return { runs: orderGlobalRuns([...fresh, ...kept]) };
+
+      let nextGroupRuns = state.groupRuns;
+      const byGroup = new Map<string, Run[]>();
+      for (const run of runs) {
+        if (!run.groupId) continue;
+        const list = byGroup.get(run.groupId);
+        if (list) list.push(run);
+        else byGroup.set(run.groupId, [run]);
+      }
+      if (byGroup.size > 0) {
+        for (const [gid, members] of byGroup) {
+          if (!(gid in state.groupRuns)) continue;
+          if (nextGroupRuns === state.groupRuns) nextGroupRuns = { ...state.groupRuns };
+          nextGroupRuns[gid] = mergeRunList(state.groupRuns[gid] ?? [], members);
+        }
+      }
+
+      return { runs: orderGlobalRuns([...fresh, ...kept]), groupRuns: nextGroupRuns };
     });
   };
 
   /** One reload at the end of a fixed window from the first ask. */
-  const reloadSoon = () => {
+  const reloadSoon = (includeGroupsAndContests = false) => {
+    if (includeGroupsAndContests) pendingGlobalRefresh = true;
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
+      const refreshExtra = pendingGlobalRefresh;
+      pendingGlobalRefresh = false;
       void get().load();
+      if (refreshExtra) {
+        get().refreshLoadedGroups();
+        useCoordStore.getState().refreshLoadedContests();
+        useCoordStore.getState().refreshLoadedOverlaps();
+      }
     }, GLOBAL_COALESCE_MS);
   };
 
@@ -177,6 +292,7 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
       else if (timer) {
         clearTimeout(timer);
         timer = null;
+        pendingGlobalRefresh = false;
       }
     },
 
@@ -248,22 +364,145 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
       }
     },
 
+    loadGroup: (groupId) => {
+      if (!groupId) return Promise.resolve(null);
+      const existing = groupInFlight.get(groupId);
+      if (existing) return existing;
+      const gen = generation;
+      const work = (async () => {
+        set((state) => ({ groupLoading: { ...state.groupLoading, [groupId]: true } }));
+        try {
+          const res = await api.getGlobalGroup(groupId);
+          if (gen !== generation) return null;
+          const members = res.runs ?? [];
+          if (members.length > 0) useRuns.getState().putRuns(members);
+          set((state) => {
+            const errors = { ...state.groupErrors };
+            delete errors[groupId];
+            return {
+              groups: { ...state.groups, [groupId]: res.group },
+              groupRuns: { ...state.groupRuns, [groupId]: members },
+              groupErrors: errors,
+            };
+          });
+          return res;
+        } catch (error) {
+          if (gen === generation) {
+            set((state) => ({
+              groupErrors: { ...state.groupErrors, [groupId]: message(error) },
+            }));
+          }
+          return null;
+        } finally {
+          if (gen === generation) {
+            set((state) => {
+              const loading = { ...state.groupLoading };
+              delete loading[groupId];
+              return { groupLoading: loading };
+            });
+          }
+        }
+      })().finally(() => {
+        if (groupInFlight.get(groupId) === work) groupInFlight.delete(groupId);
+      });
+      groupInFlight.set(groupId, work);
+      return work;
+    },
+
+    refreshLoadedGroups: () => {
+      for (const groupId of Object.keys(get().groups)) {
+        void get().loadGroup(groupId);
+      }
+    },
+
+    cancelGroup: async (groupId) => {
+      if (!groupId) return null;
+      const gen = generation;
+      try {
+        const res = await api.cancelGlobalGroup(groupId);
+        if (gen !== generation) return null;
+        const runs = res.runs ?? [];
+        hold(runs);
+        useRuns.setState((state) => {
+          const stopRequested = { ...state.stopRequested };
+          for (const run of runs) if (!runFinal(run.status)) stopRequested[run.id] = true;
+          return { stopRequested };
+        });
+        return res.cancelled;
+      } catch (error) {
+        if (gen === generation) {
+          set((state) => ({ groupErrors: { ...state.groupErrors, [groupId]: message(error) } }));
+        }
+        return null;
+      }
+    },
+
+    resumeGroup: async (groupId) => {
+      if (!groupId) return null;
+      const gen = generation;
+      try {
+        const res = await api.resumeGlobalGroup(groupId);
+        if (gen !== generation) return null;
+        set((state) => {
+          const errors = { ...state.groupErrors };
+          delete errors[groupId];
+          return {
+            groups: { ...state.groups, [groupId]: res.group },
+            groupErrors: errors,
+          };
+        });
+        return res.group;
+      } catch (error) {
+        if (gen === generation) {
+          set((state) => ({ groupErrors: { ...state.groupErrors, [groupId]: message(error) } }));
+        }
+        return null;
+      }
+    },
+
+    followUpGroup: async (groupId, body) => {
+      if (!groupId) return null;
+      const gen = generation;
+      try {
+        const res = await api.followUpGlobalGroup(groupId, body);
+        if (gen !== generation) return null;
+        const started = res.started ?? [];
+        hold(started);
+        set((state) => {
+          const errors = { ...state.groupErrors };
+          delete errors[groupId];
+          return { groupErrors: errors };
+        });
+        return res;
+      } catch (error) {
+        if (gen === generation) {
+          set((state) => ({ groupErrors: { ...state.groupErrors, [groupId]: message(error) } }));
+        }
+        return null;
+      }
+    },
+
     onChanged: (runId) => {
       if (!get().watching) {
         // An open workspace panel (a toast's) still follows its run.
         if (runId && useRuns.getState().globalById[runId]) void useRuns.getState().refreshRun(runId);
         return;
       }
-      reloadSoon();
+      reloadSoon(true);
     },
 
     onRunnerLoadChanged: () => {
       const state = get();
-      if (state.watching && state.runners.length > 0) reloadSoon();
+      if (state.watching && state.runners.length > 0) reloadSoon(false);
     },
 
     resync: () => {
-      if (get().watching) void get().load();
+      if (get().watching) {
+        void get().load();
+        get().refreshLoadedGroups();
+        useCoordStore.getState().refreshLoadedContests();
+        useCoordStore.getState().refreshLoadedOverlaps();
+      }
     },
 
     create: async (body) => {
@@ -344,8 +583,10 @@ export const useGlobalAgents = create<GlobalAgentsState>((set, get) => {
       generation++;
       if (timer) clearTimeout(timer);
       timer = null;
+      pendingGlobalRefresh = false;
       inFlight = null;
       again = false;
+      groupInFlight.clear();
       set({ ...initial, watching: false });
     },
   };

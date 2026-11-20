@@ -108,6 +108,7 @@ type run struct {
 	seq     int64
 	events  []runnerwire.RunEvent
 	dropped int
+	touched []runnerwire.Touched
 	changes *runnerwire.RunChanges
 	pr      *runnerwire.PRInfo
 	finish  *runnerwire.RunResult
@@ -123,6 +124,9 @@ type run struct {
 	resumeSession string
 	workRoot      string
 	pendingEnd    bool
+
+	// watcher tracks files modified in the run's worktree while the agent runs (§C.3.1).
+	watcher *touchedWatcher
 }
 
 const (
@@ -556,7 +560,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	unmark()
 	if result.Status == runnerwire.RunCancelled {
 		// Stopped on purpose: nothing is committed or pushed, and the
-		// worktree stays as the agent left it.
+		// worktree stays as the agent left it. Poll once so any uncommitted
+		// edits since the last tick are still reported before finish (§C.3.1).
+		r.watcher.pollFinal()
 		if job.Global {
 			j.recordGlobalWork(r, wt, workEntry, result, nil)
 		}
@@ -571,6 +577,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.mu.Unlock()
 	if job.ContinueOf != "" {
 		changes, pr, result := j.publishTurn(r, wt, &workEntry, result)
+		r.watcher.pollFinal()
 		j.recordGlobalWork(r, wt, workEntry, result, pr)
 		j.finishWith(r, result, changes, pr)
 		return
@@ -581,10 +588,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	if result.Status == runnerwire.RunFailed && runnerwire.HandoffWorthy(result.FailureKind) &&
 		job.Mode != runnerwire.ModeInteractive && !job.Global {
 		changes := j.handOff(r, wt, &result)
+		r.watcher.pollFinal()
 		j.finishWith(r, result, changes, nil)
 		return
 	}
 	changes, pr := j.publish(r, wt, result)
+	r.watcher.pollFinal()
 	if job.Global {
 		j.recordGlobalWork(r, wt, workEntry, result, pr)
 	}
@@ -837,6 +846,12 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 			return fail(runnerwire.FailureTask, "could not open %s's stdin: %v", job.Agent, err)
 		}
 	}
+	var watcher *touchedWatcher
+	if !adapter.ReadOnly(job) {
+		watcher = newTouchedWatcher(wt.Path, func(t runnerwire.Touched) {
+			j.queueTouched(r, t)
+		}, touchedOptions{})
+	}
 	sawText := false
 	stdout := &lineWriter{fn: func(line []byte) {
 		for _, ev := range parser.Parse(line) {
@@ -844,6 +859,9 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 				sawText = true
 			}
 			j.emit(r, ev)
+			if watcher != nil {
+				watcher.onEvent(ev)
+			}
 		}
 	}}
 	stderr := &tailBuffer{max: stderrTail}
@@ -858,6 +876,11 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 	tree := attachTree(cmd)
 	defer tree.close()
+	if watcher != nil {
+		r.watcher = watcher
+		watcher.start(ctx)
+		defer watcher.close()
+	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), modeText)})
 	if conv != nil {
@@ -1173,6 +1196,14 @@ func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 	}
 }
 
+// queueTouched queues an incremental touched-file report for r (§C.3.1).
+func (j *jobs) queueTouched(r *run, t runnerwire.Touched) {
+	j.mu.Lock()
+	r.touched = append(r.touched, t)
+	j.mu.Unlock()
+	j.wake()
+}
+
 func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 	j.finishWith(r, result, nil, nil)
 }
@@ -1349,6 +1380,12 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 					i++
 				}
 				r.events = r.events[i:]
+			}
+		}
+		if len(r.touched) > 0 {
+			t := r.touched[0]
+			return runnerwire.Envelope{Type: runnerwire.TypeTouched, RunID: id, Touched: &t}, func() {
+				r.touched = r.touched[1:]
 			}
 		}
 		if r.finish == nil {

@@ -48,6 +48,19 @@ describe("resultState", () => {
     expect(resultState(ready({ workspace: "merged_local" }), LOCAL)).toBe("applied");
     expect(resultState(ready({ workspaceAction: makeAction() }), LOCAL)).toBe("applying");
   });
+
+  it("returns continued for earlier turns, pr_ended for ended PRs, and contest_locked for undecided contest entries", () => {
+    expect(resultState(ready({ continuedBy: "run8" }), LOCAL)).toBe("continued");
+    expect(resultState(ready({ prUrl: "https://github.com/o/r/pull/2", prState: "merged" }), LOCAL)).toBe("pr_ended");
+    expect(resultState(ready({ prUrl: "https://github.com/o/r/pull/2", prState: "closed" }), LOCAL)).toBe("pr_ended");
+    expect(resultState(ready({ status: "declined", declineCode: "pr_ended", commit: undefined }), LOCAL)).toBe("pr_ended");
+
+    const entry = ready({ id: "entryA", contestId: "c1", contestLabel: "A" });
+    expect(resultState(entry, LOCAL)).toBe("contest_locked");
+    expect(resultState(entry, LOCAL, { contest: { state: "ready" } })).toBe("contest_locked");
+    expect(resultState(entry, LOCAL, { contest: { state: "decided", winnerRunId: "entryA" } })).toBe("ready");
+    expect(resultState(entry, LOCAL, { contest: { state: "decided", winnerRunId: "entryB" } })).toBe("none");
+  });
 });
 
 describe("applyRefusalKey", () => {
@@ -68,6 +81,8 @@ describe("applyRefusalKey", () => {
     expect(applyRefusalKey("running")).toBe("result.refuse.busy");
     expect(applyRefusalKey("offline")).toBe("result.refuse.offline");
     expect(applyRefusalKey("merged_local")).toBe("result.refuse.gone");
+    expect(applyRefusalKey("continued")).toBe("result.refuse.gone");
+    expect(applyRefusalKey("turn_running")).toBe("result.refuse.busy");
     expect(applyRefusalKey("git")).toBe("result.refuse.other");
   });
 });
@@ -167,5 +182,21 @@ describe("applyRuns", () => {
     const one = ready({ id: "g1", global: true, nodeId: "", finishedAt: at(1000) });
     const two = ready({ id: "g2", global: true, nodeId: "", finishedAt: at(2000) });
     expect(applyRuns([one, two], NOW, LOCAL).map((run) => run.id)).toEqual(["g1", "g2"]);
+  });
+
+  it("skips earlier turns, PR-ended runs, and undecided contest entries, but includes a decided winner", () => {
+    const earlier = ready({ id: "t1", global: true, nodeId: "", continuedBy: "t2", finishedAt: at(3000) });
+    const latest = ready({ id: "t2", global: true, nodeId: "", continueOf: "t1", workRoot: "t1", finishedAt: at(1000) });
+    const prEnded = ready({ id: "p1", global: true, nodeId: "", prUrl: "https://github.com/o/r/pull/4", prState: "merged", finishedAt: at(2000) });
+    const contestUndecided = ready({ id: "ca", global: true, nodeId: "", contestId: "c1", contestLabel: "A", finishedAt: at(1500) });
+    const contestWinner = ready({ id: "cb", global: true, nodeId: "", contestId: "c2", contestLabel: "B", finishedAt: at(1200) });
+    const contestLoser = ready({ id: "cc", global: true, nodeId: "", contestId: "c2", contestLabel: "A", finishedAt: at(1200) });
+
+    expect(
+      applyRuns([earlier, latest, prEnded, contestUndecided, contestWinner, contestLoser], NOW, LOCAL, APPLY_WINDOW_MS, {
+        c1: { state: "ready" },
+        c2: { state: "decided", winnerRunId: "cb" },
+      }).map((run) => run.id),
+    ).toEqual(["t2", "cb"]);
   });
 });

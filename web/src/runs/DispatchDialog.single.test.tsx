@@ -14,6 +14,7 @@ import { GlobalAgentForm } from "../station/GlobalAgentForm";
 import { useGlobalAgents } from "../station/globalAgentsStore";
 import { useApp } from "../store";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { DispatchDialog } from "./DispatchDialog";
 import { useRuns } from "./runStore";
 
@@ -89,12 +90,15 @@ async function addBig(after: Runner) {
 
 beforeEach(() => {
   viewer.current = null;
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   useRunners.setState({ loaded: false, loading: false, runners: [], error: null, creating: false, revoking: {} });
   useRuns.getState().reset();
   useBudget.getState().reset();
   useGlobalAgents.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue(withinBudget);
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
+  vi.spyOn(api, "getGlobalRunBusy").mockResolvedValue({ repos: [] });
 });
 
 afterEach(() => {
@@ -106,8 +110,8 @@ describe("DispatchDialog, single-user edition", () => {
     serve([localRunner()]);
     dispatchDialog();
     const dialog = await screen.findByRole("dialog", { name: "Dispatch to agent" });
-    await screen.findByRole("combobox", { name: "Agent" });
-    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    await screen.findByRole("radiogroup", { name: "Who works" });
+    expect(screen.queryByRole("radiogroup", { name: "Which computer" })).not.toBeInTheDocument();
     expect(dialog).toHaveTextContent("on this computer");
     expect(screen.getByTestId("dispatch-auto-accept")).toHaveTextContent("It starts right away on this computer.");
     expect(screen.getByRole("button", { name: "+ Add repo" })).toBeInTheDocument();
@@ -118,10 +122,12 @@ describe("DispatchDialog, single-user edition", () => {
   it("adds a repo from the dialog and picks it", async () => {
     serve([localRunner()]);
     dispatchDialog();
-    await screen.findByRole("combobox", { name: "Repository" });
+    await screen.findByRole("radiogroup", { name: "Which folders" });
     await addBig(withRepos(localRunner(), [...localRunner().info!.repos!, big]));
     await waitFor(() =>
-      expect((screen.getByRole("combobox", { name: "Repository" }) as HTMLSelectElement).value).toBe("repo9"),
+      expect(
+        within(screen.getByRole("radiogroup", { name: "Which folders" })).getByRole("radio", { name: /big/ }),
+      ).toHaveAttribute("aria-checked", "true"),
     );
     expect(screen.getByText("big added. You can pick it when you start an agent.")).toBeInTheDocument();
   });
@@ -133,7 +139,9 @@ describe("DispatchDialog, single-user edition", () => {
     expect(visibleText(container)).not.toMatch(/nodevas runner/);
     await addBig(withRepos(localRunner(), [big]));
     await waitFor(() =>
-      expect((screen.getByRole("combobox", { name: "Repository" }) as HTMLSelectElement).value).toBe("repo9"),
+      expect(
+        within(screen.getByRole("radiogroup", { name: "Which folders" })).getByRole("radio", { name: /big/ }),
+      ).toHaveAttribute("aria-checked", "true"),
     );
   });
 
@@ -141,7 +149,8 @@ describe("DispatchDialog, single-user edition", () => {
     serve([withLocal(localRunner(), { permission: { claude: "full", codex: "edit" } })]);
     dispatchDialog();
     expect(await screen.findByText("Claude can run any command on this computer.")).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), { target: { value: "codex" } });
+    const agents = screen.getByRole("radiogroup", { name: "Who works" });
+    fireEvent.click(within(agents).getByRole("radio", { name: /Codex/ }));
     expect(screen.queryByText(/can run any command/)).not.toBeInTheDocument();
   });
 
@@ -173,14 +182,14 @@ describe("DispatchDialog, single-user edition", () => {
     expect(await screen.findByText(STARTING)).toBeInTheDocument();
     expect(dialog).toHaveTextContent("on this computer");
     expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Which computer" })).not.toBeInTheDocument();
     // Nothing is wrong yet, so there is nothing to press.
     expect(within(screen.getByTestId("local-not-ready")).queryByRole("button")).not.toBeInTheDocument();
     expect(visibleText(dialog)).not.toMatch(/runner/i);
 
     // It connects: the list changes and the form is there, no click needed.
     act(() => useRunners.setState({ runners: [localRunner()] }));
-    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    expect(await screen.findByRole("radiogroup", { name: "Who works" })).toBeInTheDocument();
     expect(screen.queryByText(STARTING)).not.toBeInTheDocument();
   });
 
@@ -201,7 +210,7 @@ describe("DispatchDialog, single-user edition", () => {
     // Check again asks the hub afresh; this time it is back.
     list.mockResolvedValue({ runners: [localRunner()] });
     fireEvent.click(within(block).getByRole("button", { name: "Check again" }));
-    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    expect(await screen.findByRole("radiogroup", { name: "Who works" })).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(2);
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -217,8 +226,6 @@ describe("DispatchDialog, single-user edition", () => {
   });
 
   it("never falls back to a team hub's words when nothing here can take a run", async () => {
-    // No runner at all (serve --no-runner), or only one connected by hand
-    // that is offline.
     for (const runners of [[], [{ ...laptop, online: false }]]) {
       serve(runners);
       const { unmount } = dispatchDialog();
@@ -234,19 +241,17 @@ describe("DispatchDialog, single-user edition", () => {
   it("still dispatches the classic way to a runner connected by hand that is online", async () => {
     serve([startingRunner(), laptop]);
     dispatchDialog();
-    const runner = (await screen.findByRole("combobox", { name: "Runner" })) as HTMLSelectElement;
-    expect(runner.value).toBe("r9");
+    const runners = await screen.findByRole("radiogroup", { name: "Which computer" });
+    expect(within(runners).getByRole("radio", { name: /laptop/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByTestId("local-not-ready")).not.toBeInTheDocument();
-    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    expect(await screen.findByRole("radiogroup", { name: "Who works" })).toBeInTheDocument();
   });
 
-  // The top-bar pill says "agents can't start" in this state; the dialog
-  // must agree and not offer the runner connected by hand.
   it("sticks to this computer once its runner was welcomed, even with a runner connected by hand online", async () => {
     serve([{ ...localRunner(), online: false }, laptop]);
     dispatchDialog();
     expect(await screen.findByTestId("local-not-ready")).toHaveTextContent(UNAVAILABLE);
-    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Which computer" })).not.toBeInTheDocument();
   });
 
   it("links to This computer when no agent is installed", async () => {
@@ -265,8 +270,8 @@ describe("GlobalAgentForm, single-user edition", () => {
   it("has no runner to pick and never says runner", async () => {
     serve([localRunner()]);
     const { container } = globalForm();
-    await screen.findByRole("combobox", { name: "Agent" });
-    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    await screen.findByRole("radiogroup", { name: "Who works" });
+    expect(screen.queryByRole("radiogroup", { name: "Which computer" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Add repo" })).toBeInTheDocument();
     expect(visibleText(container)).not.toMatch(/runner/i);
   });
@@ -282,7 +287,9 @@ describe("GlobalAgentForm, single-user edition", () => {
 
     await addBig(withRepos(localRunner(), [big]));
     await waitFor(() =>
-      expect((screen.getByRole("combobox", { name: "Repository" }) as HTMLSelectElement).value).toBe("repo9"),
+      expect(
+        within(screen.getByRole("group", { name: "Which folders" })).getByRole("checkbox", { name: /big/ }),
+      ).toBeChecked(),
     );
   });
 
@@ -315,13 +322,11 @@ describe("GlobalAgentForm, single-user edition", () => {
     expect(create.mock.calls[0][0]).toMatchObject({ runnerId: "local1", repoId: "repo1", agent: "claude" });
   });
 
-  // Before its runner connects, the form said "None of your runners can
-  // start a global agent now." over a disabled Runner box.
   it("waits calmly while this computer gets ready, then shows the form", async () => {
     serve([startingRunner()]);
     const { container } = globalForm();
     expect(await screen.findByText(STARTING)).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Runner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Which computer" })).not.toBeInTheDocument();
     expect(within(screen.getByTestId("local-not-ready")).queryByRole("button")).not.toBeInTheDocument();
     expect(visibleText(container)).not.toMatch(/runner/i);
 

@@ -132,3 +132,65 @@ func TestPruneMarksPatchesPruned(t *testing.T) {
 		}
 	}
 }
+
+// C2: run_touched_files and run_overlaps age out after a fixed 7-day cutoff
+// even when analytics retention is turned off (days == 0).
+func TestTouchedPrunedAfter7DaysEvenWithRetentionOff(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	old8 := testNow.AddDate(0, 0, -8)
+	recent3 := testNow.AddDate(0, 0, -3)
+
+	// Two runs finished 8 days ago, one finished 3 days ago, and one still running.
+	f.run(seedRun{id: "old-a", node: "n1", role: "executor", cost: 1, created: old8, seconds: 60})
+	f.run(seedRun{id: "old-b", node: "n2", role: "executor", cost: 1, created: old8, seconds: 60})
+	f.run(seedRun{id: "new-c", node: "n3", role: "executor", cost: 1, created: recent3, seconds: 60})
+	f.exec(`INSERT INTO runs (id, project, node_id, runner_id, owner_id, agent, model, repo_id,
+		status, created_by, created_at, started_at, finished_at)
+		VALUES ('live-d', 'p', 'n4', 'r1', 'u1', 'claude', 'opus', 'repo-1',
+		'running', 'u1', ?, ?, '')`, ts(old8), ts(old8))
+
+	// Touched files on all four runs.
+	f.exec(`INSERT INTO run_touched_files (run_id, path, add_only, at) VALUES
+		('old-a', 'src/a.go', FALSE, ?),
+		('old-a', 'src/b.go', TRUE, ?),
+		('old-b', 'src/a.go', FALSE, ?),
+		('new-c', 'src/a.go', FALSE, ?),
+		('live-d', 'src/a.go', FALSE, ?)`, ts(old8), ts(old8), ts(old8), ts(recent3), ts(old8))
+
+	// Overlaps:
+	// - (old-a, old-b): both finished > 7d ago -> pruned
+	// - (new-c, old-a): new-c finished 3d ago -> kept
+	// - (live-d, old-a): live-d still running -> kept
+	f.exec(`INSERT INTO run_overlaps (run_a, run_b, paths, path_count, strong_count, cross_member, first_at, updated_at) VALUES
+		('old-a', 'old-b', '["src/a.go"]', 1, 1, FALSE, ?, ?),
+		('new-c', 'old-a', '["src/a.go"]', 1, 1, FALSE, ?, ?),
+		('live-d', 'old-a', '["src/a.go"]', 1, 1, FALSE, ?, ?)`,
+		ts(old8), ts(old8), ts(recent3), ts(recent3), ts(old8), ts(old8))
+
+	// Also seed an event on old-a to verify days == 0 still keeps regular retention tables.
+	f.exec(`INSERT INTO run_events (run_id, seq, type, at, payload) VALUES ('old-a', 1, 'text', '', '{}')`)
+
+	res, err := Prune(ctx, f.db, testNow, 0)
+	if err != nil {
+		t.Fatalf("Prune(0): %v", err)
+	}
+	if res.Touched != 3 || res.Overlaps != 1 {
+		t.Fatalf("Prune(0) = %+v, want Touched=3, Overlaps=1", res)
+	}
+	if res.Events != 0 {
+		t.Errorf("Prune(0) pruned %d events, want 0", res.Events)
+	}
+	if n := f.count(`SELECT COUNT(*) FROM run_touched_files WHERE run_id IN ('old-a', 'old-b')`); n != 0 {
+		t.Errorf("old touched files left: %d", n)
+	}
+	if n := f.count(`SELECT COUNT(*) FROM run_touched_files WHERE run_id IN ('new-c', 'live-d')`); n != 2 {
+		t.Errorf("recent/live touched files = %d, want 2", n)
+	}
+	if n := f.count(`SELECT COUNT(*) FROM run_overlaps`); n != 2 {
+		t.Errorf("remaining overlaps = %d, want 2", n)
+	}
+	if n := f.count(`SELECT COUNT(*) FROM run_events WHERE run_id = 'old-a'`); n != 1 {
+		t.Errorf("old run_events should remain when retention days == 0, got %d", n)
+	}
+}

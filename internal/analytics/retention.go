@@ -19,6 +19,9 @@ const (
 	DefaultRetentionDays = 180
 	MinRetentionDays     = 30
 	MaxRetentionDays     = 3650
+	// TouchedRetentionDays is the fixed retention for Layer 2 touched-file and
+	// overlap records (§C.5); it runs even when analytics retention is off.
+	TouchedRetentionDays = 7
 	PruneBatch           = 5000
 )
 
@@ -30,10 +33,15 @@ type PruneResult struct {
 	Patches int `json:"patches"`
 	// Refusals are audit rows of refused attempts (AuditRefusalActions).
 	Refusals int `json:"refusals"`
+	// Touched and Overlaps are Layer 2 coordination rows aged out past 7 days.
+	Touched  int `json:"touched"`
+	Overlaps int `json:"overlaps"`
 }
 
 // Total is every row Prune removed or cleared.
-func (r PruneResult) Total() int { return r.Events + r.Actions + r.Picks + r.Patches + r.Refusals }
+func (r PruneResult) Total() int {
+	return r.Events + r.Actions + r.Picks + r.Patches + r.Refusals + r.Touched + r.Overlaps
+}
 
 // ValidRetentionDays reports whether days may be stored.
 func ValidRetentionDays(days int) bool {
@@ -78,6 +86,41 @@ func RetentionDays(ctx context.Context, database *db.DB) (int, error) {
 // (AuditRefusalActions) age out too. days 0 keeps everything.
 func Prune(ctx context.Context, database *db.DB, now time.Time, days int) (PruneResult, error) {
 	var out PruneResult
+	// Layer 2 touched-file and overlap rows always age out after 7 days, even
+	// when analytics retention is turned off (days <= 0; §C.5).
+	touchedCutoff := formatStamp(now.AddDate(0, 0, -TouchedRetentionDays))
+	touchedSteps := []struct {
+		count *int
+		query string
+		args  []any
+	}{
+		{&out.Touched, `DELETE FROM run_touched_files WHERE ctid IN (
+  SELECT t.ctid FROM run_touched_files t JOIN runs r ON r.id = t.run_id
+   WHERE r.finished_at <> '' AND r.finished_at < ? LIMIT ` + batchLimit + `)`, []any{touchedCutoff}},
+		{&out.Overlaps, `DELETE FROM run_overlaps WHERE ctid IN (
+  SELECT o.ctid FROM run_overlaps o
+    JOIN runs ra ON ra.id = o.run_a
+    JOIN runs rb ON rb.id = o.run_b
+   WHERE ra.finished_at <> '' AND ra.finished_at < ?
+     AND rb.finished_at <> '' AND rb.finished_at < ?
+   LIMIT ` + batchLimit + `)`, []any{touchedCutoff, touchedCutoff}},
+	}
+	for _, step := range touchedSteps {
+		for {
+			res, err := database.ExecContext(ctx, step.query, step.args...)
+			if err != nil {
+				return out, err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return out, err
+			}
+			*step.count += int(n)
+			if n < PruneBatch {
+				break
+			}
+		}
+	}
 	if days <= 0 {
 		return out, nil
 	}

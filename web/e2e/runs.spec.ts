@@ -93,6 +93,9 @@ async function mockRuns(page: Page) {
   await page.route("**/api/runners", (route) =>
     route.fulfill({ json: { runners: [owned] } }),
   );
+  await page.route(/\/api\/runs\/busy\?/, (route) =>
+    route.fulfill({ json: { holders: [], others: 0, choices: [] } }),
+  );
   await page.route(/\/api\/runs\/run1\/events/, (route) =>
     route.fulfill({ json: { events, more: false } }),
   );
@@ -149,8 +152,12 @@ for (const [name, viewport] of Object.entries({
     await drawer.getByRole("button", { name: "派給 agent…" }).click();
     const dialog = page.getByRole("dialog", { name: "派給 agent" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("combobox", { name: "Runner" })).toHaveValue("r1");
-    await expect(dialog.getByRole("combobox", { name: "模型" })).toHaveValue("default");
+    await expect(
+      dialog.getByRole("radiogroup", { name: "哪台電腦" }).getByRole("radio", { name: /desktop/ }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(
+      dialog.getByRole("radiogroup", { name: "用哪個模型" }).getByRole("radio", { name: "CLI 預設" }),
+    ).toHaveAttribute("aria-checked", "true");
     await expect(dialog.getByText(/要等 runner 那端有人接受/)).toBeVisible();
     const box = await dialog.boundingBox();
     expect(box).not.toBeNull();
@@ -449,6 +456,9 @@ async function mockRouting(page: Page) {
   const puts: unknown[] = [];
   let rules: unknown[] = [savedRule];
   await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [twoAgents] } }));
+  await page.route(/\/api\/runs\/busy\?/, (route) =>
+    route.fulfill({ json: { holders: [], others: 0, choices: [] } }),
+  );
   await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [] } }));
   await page.route(/\/api\/runs\/routing/, async (route) => {
     if (route.request().method() === "PUT") {
@@ -543,8 +553,12 @@ for (const [name, viewport] of Object.entries({
     const dialog = page.getByRole("dialog", { name: "派給 agent" });
     await expect(dialog.getByTestId("dispatch-rule-note")).toHaveText("來自規則：標籤 = review");
     // A pipeline's implementer is the form's own agent and model.
-    await expect(dialog.getByRole("combobox", { name: "Agent", exact: true })).toHaveValue("claude");
-    await expect(dialog.getByRole("combobox", { name: "模型", exact: true })).toHaveValue("opus");
+    await expect(
+      dialog.getByRole("radiogroup", { name: "誰來做" }).getByRole("radio", { name: /Claude/ }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(
+      dialog.getByRole("radiogroup", { name: "用哪個模型" }).getByRole("radio", { name: "Opus" }),
+    ).toHaveAttribute("aria-checked", "true");
     await expect(dialog.getByRole("checkbox", { name: "管線：實作 → 審查" })).toBeChecked();
     await expect(dialog.getByRole("combobox", { name: "審查 agent" })).toHaveValue("codex");
     await expect(dialog.getByRole("combobox", { name: "輪數" })).toHaveValue("2");
@@ -554,5 +568,84 @@ for (const [name, viewport] of Object.entries({
     await chain.getByText("Fallback 鏈（1）").click();
     await expect(chain.getByRole("combobox", { name: "備援 1模型" })).toHaveValue("opus");
     await expectInside(page, await dialog.boundingBox(), viewport.width);
+  });
+
+  test(`dispatch busy choice sends onBusy both and holderIds on ${name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const status = await (await page.request.get("/api/auth/status")).json();
+    const owned = {
+      ...runner,
+      ownerId: status.actor?.id ?? "",
+      info: { ...runner.info, capabilities: ["headless", "coord"] },
+    };
+    const busyBody = {
+      code: "BUSY",
+      error: "node is busy",
+      holders: [
+        {
+          runId: "run1",
+          title: "設計稿",
+          agent: "claude",
+          model: "opus",
+          mode: "",
+          status: "running",
+          since: "2026-10-24T08:00:00Z",
+          by: "alice",
+          nodeId: "n",
+          mayStop: true,
+          sameNode: true,
+        },
+      ],
+      others: 0,
+      choices: ["queue", "takeOver", "both"],
+    };
+    const posted: Record<string, unknown>[] = [];
+    await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [owned] } }));
+    await page.route(/\/api\/runs\/busy\?/, (route) => route.fulfill({ json: busyBody }));
+    await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [run] } }));
+    await page.route(/\/api\/runs\/run1\/events/, (route) =>
+      route.fulfill({ json: { events, more: false } }),
+    );
+    await page.route(/\/api\/runs\/run1\/asks/, (route) => route.fulfill({ json: { asks: [] } }));
+    await page.route(/\/api\/runs$/, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fulfill({ json: { runs: [run] } });
+        return;
+      }
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      posted.push(body);
+      if (!body.onBusy) {
+        await route.fulfill({ status: 409, json: busyBody });
+        return;
+      }
+      await route.fulfill({ status: 201, json: { ...run, id: "run-second", busyChoice: body.onBusy } });
+    });
+
+    await freshProject(page, ["設計稿"]);
+    await withoutStages(page);
+    await page.getByText("設計稿").first().click();
+
+    const drawer = page.getByRole("dialog", { name: "節點編輯" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
+    await drawer.getByRole("button", { name: "派給 agent…" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "派給 agent" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("dispatch-busy-preflight")).toBeVisible();
+
+    await dialog.getByRole("button", { name: "派工" }).click();
+    const busyRegion = dialog.getByRole("region", { name: "已經有人在做這件事" });
+    await expect(busyRegion).toBeVisible();
+    await expectInside(page, await dialog.boundingBox(), viewport.width);
+
+    await busyRegion.getByRole("radio", { name: /兩個都做/ }).click();
+    await busyRegion.getByRole("button", { name: "確認" }).click();
+
+    await expect(dialog).toHaveCount(0);
+    expect(posted).toHaveLength(2);
+    expect(posted[0]).not.toHaveProperty("onBusy");
+    expect(posted[1]).toMatchObject({ onBusy: "both", holderIds: ["run1"] });
+    await expectNoHorizontalOverflow(page);
   });
 }

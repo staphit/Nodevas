@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   AuthError,
+  BusyError,
   ConflictError,
   RequestError,
   type Actor,
+  type BusyResponse,
   type Run,
   type RunBudgetStatus,
   type Runner,
@@ -15,6 +17,7 @@ import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import { DispatchDialog, ownRunners, runnerUnavailableReason } from "./DispatchDialog";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { useRuns } from "./runStore";
 
 const viewer = vi.hoisted(() => ({ current: null as Actor | null }));
@@ -35,7 +38,7 @@ const desktop: Runner = {
     hostname: "PC-01",
     os: "windows",
     arch: "amd64",
-    capabilities: ["headless"],
+    capabilities: ["headless", "coord"],
     agents: [
       {
         kind: "claude",
@@ -106,19 +109,54 @@ const withinBudget: RunBudgetStatus = {
   exceeded: "",
 };
 
-function selectNamed(name: string): HTMLSelectElement {
-  return screen.getByRole("combobox", { name }) as HTMLSelectElement;
+const busyPayload: BusyResponse = {
+  holders: [
+    {
+      runId: "holder-1",
+      title: "Fix login",
+      agent: "claude",
+      model: "sonnet",
+      mode: "interactive",
+      status: "running",
+      since: "2026-10-24T08:00:00Z",
+      by: "alice",
+      nodeId: "alpha",
+      mayStop: true,
+      sameNode: true,
+    },
+  ],
+  others: 0,
+  choices: ["queue", "takeOver", "both"],
+};
+
+function radioGroup(name: string) {
+  return screen.getByRole("radiogroup", { name });
 }
 
-function optionTexts(select: HTMLSelectElement): string[] {
-  return within(select)
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+function cardText(el: HTMLElement): string {
+  return (el.querySelector(".picker-card-text")?.textContent ?? el.textContent ?? "").trim();
+}
+
+function radioTexts(groupName: string): string[] {
+  return within(radioGroup(groupName))
+    .getAllByRole("radio")
+    .map(cardText);
+}
+
+function checkedRadioText(groupName: string): string {
+  const checked = within(radioGroup(groupName))
+    .getAllByRole("radio")
+    .find((el) => el.getAttribute("aria-checked") === "true");
+  return checked ? cardText(checked) : "";
+}
+
+function pickCard(groupName: string, label: string | RegExp) {
+  fireEvent.click(within(radioGroup(groupName)).getByRole("radio", { name: label }));
 }
 
 beforeEach(() => {
   viewer.current = alice;
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   useRunners.setState({
     loaded: false,
     loading: false,
@@ -129,7 +167,9 @@ beforeEach(() => {
   });
   useRuns.getState().reset();
   useBudget.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue(withinBudget);
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
 });
 
 afterEach(() => {
@@ -150,37 +190,55 @@ describe("runner eligibility", () => {
 });
 
 describe("DispatchDialog", () => {
-  it("offers own headless runners, installed agents, their models and repos", async () => {
+  it("offers own headless runners, installed agents, their models and repos as picture cards", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({
       runners: [laptop, desktop, oldRunner, bobs],
     });
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
 
-    const runner = await screen.findByRole("combobox", { name: "Runner" });
-    const runnerSelect = runner as HTMLSelectElement;
-    expect(optionTexts(runnerSelect)).toEqual([
-      "laptop — offline",
+    const runners = await screen.findByRole("radiogroup", { name: "Which computer" });
+    const runnerRadios = within(runners).getAllByRole("radio") as HTMLButtonElement[];
+    expect(runnerRadios.map((el) => el.textContent)).toEqual([
+      "laptopoffline",
       "desktop (PC-01)",
-      "old — cannot take runs (update the runner)",
+      "oldcannot take runs (update the runner)",
     ]);
-    expect(runnerSelect.value).toBe("r1");
-    const options = within(runnerSelect).getAllByRole("option") as HTMLOptionElement[];
-    expect(options.map((option) => option.disabled)).toEqual([true, false, true]);
+    expect(runnerRadios.map((el) => el.disabled)).toEqual([true, false, true]);
+    expect(checkedRadioText("Which computer")).toBe("desktop (PC-01)");
 
-    const agent = selectNamed("Agent");
-    expect(optionTexts(agent)).toEqual(["claude · 2.1.0", "codex"]);
-    const model = selectNamed("Model");
-    expect(optionTexts(model)).toEqual(["Opus", "Sonnet (default)"]);
-    expect(model.value).toBe("sonnet");
+    expect(radioTexts("Who works")).toEqual(["Claude2.1.0", "Codex"]);
+    expect(radioTexts("Which model")).toEqual(["Sonnet", "Opus"]);
+    expect(checkedRadioText("Which model")).toBe("Sonnet");
 
-    fireEvent.change(agent, { target: { value: "codex" } });
-    expect(optionTexts(selectNamed("Model"))).toEqual(["gpt-5"]);
-    expect(selectNamed("Model").value).toBe("gpt-5");
+    pickCard("Who works", /Codex/);
+    expect(radioTexts("Which model")).toEqual(["gpt-5"]);
+    expect(checkedRadioText("Which model")).toBe("gpt-5");
 
-    const repo = selectNamed("Repository");
-    expect(optionTexts(repo)).toEqual(["nodevas — H:\\visual-editor", "site"]);
+    expect(radioTexts("Which folders")).toEqual(["nodevasH:/visual-editor", "site"]);
     expect(screen.getByText(/waits until someone at the runner accepts it/)).toBeInTheDocument();
+  });
+
+  it("leaves a signed-out agent without a card and shows picker.signedOut", async () => {
+    const withSignedOut: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        agents: [
+          { kind: "claude", installed: false, signedOut: true, models: [] },
+          { kind: "codex", installed: true, models: [{ id: "gpt-5", default: true }] },
+        ],
+      },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [withSignedOut] });
+
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("radiogroup", { name: "Who works" });
+
+    expect(radioTexts("Who works")).toEqual(["Codex"]);
+    expect(
+      screen.getByText("Claude is not signed in on that computer; sign in there to use it"),
+    ).toBeInTheDocument();
   });
 
   it("submits the chosen runner, agent, model, repo, base and instructions", async () => {
@@ -189,10 +247,10 @@ describe("DispatchDialog", () => {
     const onCreated = vi.fn();
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
-    fireEvent.change(selectNamed("Model"), { target: { value: "opus" } });
-    fireEvent.change(selectNamed("Repository"), { target: { value: "repo2" } });
+    pickCard("Which model", "Opus");
+    pickCard("Which folders", "site");
     fireEvent.change(screen.getByRole("textbox", { name: "Base branch" }), {
       target: { value: " develop " },
     });
@@ -219,7 +277,7 @@ describe("DispatchDialog", () => {
     const create = vi.spyOn(api, "createRun").mockResolvedValue(created);
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
 
     await waitFor(() =>
@@ -233,13 +291,110 @@ describe("DispatchDialog", () => {
     );
   });
 
+  it("preflights node busy status, shows BusyChoice on 409, and resends with holderIds", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const busySpy = vi.spyOn(api, "getRunBusy").mockResolvedValue(busyPayload);
+    const create = vi
+      .spyOn(api, "createRun")
+      .mockRejectedValueOnce(new BusyError("busy", busyPayload))
+      .mockResolvedValueOnce(created);
+    const onCreated = vi.fn();
+
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByRole("radiogroup", { name: "Which computer" });
+
+    // Preflight note appears before clicking Dispatch.
+    await waitFor(() =>
+      expect(busySpy).toHaveBeenCalledWith({ runnerId: "r1", repoId: "repo1", nodeId: "alpha" }),
+    );
+    expect(await screen.findByTestId("dispatch-busy-preflight")).toHaveTextContent(
+      "Someone is already on this",
+    );
+
+    // Submitting hits 409 BUSY -> BusyChoice renders.
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    const busyRegion = await screen.findByRole("region", { name: "Someone is already on this" });
+    fireEvent.click(within(busyRegion).getByRole("radio", { name: /Stop it and start mine/ }));
+    fireEvent.click(within(busyRegion).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created));
+    expect(create).toHaveBeenNthCalledWith(2, {
+      nodeId: "alpha",
+      runnerId: "r1",
+      agent: "claude",
+      model: "sonnet",
+      repoId: "repo1",
+      onBusy: "takeOver",
+      holderIds: ["holder-1"],
+    });
+  });
+
+  it("shows busy.changed when the holder set changes between 409 and retry", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const updatedBusy: BusyResponse = {
+      ...busyPayload,
+      holders: [{ ...busyPayload.holders![0], runId: "holder-2", title: "Newer run" }],
+    };
+    vi.spyOn(api, "createRun")
+      .mockRejectedValueOnce(new BusyError("busy", busyPayload))
+      .mockRejectedValueOnce(new BusyError("busy changed", updatedBusy));
+
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("radiogroup", { name: "Which computer" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    const busyRegion = await screen.findByRole("region", { name: "Someone is already on this" });
+    fireEvent.click(within(busyRegion).getByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByText("Something changed; check again")).toBeInTheDocument();
+    expect(screen.getByText("Newer run")).toBeInTheDocument();
+  });
+
+  it("mounts ContestForm behind the compare toggle and submits a node contest", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const contestRun: Run = { ...created, id: "crun-1", contestId: "c1", contestLabel: "A" };
+    const createContest = vi.spyOn(api, "createContest").mockResolvedValue({
+      contest: {
+        id: "c1",
+        title: "Alpha",
+        nodeId: "alpha",
+        project: "p",
+        global: false,
+        state: "running",
+        entryCount: 2,
+        createdBy: "u1",
+        createdAt: "2026-10-24T08:00:00Z",
+      },
+      runs: [contestRun, { ...contestRun, id: "crun-2", contestLabel: "B" }],
+    });
+    const onCreated = vi.fn();
+
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByRole("radiogroup", { name: "Which computer" });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents (比稿)" }));
+    expect(screen.getByText("2 agents on the same task")).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(contestRun));
+    expect(createContest).toHaveBeenCalledWith({
+      nodeId: "alpha",
+      repoId: "repo1",
+      entries: [
+        { runnerId: "r1", agent: "claude", model: "sonnet" },
+        { runnerId: "r1", agent: "codex", model: "gpt-5" },
+      ],
+    });
+  });
+
   it("shows an API error inline and stays open", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     vi.spyOn(api, "createRun").mockRejectedValue(new AuthError(403, "remote dispatch is off"));
     const onCreated = vi.fn();
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -254,7 +409,7 @@ describe("DispatchDialog", () => {
     vi.spyOn(api, "createRun").mockRejectedValue(new ConflictError("", ""));
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/This runner cannot take runs/);
@@ -267,7 +422,7 @@ describe("DispatchDialog", () => {
     vi.spyOn(api, "createRun").mockRejectedValue(new ConflictError("", "", reason, "FAILED_PRECONDITION"));
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
 
     const alert = await screen.findByRole("alert");
@@ -278,7 +433,7 @@ describe("DispatchDialog", () => {
   it("checks the base branch and the instruction size before sending", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     const dispatch = screen.getByRole("button", { name: "Dispatch" });
     const base = screen.getByRole("textbox", { name: "Base branch" });
 
@@ -303,10 +458,10 @@ describe("DispatchDialog", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [bare] });
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
 
     expect(screen.getByText("nodevas runner repo add <path>")).toBeInTheDocument();
-    expect(selectNamed("Repository")).toBeDisabled();
+    expect(screen.queryByRole("radiogroup", { name: "Which folders" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dispatch" })).toBeDisabled();
   });
 
@@ -358,7 +513,7 @@ describe("DispatchDialog", () => {
   it("says nothing about the budget while within it", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     await waitFor(() => expect(useBudget.getState().status).not.toBeNull());
     expect(screen.queryByText(/budget is used up/)).not.toBeInTheDocument();
   });
@@ -378,7 +533,7 @@ describe("DispatchDialog", () => {
     );
     const onCreated = vi.fn();
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(

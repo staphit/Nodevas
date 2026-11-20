@@ -6,6 +6,7 @@ import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import { DispatchDialog } from "./DispatchDialog";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { useRouting } from "./routingStore";
 import { useRuns } from "./runStore";
 
@@ -77,9 +78,28 @@ function selectNamed(name: string): HTMLSelectElement {
   return screen.getByRole("combobox", { name }) as HTMLSelectElement;
 }
 
+function radioGroup(name: string) {
+  return screen.getByRole("radiogroup", { name });
+}
+
+function cardText(el: HTMLElement): string {
+  return (el.querySelector(".picker-card-text")?.textContent ?? el.textContent ?? "").trim();
+}
+
+function checkedRadioText(groupName: string): string {
+  const checked = within(radioGroup(groupName))
+    .getAllByRole("radio")
+    .find((el) => el.getAttribute("aria-checked") === "true");
+  return checked ? cardText(checked) : "";
+}
+
+function pickCard(groupName: string, label: string | RegExp) {
+  fireEvent.click(within(radioGroup(groupName)).getByRole("radio", { name: label }));
+}
+
 beforeEach(() => {
   viewer.current = { id: "u1", name: "alice", role: "admin" };
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   useRunners.setState({
     loaded: false,
     loading: false,
@@ -91,11 +111,13 @@ beforeEach(() => {
   useRuns.getState().reset();
   useBudget.getState().reset();
   useRouting.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue({
     budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
     used: { runs: 0, costUsd: 0, tokens: 0 },
     exceeded: "",
   });
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
   vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop, studio] });
 });
 
@@ -118,7 +140,7 @@ describe("DispatchDialog routing", () => {
 
     await waitFor(() => expect(screen.getByTestId("dispatch-rule-note")).toHaveTextContent("Auto routing"));
     expect(rules).not.toHaveBeenCalled();
-    expect(selectNamed("Agent").value).toBe("codex");
+    expect(checkedRadioText("Who works")).toContain("Codex");
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ agent: "codex", model: "gpt-5", runnerId: "r2", routePick: "pick-42" }));
@@ -126,7 +148,6 @@ describe("DispatchDialog routing", () => {
 
   it("pre-fills runner, agent, model and fallbacks from the matched rule", async () => {
     vi.spyOn(api, "getRoute").mockResolvedValue(suggestion);
-    // The suggestion names its rule; the rule says which tag matched.
     const rules = vi.spyOn(api, "getRouting").mockResolvedValue({
       rules: [
         {
@@ -149,9 +170,9 @@ describe("DispatchDialog routing", () => {
     );
     expect(api.getRoute).toHaveBeenCalledWith("alpha");
     expect(rules).toHaveBeenCalledTimes(1);
-    expect(selectNamed("Runner").value).toBe("r2");
-    expect(selectNamed("Agent").value).toBe("codex");
-    expect(selectNamed("Model").value).toBe("gpt-5");
+    expect(checkedRadioText("Which computer")).toContain("studio");
+    expect(checkedRadioText("Who works")).toContain("Codex");
+    expect(checkedRadioText("Which model")).toBe("gpt-5");
     // The chain is collapsed, its length in the summary.
     const chain = screen.getByTestId("dispatch-fallbacks");
     expect(chain).not.toHaveAttribute("open");
@@ -182,9 +203,9 @@ describe("DispatchDialog routing", () => {
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     await screen.findByTestId("dispatch-rule-note");
 
-    fireEvent.change(selectNamed("Runner"), { target: { value: "r1" } });
-    fireEvent.change(selectNamed("Agent"), { target: { value: "claude" } });
-    fireEvent.change(selectNamed("Model"), { target: { value: "opus" } });
+    pickCard("Which computer", "desktop");
+    pickCard("Who works", /Claude/);
+    pickCard("Which model", "Opus");
     const chain = screen.getByTestId("dispatch-fallbacks");
     fireEvent.click(within(chain).getByRole("button", { name: "Remove Fallback 1" }));
     fireEvent.change(within(chain).getByRole("combobox", { name: "Fallback 1 agent" }), {
@@ -206,6 +227,27 @@ describe("DispatchDialog routing", () => {
     });
   });
 
+  it("sets touched.current.agent when a model card is picked before a late route suggestion arrives", async () => {
+    let resolveRoute!: (value: RouteSuggestion) => void;
+    vi.spyOn(api, "getRoute").mockReturnValue(
+      new Promise<RouteSuggestion>((resolve) => {
+        resolveRoute = resolve;
+      }),
+    );
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("radiogroup", { name: "Which model" });
+
+    // User picks Opus before the route suggestion resolves.
+    pickCard("Which model", "Opus");
+    expect(checkedRadioText("Which model")).toBe("Opus");
+
+    // Late suggestion arrives asking for codex/gpt-5; touched.agent prevents overwrite.
+    resolveRoute({ ...suggestion, value: "review" });
+    await screen.findByTestId("dispatch-rule-note");
+    expect(checkedRadioText("Who works")).toContain("Claude");
+    expect(checkedRadioText("Which model")).toBe("Opus");
+  });
+
   it("pre-fills a pipeline and sends it with the implementer from the form", async () => {
     vi.spyOn(api, "getRoute").mockResolvedValue({
       ruleId: "rule-2",
@@ -224,7 +266,7 @@ describe("DispatchDialog routing", () => {
       "From rule: Global default",
     );
     expect(screen.getByRole("checkbox", { name: "Pipeline: implement → review" })).toBeChecked();
-    expect(selectNamed("Model").value).toBe("opus");
+    expect(checkedRadioText("Which model")).toBe("Opus");
     expect(screen.getByText("claude/opus (the agent and model above)")).toBeInTheDocument();
     expect(selectNamed("Review model").value).toBe("gpt-5-codex");
     expect(selectNamed("Rounds").value).toBe("3");
@@ -255,18 +297,16 @@ describe("DispatchDialog routing", () => {
     const create = vi.spyOn(api, "createRun").mockResolvedValue(created);
 
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     await waitFor(() => expect(api.getRoute).toHaveBeenCalled());
     expect(screen.queryByTestId("dispatch-rule-note")).not.toBeInTheDocument();
-    expect(selectNamed("Runner").value).toBe("r1");
+    expect(checkedRadioText("Which computer")).toContain("desktop");
     expect(screen.getByText("Fallback chain (0)")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Pipeline: implement → review" }));
-    // The reviewer defaults to another agent than the implementer.
     expect(selectNamed("Review agent").value).toBe("codex");
     const chain = screen.getByTestId("dispatch-fallbacks");
     fireEvent.click(within(chain).getByRole("button", { name: "Add fallback" }));
-    // A free-text fallback left blank blocks the dispatch.
     fireEvent.change(within(chain).getByRole("combobox", { name: "Fallback 1 agent" }), {
       target: { value: "\u0000other" },
     });
@@ -302,7 +342,6 @@ describe("DispatchDialog routing", () => {
     });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     const note = await screen.findByTestId("dispatch-rule-note");
-    // A kind rule reads as the type's name.
     expect(note).toHaveTextContent("From rule: Node kind = Task");
     expect(note).toHaveTextContent("This runner does not offer gemini/flash; using claude/sonnet.");
   });
@@ -311,7 +350,7 @@ describe("DispatchDialog routing", () => {
     vi.spyOn(api, "getRoute").mockRejectedValue(new Error("404"));
     const create = vi.spyOn(api, "createRun").mockResolvedValue(created);
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(screen.queryByTestId("dispatch-rule-note")).not.toBeInTheDocument();

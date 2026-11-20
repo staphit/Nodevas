@@ -6,6 +6,7 @@ import { useRunners } from "../runners/runnerStore";
 import { useApp } from "../store";
 import type { Acceptance, Graph, Workflow } from "../types";
 import { useBudget } from "./budgetStore";
+import { useCoordStore } from "./coord/coordStore";
 import { DispatchDialog } from "./DispatchDialog";
 import { useRuns } from "./runStore";
 
@@ -31,10 +32,10 @@ function runner(verify: boolean): Runner {
       hostname: "PC-01",
       os: "windows",
       arch: "amd64",
-      capabilities: ["headless", "plan", "roles", "verify", "judge"],
+      capabilities: ["headless", "interactive", "plan", "roles", "verify", "judge"],
       agents: [
-        { kind: "claude", installed: true, models: [{ id: "sonnet", default: true }] },
-        { kind: "codex", installed: true, models: [{ id: "gpt-5" }] },
+        { kind: "claude", installed: true, interactive: true, models: [{ id: "sonnet", default: true }] },
+        { kind: "codex", installed: true, interactive: true, models: [{ id: "gpt-5" }] },
       ],
       repos: [{ id: "repo1", name: "nodevas", verify } as never],
     },
@@ -71,21 +72,23 @@ const criteria: Acceptance = { items: [{ id: "a1", text: "logs in on Safari" }] 
 
 beforeEach(() => {
   viewer.current = { id: "u1", name: "alice", role: "admin" };
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   useRunners.setState({ loaded: false, loading: false, runners: [], error: null, creating: false, revoking: {} });
   useRuns.getState().reset();
   useBudget.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue({
     budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
     used: { runs: 0, costUsd: 0, tokens: 0 },
     exceeded: "",
   });
+  vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("DispatchDialog with workflow stages", () => {
-  it("shows the stage chain the run will go through", async () => {
+  it("shows the stage chain the run will go through and defaults to background", async () => {
     setGraph(standard, criteria);
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [runner(true)] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
@@ -97,6 +100,9 @@ describe("DispatchDialog with workflow stages", () => {
       "green",
       "Reviewer",
     ]);
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toBeDisabled();
+    expect(screen.getByText("A staged node runs in the background")).toBeInTheDocument();
   });
 
   it("blocks a dispatch without acceptance criteria and offers to write them", async () => {
@@ -133,7 +139,7 @@ describe("DispatchDialog with workflow stages", () => {
     setGraph(null);
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [runner(true)] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole("combobox", { name: "Runner" });
+    await screen.findByRole("radiogroup", { name: "Which computer" });
     expect(screen.queryByRole("list", { name: "Stages" })).toBeNull();
     expect(screen.getByRole("button", { name: "Dispatch" })).toBeEnabled();
   });

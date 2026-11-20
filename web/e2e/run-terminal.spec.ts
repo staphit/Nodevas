@@ -22,6 +22,7 @@ const runner = {
       {
         kind: "claude",
         installed: true,
+        interactive: true,
         version: "2.1.0 (Claude Code)",
         models: [{ id: "default", label: "CLI default", default: true }],
       },
@@ -60,6 +61,9 @@ async function mockInteractiveRun(page: Page) {
   const status = await (await page.request.get("/api/auth/status")).json();
   const owned = { ...runner, ownerId: status.actor?.id ?? "" };
   await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [owned] } }));
+  await page.route(/\/api\/runs\/busy\?/, (route) =>
+    route.fulfill({ json: { holders: [], others: 0, choices: [] } }),
+  );
   await page.route(/\/api\/runs\/run9\/events/, (route) =>
     route.fulfill({ json: { events: [], more: false } }),
   );
@@ -99,6 +103,12 @@ for (const [name, viewport] of Object.entries({
     await page.setViewportSize(viewport);
     const mock = await mockInteractiveRun(page);
     await freshProject(page, ["設計稿"]);
+    const cleared = await page.request.post("/api/graph/ops", {
+      data: { ops: [{ kind: "workflow", workflow: null }] },
+    });
+    expect(cleared.ok(), await cleared.text()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByText("設計稿").first()).toBeVisible();
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
@@ -149,9 +159,13 @@ for (const [name, viewport] of Object.entries({
     await drawer.getByRole("button", { name: "派給 agent…" }).click();
     const dialog = page.getByRole("dialog", { name: "派給 agent" });
     await expect(dialog).toBeVisible();
-    await dialog.getByText("互動式", { exact: true }).click();
-    await expect(dialog.getByRole("radio", { name: "互動式" })).toBeChecked();
-    await expect(dialog.getByText(/在 runner 上開啟 agent 自己的終端機介面/)).toBeVisible();
+    const modeGroup = dialog.getByRole("radiogroup", { name: "模式" });
+    await expect(modeGroup.getByRole("radio", { name: "互動" })).toHaveAttribute("aria-checked", "true");
+    await modeGroup.getByRole("radio", { name: "背景" }).click();
+    await expect(modeGroup.getByRole("radio", { name: "背景" })).toHaveAttribute("aria-checked", "true");
+    await modeGroup.getByRole("radio", { name: "互動" }).click();
+    await expect(modeGroup.getByRole("radio", { name: "互動" })).toHaveAttribute("aria-checked", "true");
+    await expect(dialog.getByText(/在 runner 的終端機中執行/)).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 }
