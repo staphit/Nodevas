@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -477,5 +478,195 @@ func TestSummaryUsesLastText(t *testing.T) {
 	finish2 := env.hub.wait("run-claude-no-transcript", runnerwire.TypeFinish)
 	if !strings.Contains(finish2.Result.Summary, "Interactive session ended") || !strings.Contains(finish2.Result.Summary, "Last terminal line") {
 		t.Fatalf("fallback summary = %q, want terminal tail summary", finish2.Result.Summary)
+	}
+}
+
+// collectEvents is an emit that keeps what the tail sends.
+type collectEvents struct {
+	mu     sync.Mutex
+	events []runnerwire.RunEvent
+}
+
+func (c *collectEvents) emit(ev runnerwire.RunEvent) {
+	c.mu.Lock()
+	c.events = append(c.events, ev)
+	c.mu.Unlock()
+}
+
+func (c *collectEvents) texts(typ string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, ev := range c.events {
+		if ev.Type == typ {
+			out = append(out, ev.Text)
+		}
+	}
+	return out
+}
+
+func (c *collectEvents) mentions(s string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ev := range c.events {
+		if strings.Contains(fmt.Sprintf("%+v", ev), s) {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantLine(sessionID, stamp, text string) string {
+	return `{"type":"assistant","sessionId":"` + sessionID + `","timestamp":"` + stamp +
+		`","message":{"role":"assistant","content":[{"type":"text","text":"` + text + `"}]}}`
+}
+
+func toolLine(sessionID, stamp, id string) string {
+	return `{"type":"assistant","sessionId":"` + sessionID + `","timestamp":"` + stamp +
+		`","message":{"role":"assistant","content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{"command":"ls ` + id + `"}}]}}`
+}
+
+// A resumed Claude session goes on writing the same <id>.jsonl: the tail of
+// the new turn starts where the file ended before the CLI started, so turn
+// 1's events are not sent again and the summary is turn 2's last text.
+func TestResumedTailSkipsTheEarlierTurns(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "projects")
+	projDir := filepath.Join(projectsDir, "-proj")
+	if err := os.MkdirAll(projDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := newUUIDv4()
+	path := filepath.Join(projDir, sessionID+".jsonl")
+	old := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	appendFile(t, path, strings.Join([]string{
+		assistantLine(sessionID, old, "turn one text"),
+		toolLine(sessionID, old, "toolu_turn1"),
+		assistantLine(sessionID, old, "turn one done"),
+	}, "\n")+"\n")
+
+	got := &collectEvents{}
+	tail := newTranscriptTail(sessionID, got.emit, transcriptOptions{
+		projectsDir: projectsDir, pollInterval: 5 * time.Millisecond, resume: true,
+	})
+	tail.start(context.Background())
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	appendFile(t, path, strings.Join([]string{
+		assistantLine(sessionID, now, "turn two text"),
+		toolLine(sessionID, now, "toolu_turn2"),
+		assistantLine(sessionID, now, "turn two done"),
+	}, "\n")+"\n")
+	eventually(t, "turn 2's events", func() bool { return len(got.texts(runnerwire.EventText)) >= 2 })
+	tail.stop()
+
+	if texts := got.texts(runnerwire.EventText); !slices.Equal(texts, []string{"turn two text", "turn two done"}) {
+		t.Fatalf("text events = %q, want only turn 2's", texts)
+	}
+	if got.mentions("toolu_turn1") {
+		t.Fatal("turn 1's tool call was sent again")
+	}
+	if !got.mentions("toolu_turn2") {
+		t.Fatal("turn 2's tool call is missing")
+	}
+	if s := tail.summary("fallback"); s != "turn two done" {
+		t.Fatalf("summary = %q, want turn 2's last text", s)
+	}
+}
+
+// A resumed turn whose transcript never grows: the summary is the fallback,
+// never turn 1's text, and the runner says the feed is missing.
+func TestResumedTailWithNoNewLinesSaysSo(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "projects")
+	projDir := filepath.Join(projectsDir, "-proj")
+	if err := os.MkdirAll(projDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := newUUIDv4()
+	appendFile(t, filepath.Join(projDir, sessionID+".jsonl"),
+		assistantLine(sessionID, "2026-01-01T00:00:00Z", "turn one done")+"\n")
+	got := &collectEvents{}
+	var mu sync.Mutex
+	var logged []string
+	tail := newTranscriptTail(sessionID, got.emit, transcriptOptions{
+		projectsDir: projectsDir, pollInterval: 5 * time.Millisecond, resume: true,
+		logf: func(format string, args ...any) {
+			mu.Lock()
+			logged = append(logged, fmt.Sprintf(format, args...))
+			mu.Unlock()
+		},
+	})
+	tail.start(context.Background())
+	time.Sleep(30 * time.Millisecond)
+	tail.stop()
+	if s := tail.summary("fallback"); s != "fallback" {
+		t.Fatalf("summary = %q, want the fallback", s)
+	}
+	if texts := got.texts(runnerwire.EventText); len(texts) != 0 {
+		t.Fatalf("text events = %q, want none", texts)
+	}
+	if logs := got.texts(runnerwire.EventLog); len(logs) == 0 {
+		t.Fatal("no log event says the transcript feed is missing")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(strings.Join(logged, "\n"), sessionID) {
+		t.Fatalf("runner log = %q, want a note naming the session whose transcript did not grow", logged)
+	}
+}
+
+// A Claude that answers --resume with a new session id writes a new file in
+// the worktree's project folder: the tail follows it, skipping the history
+// copied into it, and reports the new id.
+func TestResumedTailFollowsANewSessionFile(t *testing.T) {
+	base := t.TempDir()
+	projectsDir := filepath.Join(base, "projects")
+	workdir := filepath.Join(base, "wt")
+	if err := os.MkdirAll(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(projectsDir, claudeProjectDirName(resolved))
+	if err := os.MkdirAll(projDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldID, newID, otherID := newUUIDv4(), newUUIDv4(), newUUIDv4()
+	old := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	appendFile(t, filepath.Join(projDir, oldID+".jsonl"), assistantLine(oldID, old, "turn one done")+"\n")
+	// An earlier session in the same folder is not the new one.
+	appendFile(t, filepath.Join(projDir, otherID+".jsonl"), assistantLine(otherID, old, "someone else")+"\n")
+
+	got := &collectEvents{}
+	var mu sync.Mutex
+	var reported []string
+	tail := newTranscriptTail(oldID, got.emit, transcriptOptions{
+		projectsDir: projectsDir, workdir: workdir, pollInterval: 5 * time.Millisecond, resume: true,
+		onSession: func(id string) {
+			mu.Lock()
+			reported = append(reported, id)
+			mu.Unlock()
+		},
+	})
+	tail.start(context.Background())
+	defer tail.stop()
+	appendFile(t, filepath.Join(projDir, otherID+".jsonl"), "")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	appendFile(t, filepath.Join(projDir, newID+".jsonl"), strings.Join([]string{
+		assistantLine(newID, old, "turn one done"),
+		assistantLine(newID, now, "turn two done"),
+	}, "\n")+"\n")
+	eventually(t, "the new session's turn", func() bool { return len(got.texts(runnerwire.EventText)) >= 1 })
+	tail.stop()
+	if texts := got.texts(runnerwire.EventText); !slices.Equal(texts, []string{"turn two done"}) {
+		t.Fatalf("text events = %q, want only the new turn's", texts)
+	}
+	if s := tail.summary("fallback"); s != "turn two done" {
+		t.Fatalf("summary = %q", s)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(reported, []string{newID}) {
+		t.Fatalf("reported sessions = %q, want [%s]", reported, newID)
 	}
 }

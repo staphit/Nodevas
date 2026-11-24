@@ -72,6 +72,11 @@ type Dispatcher struct {
 	// (Store.createWith); a seam for Start's tests.
 	createRun func(ctx context.Context, q querier, in New) (Record, error)
 
+	// budgetStatus reads an owner's budget for Pump's re-check of queued
+	// group members (overCostOrTokens, cancelOverBudget); nil means
+	// Store.BudgetStatus. A seam for Pump's tests.
+	budgetStatus func(ctx context.Context, ownerID string) (runnerwire.BudgetStatus, error)
+
 	// workspaceWaiters are the requests waiting for a workspace action's
 	// answer (AwaitWorkspaceAction), by action ID; closed when it comes.
 	workspaceMu      sync.Mutex
@@ -290,19 +295,33 @@ func (d *Dispatcher) Submit(ctx context.Context, r Record) Record {
 // while its lock is held would wait forever. Nothing Pump calls with a runner
 // lock held ends a run or pumps another runner.
 func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
-	over := d.pumpLocked(ctx, runnerID)
-	cancelled := false
-	for _, r := range over {
-		if d.cancelOverBudget(ctx, r) {
-			cancelled = true
+	lookAgain := true
+	for {
+		over := d.pumpLocked(ctx, runnerID)
+		cancelled, kept := false, false
+		for _, r := range over {
+			if d.cancelOverBudget(ctx, r) {
+				cancelled = true
+			} else {
+				kept = true
+			}
 		}
-	}
-	// A cancelled member no longer holds its repository, so a run on this
-	// runner waiting behind it may go now; busyEnded pumps only the other
-	// runners. Each pass that comes back here cancelled a queued run, so
-	// this ends.
-	if cancelled {
-		d.Pump(ctx, runnerID)
+		switch {
+		case cancelled:
+			// A cancelled member no longer holds its repository, so a run
+			// on this runner waiting behind it may go now; busyEnded pumps
+			// only the other runners. Each such pass cancelled a queued
+			// run, so this ends.
+		case kept && lookAgain:
+			// The pass skipped a member as over budget, but the cancel's
+			// own read found it under (the day rolled over) or failed: it
+			// is still queued, and nothing else would pump this runner for
+			// it. One more pass, not more, so two reads that keep
+			// disagreeing cannot spin.
+			lookAgain = false
+		default:
+			return
+		}
 	}
 }
 
@@ -389,11 +408,19 @@ func (d *Dispatcher) overCostOrTokens(ctx context.Context, r Record) bool {
 	if r.GroupID == "" || r.OwnerID == "" || !isWritingKind(r.Kind, !r.Global) {
 		return false
 	}
-	budget, err := d.store.BudgetStatus(ctx, r.OwnerID)
+	budget, err := d.memberBudget(ctx, r.OwnerID)
 	if err != nil {
 		return false
 	}
 	return exceededCostOrTokens(budget) != ""
+}
+
+// memberBudget is the owner's budget as Pump's re-check reads it.
+func (d *Dispatcher) memberBudget(ctx context.Context, ownerID string) (runnerwire.BudgetStatus, error) {
+	if d.budgetStatus != nil {
+		return d.budgetStatus(ctx, ownerID)
+	}
+	return d.store.BudgetStatus(ctx, ownerID)
 }
 
 // cancelOverBudget cancels a queued group member with FailureCode
@@ -401,7 +428,7 @@ func (d *Dispatcher) overCostOrTokens(ctx context.Context, r Record) bool {
 // since pumpLocked, and the transition moves the run only if it is still
 // queued. The caller holds no runner lock: afterEnd may pump other runners.
 func (d *Dispatcher) cancelOverBudget(ctx context.Context, r Record) bool {
-	budget, err := d.store.BudgetStatus(ctx, r.OwnerID)
+	budget, err := d.memberBudget(ctx, r.OwnerID)
 	if err != nil {
 		return false
 	}

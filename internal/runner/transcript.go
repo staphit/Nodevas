@@ -2,7 +2,9 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -43,6 +45,13 @@ type transcriptOptions struct {
 	// expectedUID overrides os.Geteuid in tests so refusal of foreign-owned
 	// files can be tested without root privileges.
 	expectedUID func() int
+	// resume: the CLI resumes an earlier session, so the transcript may
+	// already hold earlier turns (see newTranscriptTail).
+	resume bool
+	// logf writes to the runner's log; onSession is told the id of a new
+	// session the resumed CLI wrote instead of the old one. Either may be nil.
+	logf      func(format string, args ...any)
+	onSession func(id string)
 }
 
 // transcriptTail tails a Claude interactive session's JSONL transcript
@@ -54,6 +63,14 @@ type transcriptOptions struct {
 // folders named after the worktree (projectDirs); a look through every
 // project folder, which can be thousands on a busy machine, backs off from
 // the poll interval to transcriptScanMax.
+//
+// A resumed session (transcriptOptions.resume) goes on writing the earlier
+// turns' file, so the tail starts where that file ended before the CLI
+// started: earlier turns are neither sent again nor taken as this turn's
+// summary. A CLI that writes a new session instead leaves that file as it
+// was; the tail then follows the newest transcript that appeared in the
+// same folders since the start, skipping lines stamped before it (the
+// history such a session starts with), and reports the new id.
 type transcriptTail struct {
 	sessionID    string
 	projectsDir  string
@@ -67,8 +84,31 @@ type transcriptTail struct {
 	mu       sync.Mutex
 	lastText string
 	started  bool
+	// idle: stopped before it started, so no goroutine runs.
+	idle bool
+	// handled counts the lines handed to the parser this turn.
+	handled int
 
 	file *os.File
+
+	// A resumed session (see the type's comment); the tail goroutine's own
+	// once it starts.
+	resume    bool
+	logf      func(format string, args ...any)
+	onSession func(id string)
+	startedAt time.Time
+	// watchDirs are the folders a new session's transcript is looked for
+	// in; known is the transcripts already there at the start (dir/name).
+	watchDirs []string
+	known     map[string]bool
+	// grew: bytes came from the followed file after the start. switched:
+	// following a new session's file, whose lines stamped before
+	// skipBefore are history. skipPartial: the resumed file ended without
+	// a newline, so the first line read is the rest of an old one.
+	grew        bool
+	switched    bool
+	skipBefore  time.Time
+	skipPartial bool
 	// nextScan and scanGap pace the full scans; scans counts them (tests).
 	nextScan time.Time
 	scanGap  time.Duration
@@ -79,11 +119,14 @@ type transcriptTail struct {
 	stopOnce sync.Once
 }
 
-// startTranscriptTail starts tailing Claude Code's session transcript into
-// j.emit for an interactive Claude run with a runner-chosen session ID.
-// Returns nil for other agents or invalid session IDs; nil-safe methods keep
-// the call site in interactive.go a no-op in those cases.
-func (j *jobs) startTranscriptTail(ctx context.Context, r *run, sessionID, workdir string) *transcriptTail {
+// prepareTranscriptTail makes the tail of Claude Code's session transcript
+// into j.emit for an interactive Claude run, before the CLI starts (resume:
+// it resumes sessionID, whose transcript is followed from where it ends
+// now); start it once the CLI runs. A new session the resumed CLI writes
+// instead becomes the run's session. Returns nil for other agents or
+// invalid session IDs; nil-safe methods keep the call site in
+// interactive.go a no-op in those cases.
+func (j *jobs) prepareTranscriptTail(r *run, sessionID, workdir string, resume bool) *transcriptTail {
 	if r == nil || r.job.Agent != "claude" || !validTranscriptSessionID(sessionID) {
 		return nil
 	}
@@ -91,10 +134,25 @@ func (j *jobs) startTranscriptTail(ctx context.Context, r *run, sessionID, workd
 	if err != nil {
 		return nil
 	}
+	runID := r.job.RunID
 	t := newTranscriptTail(sessionID, func(ev runnerwire.RunEvent) {
 		j.emit(r, ev)
-	}, transcriptOptions{projectsDir: dir, workdir: workdir})
-	t.start(ctx)
+	}, transcriptOptions{
+		projectsDir: dir,
+		workdir:     workdir,
+		resume:      resume,
+		logf: func(format string, args ...any) {
+			j.c.logf("run %s: "+format, append([]any{runID}, args...)...)
+		},
+		onSession: func(id string) {
+			if !runnerwire.ValidSessionID(id) {
+				return
+			}
+			j.mu.Lock()
+			r.session = id
+			j.mu.Unlock()
+		},
+	})
 	return t
 }
 
@@ -118,9 +176,49 @@ func newTranscriptTail(sessionID string, emit func(runnerwire.RunEvent), opts tr
 		parser:       (adapter.Claude{}).NewParser(),
 		stopCh:       make(chan struct{}),
 		doneCh:       make(chan struct{}),
+		logf:         opts.logf,
+		onSession:    opts.onSession,
 	}
 	t.lines = lineWriter{fn: t.handleLine}
+	if opts.resume {
+		t.markResume()
+	}
 	return t
+}
+
+// markResume records, before a resumed CLI starts, where its transcript
+// ends and which transcripts its folders already hold.
+func (t *transcriptTail) markResume() {
+	t.resume = true
+	t.startedAt = time.Now()
+	t.watchDirs = slices.Clone(t.projectDirs)
+	if !validTranscriptSessionID(t.sessionID) || t.projectsDir == "" {
+		return
+	}
+	if f, dir, err := t.openTranscriptFile(); err == nil {
+		if info, err := f.Stat(); err != nil {
+			_ = f.Close()
+		} else if _, err := f.Seek(info.Size(), io.SeekStart); err != nil {
+			_ = f.Close()
+		} else {
+			t.file = f
+			if size := info.Size(); size > 0 {
+				var last [1]byte
+				if _, err := f.ReadAt(last[:], size-1); err == nil && last[0] != '\n' {
+					t.skipPartial = true
+				}
+			}
+			if !slices.Contains(t.watchDirs, dir) {
+				t.watchDirs = append(t.watchDirs, dir)
+			}
+		}
+	}
+	t.known = map[string]bool{}
+	for _, dir := range t.watchDirs {
+		for _, name := range t.sessionFiles(dir) {
+			t.known[dir+"/"+name] = true
+		}
+	}
 }
 
 func (t *transcriptTail) start(ctx context.Context) {
@@ -146,9 +244,21 @@ func (t *transcriptTail) stop() {
 		return
 	}
 	t.mu.Lock()
-	started := t.started
+	if !t.started {
+		// Never started (the CLI did not): it never will now; close the
+		// file a resume opened.
+		t.started, t.idle = true, true
+		f := t.file
+		t.file = nil
+		t.mu.Unlock()
+		if f != nil {
+			_ = f.Close()
+		}
+		return
+	}
+	idle := t.idle
 	t.mu.Unlock()
-	if !started {
+	if idle {
 		return
 	}
 	t.stopOnce.Do(func() { close(t.stopCh) })
@@ -174,6 +284,16 @@ func (t *transcriptTail) summary(fallback string) string {
 	return adapter.Truncate(text, runnerwire.MaxSummaryBytes)
 }
 
+// sawLines reports whether this turn's transcript had any lines.
+func (t *transcriptTail) sawLines() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.handled > 0
+}
+
 func (t *transcriptTail) run(ctx context.Context) {
 	defer close(t.doneCh)
 	defer func() {
@@ -190,12 +310,10 @@ func (t *transcriptTail) run(ctx context.Context) {
 	for {
 		select {
 		case <-t.stopCh:
-			t.drain(buf)
-			t.lines.flush()
+			t.end(buf)
 			return
 		case <-ctx.Done():
-			t.drain(buf)
-			t.lines.flush()
+			t.end(buf)
 			return
 		case <-ticker.C:
 			t.drain(buf)
@@ -203,17 +321,39 @@ func (t *transcriptTail) run(ctx context.Context) {
 	}
 }
 
+// end reads the last of the transcript and, for a resumed session that
+// wrote nothing the tail could find, says so rather than going quiet.
+func (t *transcriptTail) end(buf []byte) {
+	t.drain(buf)
+	t.lines.flush()
+	if t.resume && !t.grew {
+		t.note(fmt.Sprintf("no transcript lines from resumed Claude session %s this turn; its work shows only in the terminal", t.sessionID))
+	}
+}
+
 func (t *transcriptTail) drain(buf []byte) {
 	if t.file == nil {
-		f, err := t.openTranscriptFile()
-		if err != nil {
-			return
+		if f, _, err := t.openTranscriptFile(); err == nil {
+			t.file = f
 		}
-		t.file = f
+	}
+	t.read(buf)
+	// A resumed CLI that has written nothing to the old session may have
+	// started a new one.
+	if t.resume && !t.grew && !t.switched {
+		t.followNewSession()
+		t.read(buf)
+	}
+}
+
+func (t *transcriptTail) read(buf []byte) {
+	if t.file == nil {
+		return
 	}
 	for {
 		n, err := t.file.Read(buf)
 		if n > 0 {
+			t.grew = true
 			_, _ = t.lines.Write(buf[:n])
 		}
 		if err != nil {
@@ -222,7 +362,64 @@ func (t *transcriptTail) drain(buf []byte) {
 	}
 }
 
+// followNewSession switches to the newest session transcript that appeared
+// in the watched folders since a resumed CLI started.
+func (t *transcriptTail) followNewSession() {
+	f, id := t.newSessionFile()
+	if f == nil {
+		return
+	}
+	if t.file != nil {
+		_ = t.file.Close()
+	}
+	t.file = f
+	t.switched = true
+	t.skipPartial = false
+	t.skipBefore = t.startedAt.Truncate(time.Second)
+	t.lines = lineWriter{fn: t.handleLine}
+	t.note(fmt.Sprintf("resumed Claude session %s continues as session %s; following its transcript", t.sessionID, id))
+	if t.onSession != nil {
+		t.onSession(id)
+	}
+}
+
+// note tells the runner's log and the run's events.
+func (t *transcriptTail) note(text string) {
+	if t.logf != nil {
+		t.logf("%s", text)
+	}
+	if t.emit != nil {
+		t.emit(runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
+	}
+}
+
+// historyLine reports whether a line of a new session's transcript is
+// stamped before the resumed CLI started: history it was started with.
+func (t *transcriptTail) historyLine(line []byte) bool {
+	if t.skipBefore.IsZero() {
+		return false
+	}
+	var rec struct {
+		Timestamp string `json:"timestamp"`
+	}
+	if json.Unmarshal(line, &rec) != nil || rec.Timestamp == "" {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+	return err == nil && at.Before(t.skipBefore)
+}
+
 func (t *transcriptTail) handleLine(line []byte) {
+	if t.skipPartial {
+		t.skipPartial = false
+		return
+	}
+	if t.historyLine(line) {
+		return
+	}
+	t.mu.Lock()
+	t.handled++
+	t.mu.Unlock()
 	for _, ev := range t.parser.Parse(line) {
 		if ev.Type == runnerwire.EventText {
 			if trimmed := strings.TrimSpace(ev.Text); trimmed != "" {
@@ -240,8 +437,50 @@ func (t *transcriptTail) handleLine(line []byte) {
 // openTranscriptFile looks for <projectsDir>/<project>/<sessionID>.jsonl,
 // refusing symlinks at any level under projectsDir, non-regular files, and
 // files not owned by the runner user (§14).
-func (t *transcriptTail) openTranscriptFile() (*os.File, error) {
-	if !validTranscriptSessionID(t.sessionID) || t.projectsDir == "" {
+// It returns the project folder it was found in, too.
+func (t *transcriptTail) openTranscriptFile() (*os.File, string, error) {
+	if !validTranscriptSessionID(t.sessionID) {
+		return nil, "", fs.ErrInvalid
+	}
+	root, err := t.openProjectsRoot()
+	if err != nil {
+		return nil, "", err
+	}
+	defer root.Close()
+
+	for _, dir := range t.projectDirs {
+		if f := t.openIn(root, dir, t.sessionID); f != nil {
+			return f, dir, nil
+		}
+	}
+	now := time.Now()
+	if now.Before(t.nextScan) {
+		return nil, "", fs.ErrNotExist
+	}
+	t.nextScan = now.Add(t.scanGap)
+	t.scanGap = min(2*t.scanGap, transcriptScanMax)
+	t.mu.Lock()
+	t.scans++
+	t.mu.Unlock()
+	entries, err := os.ReadDir(t.projectsDir)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, ent := range entries {
+		if ent.Type()&os.ModeSymlink != 0 || !ent.IsDir() {
+			continue
+		}
+		if f := t.openIn(root, ent.Name(), t.sessionID); f != nil {
+			return f, ent.Name(), nil
+		}
+	}
+	return nil, "", fs.ErrNotExist
+}
+
+// openProjectsRoot opens projectsDir when it is a real directory of the
+// runner user's.
+func (t *transcriptTail) openProjectsRoot() (*os.Root, error) {
+	if t.projectsDir == "" {
 		return nil, fs.ErrInvalid
 	}
 	pinfo, err := os.Lstat(t.projectsDir)
@@ -251,50 +490,78 @@ func (t *transcriptTail) openTranscriptFile() (*os.File, error) {
 	if !pinfo.IsDir() || pinfo.Mode()&os.ModeSymlink != 0 || !t.ownedByRunner(pinfo) {
 		return nil, fs.ErrPermission
 	}
-	root, err := os.OpenRoot(t.projectsDir)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-
-	for _, dir := range t.projectDirs {
-		if f := t.openIn(root, dir); f != nil {
-			return f, nil
-		}
-	}
-	now := time.Now()
-	if now.Before(t.nextScan) {
-		return nil, fs.ErrNotExist
-	}
-	t.nextScan = now.Add(t.scanGap)
-	t.scanGap = min(2*t.scanGap, transcriptScanMax)
-	t.mu.Lock()
-	t.scans++
-	t.mu.Unlock()
-	entries, err := os.ReadDir(t.projectsDir)
-	if err != nil {
-		return nil, err
-	}
-	for _, ent := range entries {
-		if ent.Type()&os.ModeSymlink != 0 || !ent.IsDir() {
-			continue
-		}
-		if f := t.openIn(root, ent.Name()); f != nil {
-			return f, nil
-		}
-	}
-	return nil, fs.ErrNotExist
+	return os.OpenRoot(t.projectsDir)
 }
 
-// openIn opens <dir>/<sessionID>.jsonl under root when dir is a real
-// directory and the file a regular one, both the runner user's; nil
-// otherwise.
-func (t *transcriptTail) openIn(root *os.Root, dir string) *os.File {
+// sessionFiles lists the session transcripts (<id>.jsonl) in project
+// folder dir.
+func (t *transcriptTail) sessionFiles(dir string) []string {
+	root, err := t.openProjectsRoot()
+	if err != nil {
+		return nil
+	}
+	defer root.Close()
+	if info, err := root.Lstat(dir); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(t.projectsDir, dir))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, ent := range entries {
+		id, ok := strings.CutSuffix(ent.Name(), ".jsonl")
+		if ok && ent.Type().IsRegular() && validTranscriptSessionID(id) {
+			names = append(names, ent.Name())
+		}
+	}
+	return names
+}
+
+// newSessionFile opens the newest session transcript in the watched folders
+// that was not there when the resumed CLI started and has been written
+// since, and returns its session id; nil when there is none.
+func (t *transcriptTail) newSessionFile() (*os.File, string) {
+	var bestDir, bestID string
+	var bestAt time.Time
+	for _, dir := range t.watchDirs {
+		for _, name := range t.sessionFiles(dir) {
+			id := strings.TrimSuffix(name, ".jsonl")
+			if id == t.sessionID || t.known[dir+"/"+name] {
+				continue
+			}
+			info, err := os.Lstat(filepath.Join(t.projectsDir, dir, name))
+			if err != nil || info.ModTime().Before(t.startedAt.Truncate(time.Second)) {
+				continue
+			}
+			if bestID == "" || info.ModTime().After(bestAt) {
+				bestDir, bestID, bestAt = dir, id, info.ModTime()
+			}
+		}
+	}
+	if bestID == "" {
+		return nil, ""
+	}
+	root, err := t.openProjectsRoot()
+	if err != nil {
+		return nil, ""
+	}
+	defer root.Close()
+	f := t.openIn(root, bestDir, bestID)
+	if f == nil {
+		return nil, ""
+	}
+	return f, bestID
+}
+
+// openIn opens <dir>/<id>.jsonl under root when dir is a real directory and
+// the file a regular one, both the runner user's; nil otherwise.
+func (t *transcriptTail) openIn(root *os.Root, dir, id string) *os.File {
 	dirInfo, err := root.Lstat(dir)
 	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || !t.ownedByRunner(dirInfo) {
 		return nil
 	}
-	rel := filepath.Join(dir, t.sessionID+".jsonl")
+	rel := filepath.Join(dir, id+".jsonl")
 	linfo, err := root.Lstat(rel)
 	if err != nil || !linfo.Mode().IsRegular() || !t.ownedByRunner(linfo) {
 		return nil

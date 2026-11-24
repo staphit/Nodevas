@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,7 +151,7 @@ func TestTermRelayChunksAndSequences(t *testing.T) {
 	s := relay.open("run-1", term)
 	var states []string
 	var mu sync.Mutex
-	go s.readLoop(func(st string) { mu.Lock(); states = append(states, st); mu.Unlock() }, relay.wake)
+	go s.readLoop(term, func(st string) { mu.Lock(); states = append(states, st); mu.Unlock() }, relay.wake)
 
 	big := strings.Repeat("0123456789abcdef", (2*runnerwire.MaxTermChunk+100)/16)
 	term.emit("\x1b]7501;{\"state\":\"working\"}\x07")
@@ -199,7 +201,7 @@ func TestTermRelayFailedWriteKeepsOutput(t *testing.T) {
 	term := newFakeTerm()
 	t.Cleanup(func() { _ = term.Close() })
 	s := relay.open("run-1", term)
-	go s.readLoop(func(string) {}, relay.wake)
+	go s.readLoop(term, func(string) {}, relay.wake)
 	term.emit("screen")
 	eventually(t, "output", func() bool { return pendingLen(s) == 6 })
 	if err := relay.flush(func(runnerwire.Envelope) error { return io.ErrClosedPipe }); err == nil {
@@ -243,7 +245,7 @@ func TestTermInputAndResize(t *testing.T) {
 	j := newJobs(ctx, &Client{Config: &Config{}})
 	term := newFakeTerm()
 	s := j.terms.open("run-i", term)
-	go s.writeLoop()
+	go s.writeLoop(term, s.stop)
 
 	// View only until remote typing is allowed.
 	j.termInput("run-i", &runnerwire.TermChunk{Data: []byte("whoami\r")})
@@ -1197,5 +1199,125 @@ func TestInteractiveFollowUpResumesTheSession(t *testing.T) {
 	entry, ok, err := lookupWork(env.client.Config.DataDir, "run-ires1")
 	if err != nil || !ok || entry.Session != env1.SessionID || entry.LastRunID != "run-ires2" {
 		t.Fatalf("work entry after turn 2 = %+v, %v, %v", entry, ok, err)
+	}
+}
+
+// resumeTurns runs an interactive global turn 1 and offers its follow-up,
+// returning turn 1's RunEnv and the follow-up's first (resumed) terminal.
+func resumeTurns(t *testing.T, tweak func(*Client)) (*jobEnv, chan startedTerm, chan adapter.RunEnv, adapter.RunEnv, startedTerm) {
+	t.Helper()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	envs := make(chan adapter.RunEnv, 4)
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		prev := c.Adapter
+		c.Adapter = func(kind string) adapter.Adapter {
+			ad := prev(kind)
+			if ia, ok := ad.(interactiveAgent); ok {
+				return capturingInteractiveAgent{interactiveAgent: ia, onEnv: func(e adapter.RunEnv) { envs <- e }}
+			}
+			return ad
+		}
+		if tweak != nil {
+			tweak(c)
+		}
+	})
+	env.hub.hello()
+	first := globalTestJob("run-rf1", "ok: look around")
+	first.Mode = runnerwire.ModeInteractive
+	env.hub.offer(first)
+	st := waitStarted(t, started)
+	env1 := <-envs
+	st.term.exit <- 0
+	if res := env.hub.wait("run-rf1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 = %+v", res)
+	}
+	second := followUpTestJob("run-rf2", "run-rf1", "run-rf1", "ok: and more")
+	second.Mode = runnerwire.ModeInteractive
+	env.hub.offer(second)
+	st2 := waitStarted(t, started)
+	if env2 := <-envs; env2.Resume != env1.SessionID {
+		t.Fatalf("turn 2 RunEnv.Resume = %q, want %q", env2.Resume, env1.SessionID)
+	}
+	return env, started, envs, env1, st2
+}
+
+// A resumed interactive CLI that exits at once, having done nothing (the
+// session is gone), is started once more without the session, with the
+// carry-over prompt, like a headless run; work.json then keeps the session
+// that ran, not the dead one.
+func TestInteractiveResumeThatFailsFastStartsAgainWithoutIt(t *testing.T) {
+	env, started, envs, env1, st2 := resumeTurns(t, nil)
+	st2.term.emit("No conversation found with session ID: " + env1.SessionID + "\r\n")
+	st2.term.exit <- 1
+
+	var st3 startedTerm
+	select {
+	case st3 = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no second start after a resume that failed fast")
+	}
+	env3 := <-envs
+	if env3.Resume != "" || env3.SessionID == "" || env3.SessionID == env1.SessionID {
+		t.Fatalf("retry env: Resume %q SessionID %q (turn 1's %q)", env3.Resume, env3.SessionID, env1.SessionID)
+	}
+	if slices.Contains(st3.cmd.Args, "--resume") {
+		t.Fatalf("retry argv = %q, want no --resume", st3.cmd.Args)
+	}
+	if !strings.Contains(strings.Join(st3.cmd.Args, " "), "Added hello.txt") {
+		t.Fatalf("retry argv = %q, want the carry-over prompt with the earlier summary", st3.cmd.Args)
+	}
+	st3.term.emit("Fresh start\r\n")
+	eventually(t, "retry output at the hub", func() bool {
+		out, _ := termOutput(env, "run-rf2")
+		return strings.Contains(out, "Fresh start")
+	})
+	st3.term.exit <- 0
+	if res := env.hub.wait("run-rf2", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 2 = %+v", res)
+	}
+	if !hubHasEvent(env, "run-rf2", "resume failed") {
+		t.Fatal("no event says the resume failed")
+	}
+	// One terminal for the hub: both attempts' output, numbered on.
+	out, seqs := termOutput(env, "run-rf2")
+	if !strings.Contains(out, "No conversation found") || !strings.Contains(out, "Fresh start") {
+		t.Fatalf("term output = %q", out)
+	}
+	for i, seq := range seqs {
+		if seq != int64(i+1) {
+			t.Fatalf("term_out seqs = %v, want 1..n across both attempts", seqs)
+		}
+	}
+	entry, ok, err := lookupWork(env.client.Config.DataDir, "run-rf1")
+	if err != nil || !ok || entry.Session != env3.SessionID || entry.LastRunID != "run-rf2" {
+		t.Fatalf("work entry = %+v, %v, %v; want session %s (the retry's), not %s", entry, ok, err, env3.SessionID, env1.SessionID)
+	}
+}
+
+// A resumed CLI that failed fast whose retry could not start: the run
+// fails, and work.json keeps neither the dead session nor the retry's id
+// that never ran, so the next follow-up starts fresh.
+func TestInteractiveDeadResumeIsNotRecorded(t *testing.T) {
+	var calls atomic.Int32
+	env, _, _, env1, st2 := resumeTurns(t, func(c *Client) {
+		prev := c.NewTerminal
+		c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
+			if calls.Add(1) == 3 {
+				return nil, errors.New("no more terminals")
+			}
+			return prev(cmd, cols, rows)
+		}
+	})
+	st2.term.exit <- 1
+	res := env.hub.wait("run-rf2", runnerwire.TypeFinish).Result
+	if res.Status != runnerwire.RunFailed {
+		t.Fatalf("turn 2 = %+v, want failed", res)
+	}
+	entry, ok, err := lookupWork(env.client.Config.DataDir, "run-rf1")
+	if err != nil || !ok || entry.LastRunID != "run-rf2" {
+		t.Fatalf("work entry = %+v, %v, %v", entry, ok, err)
+	}
+	if entry.Session != "" {
+		t.Fatalf("work entry session = %q (turn 1's was %q), want none", entry.Session, env1.SessionID)
 	}
 }

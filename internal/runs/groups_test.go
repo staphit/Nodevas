@@ -430,6 +430,94 @@ func TestPumpBudgetCancelStoresCode(t *testing.T) {
 	}
 }
 
+// budgetScript is an injected budget reader: each call takes the next answer
+// (true = over the daily cost limit), the last one repeating.
+type budgetScript struct {
+	mu      sync.Mutex
+	answers []bool
+	calls   int
+}
+
+func (b *budgetScript) read(context.Context, string) (runnerwire.BudgetStatus, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	over := b.answers[min(b.calls, len(b.answers)-1)]
+	b.calls++
+	st := runnerwire.BudgetStatus{Budget: runnerwire.Budget{DailyRuns: 10, DailyCostUSD: 1}}
+	if over {
+		st.Used.CostUSD = 2
+	}
+	return st, nil
+}
+
+func (b *budgetScript) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
+// A queued member the pass skipped as over budget, whose cancel then finds
+// it under budget (the day rolled over between the two reads), is not left
+// queued with the runner idle: Pump looks again and offers it.
+func TestPumpOffersAMemberItSkippedButDidNotCancel(t *testing.T) {
+	f, _ := newGlobalFixture(t, groupHello(1, "api", "web"))
+	ctx := context.Background()
+	res, err := f.d.StartGlobalGroup(ctx, f.groupRequest("Rollover", "repo-1", "repo-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r0, r1 := res.Runs[0], res.Runs[1]
+	if err := f.d.Accept(ctx, f.runner.ID, runnerwire.Accept{RunID: r0.ID, Base: "main", Branch: "agent/roll-1"}); err != nil {
+		t.Fatal(err)
+	}
+	script := &budgetScript{answers: []bool{true, false}}
+	f.d.budgetStatus = script.read
+	if err := f.d.Finish(ctx, f.runner.ID, r0.ID, runnerwire.RunResult{Status: runnerwire.RunSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.s.Get(ctx, r1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != runnerwire.RunOffered {
+		t.Fatalf("member after the rollover: status=%s err=%q, want offered", got.Status, got.Error)
+	}
+}
+
+// The look again is bounded: a reader that says over to every pass and
+// under to every cancel leaves the member queued, and Pump returns.
+func TestPumpLooksAgainOnlyOnce(t *testing.T) {
+	f, _ := newGlobalFixture(t, groupHello(1, "api", "web"))
+	ctx := context.Background()
+	res, err := f.d.StartGlobalGroup(ctx, f.groupRequest("Flapping", "repo-1", "repo-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r0, r1 := res.Runs[0], res.Runs[1]
+	if err := f.d.Accept(ctx, f.runner.ID, runnerwire.Accept{RunID: r0.ID, Base: "main", Branch: "agent/flap-1"}); err != nil {
+		t.Fatal(err)
+	}
+	flap := make([]bool, 40)
+	for i := range flap {
+		flap[i] = i%2 == 0
+	}
+	script := &budgetScript{answers: flap}
+	f.d.budgetStatus = script.read
+	if err := f.d.Finish(ctx, f.runner.ID, r0.ID, runnerwire.RunResult{Status: runnerwire.RunSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	if n := script.count(); n != 4 {
+		t.Fatalf("budget read %d times, want 4 (two passes, each a check and a cancel)", n)
+	}
+	got, err := f.s.Get(ctx, r1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != runnerwire.RunQueued {
+		t.Fatalf("member: status=%s, want still queued", got.Status)
+	}
+}
+
 func TestQuotaOrRateLimitHoldsTheGroup(t *testing.T) {
 	for _, kind := range []string{runnerwire.FailureQuota, runnerwire.FailureRateLimit} {
 		t.Run(kind, func(t *testing.T) {
