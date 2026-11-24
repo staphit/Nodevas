@@ -265,6 +265,9 @@ describe("hard reasons win over the saved preference and a pick", () => {
     ["contest", { ...base, contest: true }],
     ["capability", { ...base, runner: headlessOnly }],
     ["agent", { ...base, agent: { ...interactiveAgent, interactive: false } }],
+    // The runner no longer lists the prior run's agent (uninstalled since):
+    // nothing says it can run on screen, so a saved "interactive" can't win.
+    ["unknown agent", { ...base, agent: undefined }],
   ];
 
   it.each(hard)("%s disables the card and resolves to background whatever was saved or picked", (_name, ctx) => {

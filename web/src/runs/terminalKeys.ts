@@ -179,6 +179,41 @@ export function keySequence(key: TermKey, applicationCursor: boolean): string {
 export const MENU_LINES_ABOVE = 8;
 export const MENU_LINES_BELOW = 3;
 
+/** The part of an xterm Terminal readCursorLines reads, written out here so
+ * this module stays free of the xterm package. */
+export interface CursorScreen {
+  buffer?: {
+    active?: {
+      length: number;
+      baseY?: number;
+      cursorY?: number;
+      getLine: (index: number) => { translateToString: (trimRight?: boolean) => string } | undefined;
+    };
+  };
+}
+
+/** The screen's lines around the cursor, and the cursor's index among them
+ * (hasScreenMenuPrompt reads only that neighbourhood, §3.1). xterm's
+ * cursorY counts from the viewport's top, which starts at baseY once there
+ * is scrollback, so the cursor's buffer line is baseY + cursorY. */
+export function readCursorLines(term: CursorScreen): { lines: string[]; cursorRow?: number } {
+  const active = term.buffer?.active;
+  if (!active || typeof active.getLine !== "function" || !active.length) return { lines: [] };
+  const cursor =
+    typeof active.baseY === "number" && typeof active.cursorY === "number"
+      ? active.baseY + active.cursorY
+      : active.length - 1;
+  const row = Math.min(Math.max(cursor, 0), active.length - 1);
+  const start = Math.max(0, row - MENU_LINES_ABOVE);
+  const end = Math.min(active.length - 1, row + MENU_LINES_BELOW);
+  const lines: string[] = [];
+  for (let i = start; i <= end; i += 1) {
+    const line = active.getLine(i);
+    lines.push(line && typeof line.translateToString === "function" ? line.translateToString(true) : "");
+  }
+  return { lines, cursorRow: row - start };
+}
+
 // Verified CLI trust / permission / update modal markers (smoke report §6.3).
 // Never match bare prompt glyphs (`❯`, `›`, `>`) so idle prompts stay writable.
 const SINGLE_LINE_MENU_MARKERS: readonly RegExp[] = [

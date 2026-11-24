@@ -8,7 +8,14 @@ import { useApp } from "../store";
 import { FakeWebSocket } from "./fakeWebSocket";
 import { RunModeTabs } from "./RunModeTabs";
 import RunTerminal from "./RunTerminal";
-import { hasScreenMenuPrompt, keySequence, terminalTheme } from "./terminalKeys";
+import {
+  hasScreenMenuPrompt,
+  keySequence,
+  MENU_LINES_ABOVE,
+  MENU_LINES_BELOW,
+  readCursorLines,
+  terminalTheme,
+} from "./terminalKeys";
 
 // xterm needs a real canvas and layout; a recording stand-in is enough to
 // check what reaches it and what it sends back.
@@ -335,5 +342,68 @@ describe("terminalKeys and story palette", () => {
     const menu = [...prose, ...idle.slice(0, 6), "Allow this command?", "❯ Allow once", "  Reject", "Esc to cancel"];
     expect(hasScreenMenuPrompt(menu, menu.length - 2)).toBe(true);
     expect(hasScreenMenuPrompt(["│ > Yes, I trust this folder", "│   No, exit"], 0)).toBe(true);
+  });
+
+  // xterm's cursorY counts from the top of the viewport; with scrollback the
+  // viewport starts at baseY, so the cursor's buffer line is baseY + cursorY.
+  it("reads the lines around baseY + cursorY, not around the buffer's last line", () => {
+    const text = Array.from({ length: 40 }, (_, index) => `line ${index}`);
+    const buffer = (baseY?: number, cursorY?: number) => ({
+      buffer: {
+        active: {
+          length: text.length,
+          baseY,
+          cursorY,
+          getLine: (index: number) => ({ translateToString: () => text[index] }),
+        },
+      },
+    });
+
+    // 30 lines of scrollback, cursor on the viewport's 2nd row: buffer line 31.
+    const scrolled = readCursorLines(buffer(30, 1));
+    expect(scrolled.lines).toEqual(text.slice(31 - MENU_LINES_ABOVE, 31 + MENU_LINES_BELOW + 1));
+    expect(scrolled.lines[scrolled.cursorRow!]).toBe("line 31");
+
+    // No scrollback: cursorY alone, clamped at the top.
+    const top = readCursorLines(buffer(0, 2));
+    expect(top.lines).toEqual(text.slice(0, 2 + MENU_LINES_BELOW + 1));
+    expect(top.lines[top.cursorRow!]).toBe("line 2");
+
+    // No cursor reported: the last line stands for it.
+    const last = readCursorLines(buffer());
+    expect(last.lines[last.cursorRow!]).toBe("line 39");
+    expect(last.lines).toEqual(text.slice(39 - MENU_LINES_ABOVE));
+
+    // An empty or missing buffer reads nothing.
+    expect(readCursorLines({ buffer: { active: { length: 0, getLine: () => undefined } } })).toEqual({ lines: [] });
+    expect(readCursorLines({})).toEqual({ lines: [] });
+  });
+
+  it("finds a menu at the cursor deep in scrollback through the live terminal", () => {
+    const onScreenAsksChange = vi.fn();
+    render(<RunTerminal run={run} onScreenAsksChange={onScreenAsksChange} />);
+    const screenText = [
+      ...Array.from({ length: 30 }, (_, index) => `old output ${index}`),
+      "Allow this command?",
+      "❯ Allow once",
+      "  Reject",
+      "Esc to cancel",
+      ...Array.from({ length: 20 }, () => ""),
+    ];
+    // The menu sits at baseY + cursorY (31); the buffer's last line is
+    // 20 blank lines further down, out of its reach.
+    Object.assign(term(), {
+      buffer: {
+        active: {
+          length: screenText.length,
+          baseY: 30,
+          cursorY: 1,
+          getLine: (index: number) => ({ translateToString: () => screenText[index] }),
+        },
+      },
+    });
+    act(() => FakeWebSocket.last().serverOpen());
+    act(() => FakeWebSocket.last().serverBinary("menu"));
+    expect(onScreenAsksChange).toHaveBeenLastCalledWith(true);
   });
 });

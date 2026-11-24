@@ -13,8 +13,7 @@ import { useI18n } from "../i18n";
 import {
   hasScreenMenuPrompt,
   keySequence,
-  MENU_LINES_ABOVE,
-  MENU_LINES_BELOW,
+  readCursorLines,
   terminalTheme,
   type TermKey,
 } from "./terminalKeys";
@@ -45,26 +44,6 @@ function binaryStringBytes(data: string): Uint8Array {
   return bytes;
 }
 
-/** Reads the visible tail lines of an xterm active buffer safely. */
-/** The screen's lines around the cursor, and the cursor's index among them
- * (hasScreenMenuPrompt reads only that neighbourhood, §3.1). */
-function readCursorLines(term: Terminal): { lines: string[]; cursorRow?: number } {
-  const active = term.buffer?.active;
-  if (!active || typeof active.getLine !== "function" || !active.length) return { lines: [] };
-  const cursor =
-    typeof active.baseY === "number" && typeof active.cursorY === "number"
-      ? active.baseY + active.cursorY
-      : active.length - 1;
-  const row = Math.min(Math.max(cursor, 0), active.length - 1);
-  const start = Math.max(0, row - MENU_LINES_ABOVE);
-  const end = Math.min(active.length - 1, row + MENU_LINES_BELOW);
-  const lines: string[] = [];
-  for (let i = start; i <= end; i += 1) {
-    const line = active.getLine(i);
-    lines.push(line && typeof line.translateToString === "function" ? line.translateToString(true) : "");
-  }
-  return { lines, cursorRow: row - start };
-}
 
 export interface TerminalModeReader {
   bracketedPaste: () => boolean;

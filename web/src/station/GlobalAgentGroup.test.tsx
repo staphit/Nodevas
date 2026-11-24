@@ -182,6 +182,33 @@ describe("GlobalAgentGroup", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  // The hub's generic skip codes (groupFollowUpSkipCode) read as plain
+  // sentences in Simple: never a raw code.
+  it("words every skip in Simple without a raw code", async () => {
+    const codes = ["FAILED_PRECONDITION", "NOT_FOUND", "INVALID_ARGUMENT", "BUDGET_EXCEEDED", "SOMETHING_NEW"];
+    const members = codes.map((_, index) =>
+      makeMember({ id: `m${index}`, repoId: `r${index}`, repoName: `folder${index}`, status: "succeeded", commit: "aaa1111" }),
+    );
+    useGlobalAgents.setState({ groups: { grp1: makeGroup({ repoCount: members.length }) }, groupRuns: { grp1: members } });
+    vi.spyOn(api, "followUpGlobalGroup").mockResolvedValue({
+      started: [],
+      skipped: codes.map((code, index) => ({ runId: `m${index}`, code })),
+    });
+
+    render(<GlobalAgentGroup groupId="grp1" runs={members} expanded own simple />);
+    fireEvent.click(screen.getByRole("button", { name: "Tell all" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Bump the version" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const report = await screen.findByTestId("group-tell-report");
+    for (const code of codes) expect(report.textContent).not.toContain(code);
+    expect(report).toHaveTextContent("folder0: it can't go on from where it is right now");
+    expect(report).toHaveTextContent("folder1: this work isn't here anymore");
+    expect(report).toHaveTextContent("folder2: this one can't take another message");
+    expect(report).toHaveTextContent("folder3: today's limit was reached");
+    expect(report).toHaveTextContent("folder4: it didn't go on this time");
+  });
+
   it("keeps the text when nothing started", async () => {
     const m1 = makeMember({ id: "m1", repoId: "r-api", repoName: "api", status: "succeeded", commit: "aaa1111" });
     useGlobalAgents.setState({ groups: { grp1: makeGroup({ repoCount: 1 }) }, groupRuns: { grp1: [m1] } });

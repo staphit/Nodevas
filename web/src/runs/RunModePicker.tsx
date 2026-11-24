@@ -97,8 +97,11 @@ export function hardBackgroundReason(ctx: DefaultDispatchModeContext): ModeFallb
   if (ctx.contest) return "contest";
   if (ctx.group) return "group";
   if (!runnerSupportsInteractive(ctx.runner)) return "capability";
-  if (ctx.agent?.interactive === false) return "agent";
-  if (ctx.agent?.untrusted) return "untrusted";
+  // The same test as the default rule: an agent the runner does not list
+  // (uninstalled since) or does not say can run on screen is a hard reason.
+  // The wire omits interactive:false, so "=== false" would never match.
+  if (!ctx.agent?.interactive) return "agent";
+  if (ctx.agent.untrusted) return "untrusted";
   if (
     ctx.edition !== "single" &&
     ctx.viewer &&
