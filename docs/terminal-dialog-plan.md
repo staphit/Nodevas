@@ -826,6 +826,8 @@ CREATE INDEX IF NOT EXISTS runs_group ON runs (group_id, created_at) WHERE group
    - `codex exec resume` argv on 0.149.1; claude 2.1.327, opencode and agy resume;
    - gemini, once installed. Without it, Gemini ships without resume (answer 7).
 
+   **Status: not run yet.** Waves 0 to 3 and the review fixes merged without these live tests. The interactive quit sequence for End, whether a TUI repaints while idle, the question and menu markers and the resume flags are still unconfirmed against the real CLIs; the code's comments say so too. Run them before calling the terminal dialog done, and record the results here.
+
 ### 16.3 Wave 0: foundations (F1 ∥ F2)
 
 **F1: Go contracts, DB, store, hooks.** No dependencies. It is the largest package; it lands after #17, which touched the same files.
