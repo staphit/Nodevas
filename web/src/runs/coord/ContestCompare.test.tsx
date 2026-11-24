@@ -269,10 +269,11 @@ describe("ContestCompare", () => {
     });
   });
 
-  it("displays refused discards with the entry label and reason", () => {
+  it("displays refused discards with the entry label and the code in words (the hub sends no reason)", () => {
     const pickActions: PickActionResult[] = [
       { runId: "run-a", action: "merge_local", status: "done" },
-      { runId: "run-b", action: "discard", status: "failed", code: "unsaved_commits", reason: "unsaved commits" },
+      { runId: "run-b", action: "discard", status: "failed", code: "dirty_worktree" },
+      { runId: "run-c", action: "discard", status: "failed", code: "unknown_thing" },
     ];
     render(
       <ContestCompare
@@ -283,8 +284,22 @@ describe("ContestCompare", () => {
     );
 
     expect(
-      screen.getByText(translate("contest.discardRefused", "en", { label: "B", reason: "unsaved commits" })),
+      screen.getByText(
+        translate("contest.discardRefused", "en", { label: "B", reason: translate("runWorkspace.code.dirty_worktree", "en") }),
+      ),
     ).toBeInTheDocument();
+    // An unknown code is still said, as itself.
+    expect(
+      screen.getByText(translate("contest.discardRefused", "en", { label: "run-c", reason: "unknown_thing" })),
+    ).toBeInTheDocument();
+  });
+
+  it("puts the colon after Why in the catalog, full-width in Chinese", () => {
+    const compare = makeCompare({ scores: { scores: [{ entry: "A", score: 8, why: "Clean change" }], pick: "A" } });
+    const { container } = render(<ContestCompare contest={makeContest()} compare={compare} onPick={vi.fn()} />);
+    expect(container.querySelector(".coord-score-why-label")?.textContent).toBe("Why:");
+    expect(translate("contest.why", "zh-TW")).toBe("理由：");
+    expect(translate("contest.toggle", "en")).not.toMatch(/\p{Script=Han}/u);
   });
 
   it("opens the diff viewer when Show changes is clicked", () => {

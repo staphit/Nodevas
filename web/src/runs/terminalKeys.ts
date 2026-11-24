@@ -173,7 +173,11 @@ export function keySequence(key: TermKey, applicationCursor: boolean): string {
   }
 }
 
-const SCREEN_TAIL_LINES = 15;
+/** How far around the cursor line a menu is looked for (§3.1): a TUI draws
+ * its menu, footer and hint next to where it leaves the cursor, while the
+ * agent's own prose further up may well say "allow", "reject" or "> yes,". */
+export const MENU_LINES_ABOVE = 8;
+export const MENU_LINES_BELOW = 3;
 
 // Verified CLI trust / permission / update modal markers (smoke report §6.3).
 // Never match bare prompt glyphs (`❯`, `›`, `>`) so idle prompts stay writable.
@@ -198,18 +202,24 @@ const SINGLE_LINE_MENU_MARKERS: readonly RegExp[] = [
   // Antigravity (agy)
   /enter confirm/i,
   />\s*yes,\s*i trust this folder/i,
-  />\s*yes,/i,
+  // A focused "> Yes, …" option starts its line (after any box border);
+  // prose that merely contains "> yes," is not a menu.
+  /^[│|┃\s]*>\s*yes,/i,
 ];
 
 /**
- * Inspects the last ~15 non-empty lines of an interactive terminal screen for
- * verified CLI trust/permission/modal prompts so the composer blocks Enter
- * instead of silently confirming a focused menu option.
+ * Whether the screen shows a verified CLI trust/permission/modal prompt, so
+ * the composer blocks Enter instead of silently confirming a focused menu
+ * option. Only the cursor line and the few lines around it are read
+ * (`cursorRow`, an index into `lines`; the last line when absent).
  */
-export function hasScreenMenuPrompt(lines: readonly string[]): boolean {
+export function hasScreenMenuPrompt(lines: readonly string[], cursorRow?: number): boolean {
+  const row = cursorRow ?? lines.length - 1;
+  const from = Math.max(0, row - MENU_LINES_ABOVE);
+  const to = Math.min(lines.length - 1, row + MENU_LINES_BELOW);
   const tail: string[] = [];
-  for (let i = lines.length - 1; i >= 0 && tail.length < SCREEN_TAIL_LINES; i--) {
-    const trimmed = lines[i].trim();
+  for (let i = from; i <= to; i++) {
+    const trimmed = (lines[i] ?? "").trim();
     if (trimmed) tail.push(trimmed);
   }
   if (tail.length === 0) return false;

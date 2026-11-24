@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MutableRefObject,
   type ReactNode,
   type Ref,
 } from "react";
@@ -22,11 +23,12 @@ import { GameDialog } from "../../game/GameActions";
 import { agentName, agentWho } from "../../game/labels";
 import { useI18n } from "../../i18n";
 import { lazyWithRetry } from "../../lazyWithRetry";
+import { BusyChoice } from "../coord/BusyChoice";
 import { SimpleRunSummary } from "../SimpleRunSummary";
 import type { TerminalModeReader } from "../RunTerminal";
 import { readStoryCssVars } from "../terminalKeys";
 import { useLiveTerminalClaim } from "./liveTerminals";
-import { RunComposer, type RunComposerHandle } from "./RunComposer";
+import { RunComposer, type ComposerState, type RunComposerHandle } from "./RunComposer";
 import { RunTranscript } from "./RunTranscript";
 import { useRunDialog } from "./useRunDialog";
 
@@ -163,6 +165,35 @@ export function RunDialog({
     setPortalVars(readStoryCssVars(rootRef.current));
     setLargeOpen(true);
   };
+  // The composer handle is the caller's (Tell it, Start new work) and this
+  // dialog's own (clearing the text once a busy choice started the work).
+  const ownComposerRef = useRef<RunComposerHandle | null>(null);
+  const setComposerRef = useCallback(
+    (handle: RunComposerHandle | null) => {
+      ownComposerRef.current = handle;
+      if (typeof composerRef === "function") composerRef(handle);
+      else if (composerRef) (composerRef as MutableRefObject<RunComposerHandle | null>).current = handle;
+    },
+    [composerRef],
+  );
+
+  // Stable, so the modal's effects never re-run on this dialog's re-renders.
+  const closeLarge = useCallback(() => setLargeOpen(false), []);
+
+  // Another mount owns this run's live screen (one xterm per run per page):
+  // typing here could not reach it, so the composer says where it is.
+  const composerState = useMemo<ComposerState | null>(() => {
+    const state = dialog.composerState;
+    if (!state || !wantTerminal || isOwner) return state;
+    if (state.kind !== "interactive" && state.kind !== "screen_asks") return state;
+    return {
+      kind: "shown_above",
+      enabled: false,
+      showStop: true,
+      showJumpOwner: true,
+      placeholderKey: "runDialog.ph.shownAbove",
+    };
+  }, [dialog.composerState, wantTerminal, isOwner]);
 
   if (!run) return null;
 
@@ -323,10 +354,24 @@ export function RunDialog({
 
         <div className="run-dlg-body">{renderBody()}</div>
 
-        {dialog.composerState && (
+        {dialog.busy && (
+          <BusyChoice
+            busy={dialog.busy}
+            simple={simple}
+            maxConcurrent={dialog.runner?.info?.maxConcurrent}
+            onChoose={(choice) => {
+              void dialog.chooseBusy(choice).then((started) => {
+                if (started) ownComposerRef.current?.prefill("");
+              });
+            }}
+            onCancel={dialog.cancelBusy}
+          />
+        )}
+
+        {composerState && (
           <RunComposer
-            ref={composerRef}
-            state={dialog.composerState}
+            ref={setComposerRef}
+            state={composerState}
             simple={simple}
             busy={dialog.submitting}
             terminalConn={wantTerminal && isOwner ? terminalConn : null}
@@ -339,6 +384,7 @@ export function RunDialog({
             stopping={dialog.stopping}
             onStop={() => void dialog.stopRun()}
             onJumpLatest={dialog.focusLatestTurn}
+            onJumpOwner={focusOwner}
             onRedispatch={
               run.nodeId && onRedispatch ? () => onRedispatch(run.nodeId) : undefined
             }
@@ -348,7 +394,7 @@ export function RunDialog({
       </section>
 
       {largeOpen && !expanded && (
-        <GameDialog title={label} onClose={() => setLargeOpen(false)}>
+        <GameDialog title={label} onClose={closeLarge}>
           <div className="run-dialog-portal-theme" style={portalVars as CSSProperties}>
             <RunDialog
               runId={run.id}

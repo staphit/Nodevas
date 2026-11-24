@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1312,5 +1312,23 @@ describe("story room dialog, pictures, group view and coordination (W5)", () => 
 
     await userEvent.click(tabs[1]);
     expect(container.querySelector(".run-dlg-body")).toHaveTextContent("Entry B approach");
+
+    // The pair is where a node contest is decided: Compare and pick opens it.
+    const getContest = vi.spyOn(api, "getContest").mockResolvedValue({
+      contest: {
+        id: "contest-1",
+        title: "Login",
+        global: false,
+        state: "running",
+        entryCount: 2,
+        createdBy: "u1",
+        createdAt: "2026-11-20T08:00:00Z",
+      },
+      runs: [entryA, entryB],
+      compare: { entries: [], scores: null },
+    });
+    await userEvent.click(within(container.querySelector(".px-story-contest") as HTMLElement).getByRole("button", { name: "Compare and pick" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => expect(getContest).toHaveBeenCalledWith("contest-1"));
   });
 });

@@ -459,8 +459,12 @@
   gap: 6px;
 }
 
-/* Keep Send and End clear of the floating voice copilot FAB (§3.1). */
-.app:has(> .copilot-fab) .run-dlg-composer-actions {
+/* Keep Send and End clear of the floating voice copilot FAB (§3.1), only
+   where a dialog can reach the bottom-right corner it floats over: the
+   station's lists and the story room. A dialog in a centred modal (the
+   start screen's describe box, "Open large") never sits under it. */
+.app:has(> .copilot-fab) .station .run-dlg-composer-actions,
+.app:has(> .copilot-fab) .px-story-talk .run-dlg-composer-actions {
   padding-right: var(--copilot-fab-clearance, 0px);
 }
 

@@ -44,7 +44,9 @@ export type ComposerKind =
   | "merging"
   | "new_work"
   | "continued_below"
-  | "node_ended";
+  | "node_ended"
+  /** Interactive, but another mount on this page owns the live screen. */
+  | "shown_above";
 
 export interface ComposerState {
   kind: ComposerKind;
@@ -56,6 +58,8 @@ export interface ComposerState {
   showStop?: boolean;
   showJumpLatest?: boolean;
   showRedispatch?: boolean;
+  /** Offer a jump to the mount that owns the live screen. */
+  showJumpOwner?: boolean;
   askId?: string;
 }
 
@@ -350,6 +354,8 @@ export interface RunComposerProps {
   stopping?: boolean;
   onStop?: () => void;
   onJumpLatest?: () => void;
+  /** Moves focus to the mount that owns the live screen. */
+  onJumpOwner?: () => void;
   onRedispatch?: () => void;
   /** External error message (e.g. from follow-up/end API refusal). */
   error?: string | null;
@@ -372,6 +378,7 @@ const SIMPLE_PLACEHOLDER_KEYS = new Set([
   "runDialog.simple.ph.sendFailed",
   "runDialog.simple.ph.merging",
   "runDialog.simple.ph.waitingBehind",
+  "runDialog.simple.ph.shownAbove",
 ]);
 
 function resolvePlaceholderKey(key: string, simple: boolean): string {
@@ -401,6 +408,7 @@ export const RunComposer = forwardRef<RunComposerHandle, RunComposerProps>(funct
     stopping = false,
     onStop,
     onJumpLatest,
+    onJumpOwner,
     onRedispatch,
     error: externalError = null,
   },
@@ -573,6 +581,11 @@ export const RunComposer = forwardRef<RunComposerHandle, RunComposerProps>(funct
           {state.showJumpLatest && onJumpLatest && (
             <button type="button" className="run-dlg-jump-latest" onClick={onJumpLatest}>
               {t(simple ? "runDialog.simple.continuedBelow" : "runDialog.continuedBelow")}
+            </button>
+          )}
+          {state.showJumpOwner && onJumpOwner && (
+            <button type="button" className="run-dlg-jump-owner" onClick={onJumpOwner}>
+              {t(simple ? "runDialog.simple.shownAbove" : "runDialog.shownAbove")}
             </button>
           )}
           {state.showRedispatch && onRedispatch && (

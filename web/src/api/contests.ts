@@ -132,12 +132,13 @@ export interface PickContestRequest {
   discardOthers: boolean;
 }
 
+/** Mirrors runnerwire.PickActionResult: a code, never words (the view says
+ * it with workspaceCodeText, else the code itself). */
 export interface PickActionResult {
   runId: string;
   action: string;
   status: string;
   code?: string;
-  reason?: string;
 }
 
 export interface PickContestResponse {

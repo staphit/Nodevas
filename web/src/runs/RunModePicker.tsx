@@ -84,18 +84,45 @@ export function defaultDispatchMode(ctx: DefaultDispatchModeContext): DefaultDis
   return { mode: "interactive" };
 }
 
-/** Whether interactive mode is hard-blocked and its card must be disabled. */
-export function isInteractiveDisabled(ctx: DefaultDispatchModeContext): boolean {
-  return Boolean(
-    ctx.contest ||
-      ctx.group ||
-      !runnerSupportsInteractive(ctx.runner) ||
-      ctx.staged ||
-      ctx.agent?.interactive === false,
-  );
+/**
+ * The §8.1 reasons no pick or saved preference can override: the run could
+ * not work interactively (no capability, an agent without a TUI, a folder its
+ * CLI has not trusted, auto-accept with nobody able to type) or the hub runs
+ * it in the background anyway (a teammate's runner, a staged node, a
+ * pipeline or fallbacks, a group, a contest). Only "auto-accept covers
+ * background only" stays soft: a person may still pick interactive and
+ * answer the prompts themselves.
+ */
+export function hardBackgroundReason(ctx: DefaultDispatchModeContext): ModeFallbackReason | undefined {
+  if (ctx.contest) return "contest";
+  if (ctx.group) return "group";
+  if (!runnerSupportsInteractive(ctx.runner)) return "capability";
+  if (ctx.agent?.interactive === false) return "agent";
+  if (ctx.agent?.untrusted) return "untrusted";
+  if (
+    ctx.edition !== "single" &&
+    ctx.viewer &&
+    ctx.runner?.ownerId &&
+    ctx.runner.ownerId !== ctx.viewer.id
+  ) {
+    return "teammate";
+  }
+  const policy = ctx.runner?.info?.autoAccept;
+  if (policy?.enabled && modeAllowed(policy, RUN_MODE_INTERACTIVE) && !policy.allowRemoteTyping) {
+    return "noTyping";
+  }
+  if (ctx.staged) return "staged";
+  if (ctx.pipeline || ctx.fallbacks) return "pipeline";
+  return undefined;
 }
 
-/** Resolves the active dispatch mode from explicit click, saved runMode preference, and default rule. */
+/** Whether interactive mode is hard-blocked and its card must be disabled. */
+export function isInteractiveDisabled(ctx: DefaultDispatchModeContext): boolean {
+  return hardBackgroundReason(ctx) !== undefined;
+}
+
+/** Resolves the active dispatch mode from explicit click, saved runMode
+ * preference, and default rule. A hard §8.1 reason always wins. */
 export function resolveDispatchMode(
   choice: DispatchMode | null,
   pref: "auto" | "interactive" | "background",
@@ -107,6 +134,22 @@ export function resolveDispatchMode(
   if (pref === "background") return "headless";
   if (pref === "interactive") return "interactive";
   return def.mode;
+}
+
+/**
+ * The mode a follow-up or a "new work" start sends (§8.3): the same rule as a
+ * first start, read for the prior run's runner and agent, with the saved
+ * preference; a queued reply is always background, so it sends no mode.
+ * Returns the request's `mode` value ("" for background).
+ */
+export function followUpMode(
+  ctx: DefaultDispatchModeContext,
+  pref: "auto" | "interactive" | "background" = "auto",
+  queued = false,
+): "" | "interactive" {
+  if (queued) return "";
+  const mode = resolveDispatchMode(null, pref, defaultDispatchMode(ctx), ctx);
+  return mode === "interactive" ? "interactive" : "";
 }
 
 /** Interactive vs Background mode picture cards for dispatch and global-agent forms. */

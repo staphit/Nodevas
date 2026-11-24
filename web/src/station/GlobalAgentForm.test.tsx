@@ -458,7 +458,7 @@ describe("GlobalAgentForm", () => {
     });
   });
 
-  it("renders ContestForm when Compare agents (比稿) is toggled and calls createGlobalContest", async () => {
+  it("renders ContestForm when Compare agents is toggled and calls createGlobalContest", async () => {
     const contestRun = started({ id: "gc1", contestId: "c1", contestLabel: "A" });
     const createContest = vi.spyOn(api, "createGlobalContest").mockResolvedValue({
       contest: {
@@ -475,7 +475,7 @@ describe("GlobalAgentForm", () => {
     const onStarted = vi.fn();
 
     render(<GlobalAgentForm onStarted={onStarted} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents (比稿)" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents" }));
     expect(screen.getByText("2 agents on the same task")).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
 

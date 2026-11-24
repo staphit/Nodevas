@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  BusyError,
   GlobalRunError,
   runFinal,
+  type BusyOption,
+  type BusyResponse,
+  type OnBusy,
   type Run,
   type RunAsk,
   type Runner,
@@ -12,39 +16,15 @@ import { useViewer } from "../../components/SignIn";
 import { useI18n } from "../../i18n";
 import { useEdition } from "../../runners/edition";
 import { useRunners } from "../../runners/runnerStore";
+import { usePreference } from "../../store";
+import { followUpMode } from "../RunModePicker";
 import { selectRunById, selectRunChain, useRuns } from "../runStore";
+import { mapFollowUpError } from "./followUpErrors";
 import { canEndRun, deriveComposerState, type ComposerState } from "./RunComposer";
 import { buildRunLines, type RunDialogLine } from "./runLines";
 
 /** Cap on how many turns of a chain are watched simultaneously to bound memory. */
 const MAX_WATCHED_TURNS = 10;
-
-const FOLLOW_UP_ERROR_KEYS: Record<string, string> = {
-  CONTINUED: "runDialog.err.continued",
-  IN_USE: "runDialog.err.inUse",
-  WORK_GONE: "runDialog.err.gone",
-  RUNNER_OUTDATED: "runDialog.err.outdated",
-  RUN_LIVE: "runDialog.err.live",
-  PR_ENDED: "runDialog.err.prEnded",
-  BRANCH_MOVED: "runDialog.err.branchMoved",
-  PR_MOVED: "runDialog.err.prMoved",
-  MERGE_PENDING: "runDialog.err.mergePending",
-  TURN_RUNNING: "runDialog.err.turnRunning",
-};
-
-function mapFollowUpError(
-  error: unknown,
-  t: (key: string, values?: Record<string, string | number>) => string,
-  simple: boolean,
-): string {
-  if (error instanceof GlobalRunError) {
-    if (simple && error.code === "WORK_GONE") return t("runDialog.simple.err.gone");
-    const key = FOLLOW_UP_ERROR_KEYS[error.code];
-    if (key) return t(key);
-    return error.message;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
 
 export interface UseRunDialogOptions {
   runId: string;
@@ -67,6 +47,11 @@ export interface UseRunDialogResult {
   ending: boolean;
   stopping: boolean;
   error: string | null;
+  /** A "new work" start the hub answered BUSY: the choice to show. */
+  busy: BusyResponse | null;
+  /** Starts the busy-refused new work again with the person's choice; true once started. */
+  chooseBusy: (choice: BusyOption | string) => Promise<boolean>;
+  cancelBusy: () => void;
   submitText: (text: string) => Promise<boolean>;
   endRun: () => Promise<void>;
   stopRun: () => Promise<void>;
@@ -96,10 +81,17 @@ export function useRunDialog({
   const [submitting, setSubmitting] = useState(false);
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ response: BusyResponse; text: string } | null>(null);
+  const modePref = usePreference("runMode");
+  // A reply queued behind a still-running turn: the view stays on that turn
+  // (its Stop stays in reach) and moves to the reply once the turn ends.
+  const queuedReplyRef = useRef<string | null>(null);
 
   useEffect(() => {
     setActiveId(runId);
     setError(null);
+    setBusy(null);
+    queuedReplyRef.current = null;
   }, [runId]);
 
   const run = useRuns((s) => selectRunById(s, activeId));
@@ -228,6 +220,66 @@ export function useRunDialog({
     }
   }, [latestRun, activeId]);
 
+  // The turn a reply was queued behind has ended: show the reply's turn.
+  const activeFinal = Boolean(run && runFinal(run.status));
+  useEffect(() => {
+    const queued = queuedReplyRef.current;
+    if (!queued || !activeFinal) return;
+    queuedReplyRef.current = null;
+    setActiveId(queued);
+  }, [activeFinal]);
+
+  // §8.3: a follow-up or new work uses the first start's rule, read for the
+  // prior run's runner and agent (and the saved preference).
+  const modeFor = useCallback(
+    (prior: Run, queued: boolean) =>
+      followUpMode(
+        {
+          runner,
+          agent: runner?.info?.agents?.find((item) => item.kind === prior.agent),
+          viewer,
+          edition,
+        },
+        modePref,
+        queued,
+      ),
+    [runner, viewer, edition, modePref],
+  );
+
+  const startNewWork = useCallback(
+    async (prior: Run, text: string, onBusy?: OnBusy, holderIds?: string[]): Promise<boolean> => {
+      const mode = modeFor(prior, false);
+      try {
+        const created = await api.createGlobalRun({
+          runnerId: prior.runnerId,
+          repoId: prior.repoId,
+          agent: prior.agent,
+          model: prior.model || undefined,
+          ...(mode ? { mode } : {}),
+          base: prior.base || undefined,
+          task: text,
+          openPR: !prior.noPR,
+          simple,
+          ...(onBusy ? { onBusy } : {}),
+          ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
+        });
+        setBusy(null);
+        putRun(created);
+        setActiveId(created.id);
+        onRunCreated?.(created);
+        return true;
+      } catch (err) {
+        if (err instanceof BusyError) {
+          // The folder is busy: the person chooses (queue, take over, both).
+          setBusy({ response: err.busy, text });
+          return false;
+        }
+        throw err;
+      }
+    },
+    [modeFor, simple, putRun, onRunCreated],
+  );
+
   const submitText = useCallback(
     async (text: string): Promise<boolean> => {
       if (!targetRun || !composerState) return false;
@@ -247,29 +299,28 @@ export function useRunDialog({
         }
 
         if (composerState.kind === "new_work") {
-          const created = await api.createGlobalRun({
-            runnerId: targetRun.runnerId,
-            repoId: targetRun.repoId,
-            agent: targetRun.agent,
-            model: targetRun.model || undefined,
-            base: targetRun.base || undefined,
-            task: text,
-            openPR: !targetRun.noPR,
-            simple,
-          });
-          putRun(created);
-          setActiveId(created.id);
-          onRunCreated?.(created);
-          return true;
+          return await startNewWork(targetRun, text);
         }
 
-        // follow_up, follow_up_pr, reset_at, background_queue
+        // follow_up, follow_up_pr, reset_at, background_queue. A reply that
+        // waits (behind a running turn, or for a usage limit to reset) is a
+        // queued reply: always background (§8.3).
+        const queued = composerState.kind === "background_queue" || composerState.kind === "reset_at";
+        const mode = modeFor(targetRun, queued);
         const created = await api.followUpGlobalRun(targetRun.id, {
           message: text,
+          ...(mode ? { mode } : {}),
         });
         putRun(created);
-        setActiveId(created.id);
-        void loadThread(created.id).catch(() => undefined);
+        if (runFinal(targetRun.status)) {
+          setActiveId(created.id);
+          void loadThread(created.id).catch(() => undefined);
+        } else {
+          // Stay on the running turn (its Stop stays here); the queued reply
+          // shows as a pending line and takes over when the turn ends.
+          queuedReplyRef.current = created.id;
+          void loadThread(targetRun.id).catch(() => undefined);
+        }
         onRunCreated?.(created);
         return true;
       } catch (err) {
@@ -283,8 +334,29 @@ export function useRunDialog({
         setSubmitting(false);
       }
     },
-    [targetRun, composerState, simple, t, putRun, loadThread, onRunCreated],
+    [targetRun, composerState, simple, t, putRun, loadThread, onRunCreated, modeFor, startNewWork],
   );
+
+  const chooseBusy = useCallback(
+    async (choice: BusyOption | string): Promise<boolean> => {
+      if (!busy || !targetRun) return false;
+      const holderIds = (busy.response.holders ?? []).map((holder) => holder.runId);
+      setSubmitting(true);
+      setError(null);
+      try {
+        return await startNewWork(targetRun, busy.text, choice as OnBusy, holderIds);
+      } catch (err) {
+        setBusy(null);
+        setError(mapFollowUpError(err, t, simple));
+        return false;
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [busy, targetRun, startNewWork, t, simple],
+  );
+
+  const cancelBusy = useCallback(() => setBusy(null), []);
 
   const endRun = useCallback(async () => {
     if (!targetRun || ending) return;
@@ -309,12 +381,19 @@ export function useRunDialog({
   const withdrawRun = useCallback(
     async (targetRunId: string) => {
       setError(null);
+      if (queuedReplyRef.current === targetRunId) queuedReplyRef.current = null;
       await cancelRun(targetRunId);
-      if (isGlobal && activeId) {
-        void loadThread(activeId).catch(() => undefined);
+      // The view goes back to the latest turn that is still there, never the
+      // withdrawn one.
+      const remaining = chain.filter((item) => item.id !== targetRunId);
+      const withdrawn = chain.find((item) => item.id === targetRunId);
+      const next = remaining.length > 0 ? remaining[remaining.length - 1].id : withdrawn?.continueOf || activeId;
+      if (next && next !== activeId) setActiveId(next);
+      if (isGlobal && next) {
+        void loadThread(next).catch(() => undefined);
       }
     },
-    [cancelRun, isGlobal, activeId, loadThread],
+    [cancelRun, chain, isGlobal, activeId, loadThread],
   );
 
   return {
@@ -329,6 +408,9 @@ export function useRunDialog({
     ending,
     stopping,
     error,
+    busy: busy?.response ?? null,
+    chooseBusy,
+    cancelBusy,
     submitText,
     endRun,
     stopRun,

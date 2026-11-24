@@ -389,7 +389,7 @@ export function formatToolSummary(t: Translate, summary: ToolSummary): string {
         if (tool === "claim_task") return t("runDialog.tool.claim");
         if (tool === "get_node") return t("runDialog.tool.getNode");
         if (tool === "set_node_status") return t("runDialog.tool.setStatus");
-        return t("runDialog.tool.mcp", { server: t("runDialog.tool.board"), tool });
+        return t("runDialog.tool.boardTool", { tool });
       }
       return t("runDialog.tool.mcp", { server: summary.server || "", tool });
     }
@@ -399,7 +399,12 @@ export function formatToolSummary(t: Translate, summary: ToolSummary): string {
       return t("runDialog.tool.write", { target: summary.target }).trim();
     case "edit": {
       const target = summary.files
-        ? t("runDialog.tool.files", { first: summary.files.first, count: summary.files.moreCount })
+        ? t("runDialog.tool.files", {
+            first: summary.files.first,
+            // en counts the others ("and 2 more"), zh-TW the whole set ("等 3 個檔案").
+            count: summary.files.moreCount,
+            total: summary.files.moreCount + 1,
+          })
         : summary.target;
       return t("runDialog.tool.edit", { target }).trim();
     }

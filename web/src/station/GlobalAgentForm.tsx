@@ -440,6 +440,7 @@ export function GlobalAgentForm({
           openPR: simple ? false : openPR,
           ...(simple ? { simple: true } : {}),
           ...(groupOnBusy ? { onBusy: groupOnBusy } : {}),
+          ...(groupOnBusy && holderIds && holderIds.length > 0 ? { holderIds } : {}),
         });
         const runs = res.runs ?? [];
         useRuns.getState().putRuns(runs);

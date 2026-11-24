@@ -8,13 +8,19 @@
 // under "Show details".
 
 import { useEffect, useRef, useState } from "react";
-import { api, type Run } from "../api";
+import { api, BusyError, type BusyResponse, type OnBusy, type Run } from "../api";
+import { useViewer } from "../components/SignIn";
 import { useI18n } from "../i18n";
-import { useLocalRunner } from "../runners/edition";
+import { useEdition, useLocalRunner } from "../runners/edition";
+import { useRunners } from "../runners/runnerStore";
 import { useSimpleMode } from "../simple/simpleMode";
+import { usePreference } from "../store";
 import { confirmApply } from "./confirmWorkspace";
+import { BusyChoice } from "./coord/BusyChoice";
 import { useCoordStore } from "./coord/coordStore";
+import { mapFollowUpError } from "./dialog/followUpErrors";
 import { applyRefusalKey, lookAt, resultState, type LookOutcome } from "./resultState";
+import { followUpMode } from "./RunModePicker";
 import { selectRunById, useRuns } from "./runStore";
 import { useWorkspace, workspaceCodeText } from "./workspaceStore";
 
@@ -22,6 +28,27 @@ type Translate = ReturnType<typeof useI18n>["t"];
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The whole task a run's work started from: its chain root's first "You"
+ * line (seq 0, hub-written), from the run store when it is loaded, else read
+ * once; the title (its first line only) when neither is there.
+ */
+export async function originalTask(run: Run): Promise<string> {
+  const root = run.workRoot || run.id;
+  const fromEvents = (events: readonly { type: string; text?: string }[] | undefined) =>
+    events?.find((event) => event.type === "user" && event.text?.trim())?.text?.trim() ?? "";
+  const held = fromEvents(useRuns.getState().eventsByRun[root]);
+  if (held) return held;
+  try {
+    const page = await api.getRunEvents(root, 0, 1);
+    const read = fromEvents(page.events ?? []);
+    if (read) return read;
+  } catch {
+    // Fall back to what the list already knows.
+  }
+  return run.title || run.prompt || "";
 }
 
 /** What "Take a look" said it did, in the reader's words; "" for nothing. */
@@ -48,10 +75,23 @@ interface Refusal {
   detail: string;
 }
 
-export function ResultActions({ run: given, compact = false }: { run: Run; compact?: boolean }) {
+export function ResultActions({
+  run: given,
+  compact = false,
+  onStartNewWork,
+}: {
+  run: Run;
+  compact?: boolean;
+  /** Opens the caller's own composer prefilled with the whole task (the
+   * global list's row); without it the task opens in a box here. */
+  onStartNewWork?: (task: string) => void;
+}) {
   const { t } = useI18n();
   const local = useLocalRunner();
   const simple = useSimpleMode();
+  const viewer = useViewer();
+  const edition = useEdition();
+  const modePref = usePreference("runMode");
   // The run store's copy is the fresher one: an apply lands there first.
   const stored = useRuns((s) => selectRunById(s, given.id));
   const run = stored ?? given;
@@ -72,6 +112,9 @@ export function ResultActions({ run: given, compact = false }: { run: Run; compa
   const [folderError, setFolderError] = useState("");
   const [startingNew, setStartingNew] = useState(false);
   const [newWorkError, setNewWorkError] = useState("");
+  const [newWorkText, setNewWorkText] = useState<string | null>(null);
+  const [newWorkBusy, setNewWorkBusy] = useState<BusyResponse | null>(null);
+  const runner = useRunners((s) => s.runners.find((item) => item.id === run.runnerId));
   const live = useRef(true);
   // Set again on every mount: StrictMode (dev) unmounts and mounts once more,
   // and a ref left false would stop every answer from showing.
@@ -99,8 +142,34 @@ export function ResultActions({ run: given, compact = false }: { run: Run; compa
 
   // Merged or closed PR: offer starting new work with the same task.
   if (state === "pr_ended") {
-    const onStartNewWork = async () => {
+    // Never starts on its own: the whole task opens in a composer first, so
+    // the person sees (and can change) what the new work will be told.
+    const onOpenNewWork = async () => {
       if (startingNew) return;
+      setNewWorkError("");
+      setStartingNew(true);
+      const task = await originalTask(run);
+      if (!live.current) return;
+      setStartingNew(false);
+      if (onStartNewWork) {
+        onStartNewWork(task);
+        return;
+      }
+      setNewWorkText(task);
+    };
+    // §8.3: the first start's rule, read for this run's runner and agent.
+    const mode = followUpMode(
+      {
+        runner,
+        agent: runner?.info?.agents?.find((item) => item.kind === run.agent),
+        viewer,
+        edition,
+      },
+      modePref,
+    );
+    const onStart = async (onBusy?: OnBusy, holderIds?: string[]) => {
+      const task = (newWorkText ?? "").trim();
+      if (!task || startingNew) return;
       setStartingNew(true);
       setNewWorkError("");
       try {
@@ -109,32 +178,90 @@ export function ResultActions({ run: given, compact = false }: { run: Run; compa
           repoId: run.repoId,
           agent: run.agent,
           model: run.model || undefined,
+          ...(mode ? { mode } : {}),
           base: run.base || undefined,
-          task: run.title || run.prompt || run.id,
+          task,
           openPR: !run.noPR,
           simple,
+          ...(onBusy ? { onBusy } : {}),
+          ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
         });
         if (!live.current) return;
+        setNewWorkBusy(null);
+        setNewWorkText(null);
         if (created?.id) useRuns.getState().putRun(created);
       } catch (error) {
-        if (live.current) setNewWorkError(message(error));
+        if (!live.current) return;
+        if (error instanceof BusyError) {
+          setNewWorkBusy(error.busy);
+          return;
+        }
+        setNewWorkBusy(null);
+        setNewWorkError(mapFollowUpError(error, t, simple));
       } finally {
         if (live.current) setStartingNew(false);
       }
     };
     return (
       <div className={className}>
-        <p className="result-actions-note">{t("runDialog.err.prEnded")}</p>
-        <div className="result-actions-buttons">
-          <button
-            type="button"
-            className="result-btn is-primary"
-            disabled={startingNew}
-            onClick={() => void onStartNewWork()}
-          >
-            {t("runDialog.newWork")}
-          </button>
-        </div>
+        <p className="result-actions-note">{t(simple ? "runDialog.simple.err.prEnded" : "runDialog.err.prEnded")}</p>
+        {newWorkText === null ? (
+          <div className="result-actions-buttons">
+            <button
+              type="button"
+              className="result-btn is-primary"
+              disabled={startingNew}
+              onClick={() => void onOpenNewWork()}
+            >
+              {t("runDialog.newWork")}
+            </button>
+          </div>
+        ) : (
+          <div className="result-actions-new-work">
+            <textarea
+              className="run-dlg-textarea"
+              rows={3}
+              value={newWorkText}
+              aria-label={t("result.newWork.label")}
+              disabled={startingNew}
+              onChange={(event) => setNewWorkText(event.target.value)}
+            />
+            {newWorkBusy && (
+              <BusyChoice
+                busy={newWorkBusy}
+                simple={simple}
+                maxConcurrent={runner?.info?.maxConcurrent}
+                onChoose={(choice) => {
+                  const holderIds = (newWorkBusy.holders ?? []).map((holder) => holder.runId);
+                  void onStart(choice as OnBusy, holderIds);
+                }}
+                onCancel={() => setNewWorkBusy(null)}
+              />
+            )}
+            <div className="result-actions-buttons">
+              <button
+                type="button"
+                className="result-btn"
+                disabled={startingNew}
+                onClick={() => {
+                  setNewWorkText(null);
+                  setNewWorkBusy(null);
+                  setNewWorkError("");
+                }}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="result-btn is-primary"
+                disabled={startingNew || !newWorkText.trim()}
+                onClick={() => void onStart()}
+              >
+                {t("result.newWork.start")}
+              </button>
+            </div>
+          </div>
+        )}
         {newWorkError && (
           <p className="result-actions-note is-error" role="alert">
             {newWorkError}

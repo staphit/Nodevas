@@ -107,7 +107,7 @@ describe("summarizeTool", () => {
       expect(multiPatch.verb).toBe("edit");
       expect(multiPatch.files).toEqual({ first: "a/first.ts", moreCount: 2 });
       expect(formatToolSummary(tEn, multiPatch)).toBe("Edit a/first.ts and 2 more");
-      expect(formatToolSummary(tZh, multiPatch)).toBe("修改 a/first.ts 等 2 個檔案");
+      expect(formatToolSummary(tZh, multiPatch)).toBe("修改 a/first.ts 等 3 個檔案");
 
       // codex.go:334 stores mcp_tool_call as "mcp__<server>__<tool>"
       const mcp = summarizeTool(
@@ -127,8 +127,8 @@ describe("summarizeTool", () => {
       const inbox = summarizeTool({ tool: "check_inbox", input: "{}" }, { isError: false, text: "" });
       expect(inbox.verb).toBe("mcp");
       expect(inbox.boardServer).toBe(true);
-      expect(formatToolSummary(tEn, inbox)).toBe("Use check_inbox from the board");
-      expect(formatToolSummary(tZh, inbox)).toBe("使用 看板 的 check_inbox");
+      expect(formatToolSummary(tEn, inbox)).toBe("Use check_inbox on the board");
+      expect(formatToolSummary(tZh, inbox)).toBe("使用看板的 check_inbox");
 
       const shell = summarizeTool(
         { tool: "run_shell_command", input: JSON.stringify({ command: "git status" }) },
@@ -153,7 +153,7 @@ describe("summarizeTool", () => {
       );
       expect(board.verb).toBe("mcp");
       expect(board.state).toBe("ok");
-      expect(formatToolSummary(tEn, board)).toBe("Use send_message from the board");
+      expect(formatToolSummary(tEn, board)).toBe("Use send_message on the board");
 
       const strReplace = summarizeTool(
         { tool: "str_replace_editor", input: JSON.stringify({ path: "src/main.ts" }) },
@@ -237,7 +237,8 @@ describe("summarizeTool", () => {
     it("falls back to other for unknown tool names", () => {
       const summary = summarizeTool({ tool: "custom_gizmo", input: "{}" }, { isError: false, text: "" });
       expect(summary.verb).toBe("other");
-      expect(formatToolSummary(tEn, summary)).toBe("custom_gizmo");
+      expect(formatToolSummary(tEn, summary)).toBe("Use custom_gizmo");
+      expect(formatToolSummary(tZh, summary)).toBe("使用 custom_gizmo");
     });
   });
 });

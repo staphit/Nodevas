@@ -98,12 +98,24 @@ export function RunTranscript({
   const following = useRef(true);
   const [behind, setBehind] = useState(false);
 
+  // What changes whenever the end of the transcript does: the count of lines
+  // (which stops at the window size once there are more), the last line's key
+  // (a new line) and its text length (text growing inside the last row).
+  const tailSignature = useMemo(() => {
+    const last = filtered[filtered.length - 1];
+    let size = 0;
+    if (last && "text" in last) size = last.text.length;
+    else if (last?.kind === "tool") size = last.result ? (last.result.text?.length ?? 0) + 1 : 0;
+    else if (last?.kind === "ask") size = last.ask.status.length;
+    return `${filtered.length}:${last?.key ?? ""}:${size}`;
+  }, [filtered]);
+
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     if (following.current) el.scrollTop = el.scrollHeight;
     else setBehind(true);
-  }, [visible.length]);
+  }, [tailSignature]);
 
   // Polite live region announcing new agent `text` only (first 200 chars, <= 1 per 5s).
   // Seed lastTextKeyRef with any pre-existing text on initial mount so opening
@@ -174,19 +186,20 @@ export function RunTranscript({
   const renderNoticeText = (notice: Extract<RunDialogLine, { kind: "notice" }>["notice"]) => {
     switch (notice) {
       case "branch_moved":
-        return t("runDialog.err.branchMoved");
+        return t(simple ? "runDialog.simple.err.branchMoved" : "runDialog.err.branchMoved");
       case "quiet":
         return t(simple ? "runDialog.simple.end.quiet" : "runDialog.end.quiet");
       case "quiet_waiting":
         return t(simple ? "runDialog.simple.end.quietWaiting" : "runDialog.end.quietWaiting");
       case "resume_lost":
-        return t("runDialog.resumeLost");
+        return t(simple ? "runDialog.simple.resumeLost" : "runDialog.resumeLost");
     }
   };
 
   return (
     <div className={className ? `run-dlg-transcript ${className}` : "run-dlg-transcript"}>
-      {hasHiddenNotes && (
+      {/* Runner notes are a developer's record: Simple never offers them. */}
+      {hasHiddenNotes && !simple && (
         <div className="run-dlg-transcript-bar">
           <label className="run-dlg-notes-toggle">
             <input
@@ -246,7 +259,7 @@ export function RunTranscript({
                       <span className="run-dlg-user-prefix" aria-hidden="true">
                         ›
                       </span>
-                      <strong className="run-dlg-user-label">{t("runDialog.you")}:</strong>
+                      <strong className="run-dlg-user-label">{t("runDialog.youSaid")}</strong>
                       <span className="run-dlg-user-text">{line.text}</span>
                       {line.pending && line.withdrawRunId && onWithdraw && (
                         <button
