@@ -57,6 +57,8 @@ export interface CreateGlobalRunRequest {
 export interface FollowUpRequest {
   message: string;
   mode?: "" | "interactive";
+  /** Simple mode: the hub asks the agent for plain words in its reply. */
+  simple?: boolean;
 }
 
 /** GET /api/global-runs/:id/thread: oldest first, at most 50 turns. */
@@ -114,6 +116,8 @@ export interface ResumeGlobalGroupResponse {
 export interface GroupFollowUpRequest {
   message: string;
   only: "failed" | "all";
+  /** Simple mode: the hub asks each agent for plain words in its reply. */
+  simple?: boolean;
 }
 
 export interface GroupFollowUpSkipped {

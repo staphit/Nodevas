@@ -422,6 +422,26 @@ describe("RunDialog", () => {
     );
   });
 
+  // The hub asks the agent for plain words when the reply comes from Simple mode.
+  it("marks a follow-up sent from Simple mode", async () => {
+    useRunners.setState({ runners: [interactiveRunner], loaded: true });
+    const prior = makeRun({ mode: "", status: "succeeded", finishedAt: "2026-11-20T08:10:00Z" });
+    rememberGlobalRuns([prior]);
+    useRuns.getState().putRun(prior);
+    const next = makeRun({ id: "g2", mode: "interactive", status: "queued", continueOf: "g1", workRoot: "g1" });
+    const followUp = vi.spyOn(api, "followUpGlobalRun").mockResolvedValue(next);
+
+    render(
+      <EditionProvider edition="single">
+        <RunDialog runId="g1" variant="plain" simple />
+      </EditionProvider>,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Make the button bigger" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send|送出/ }));
+    await waitFor(() => expect(followUp).toHaveBeenCalled());
+    expect(followUp.mock.calls[0][1]).toMatchObject({ message: "Make the button bigger", simple: true });
+  });
+
   it("keeps a follow-up in the background when the saved preference or the agent says so", async () => {
     useRunners.setState({
       runners: [

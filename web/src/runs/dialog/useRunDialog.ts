@@ -310,6 +310,7 @@ export function useRunDialog({
         const created = await api.followUpGlobalRun(targetRun.id, {
           message: text,
           ...(mode ? { mode } : {}),
+          ...(simple ? { simple: true } : {}),
         });
         putRun(created);
         if (runFinal(targetRun.status)) {

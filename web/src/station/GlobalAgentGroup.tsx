@@ -269,7 +269,11 @@ export function GlobalAgentGroup({
     setSendingTell(true);
     setTellReport(null);
     try {
-      const res = await useGlobalAgents.getState().followUpGroup(groupId, { message: trimmed, only: tellMode });
+      const res = await useGlobalAgents.getState().followUpGroup(groupId, {
+        message: trimmed,
+        only: tellMode,
+        ...(simple ? { simple: true } : {}),
+      });
       if (!res) return;
       const started = res.started ?? [];
       const skipped = (res.skipped ?? []).map((item) => {
