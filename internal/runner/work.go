@@ -35,7 +35,9 @@ const (
 	// resumeFailedText is the run event (and runner log line) of a resume
 	// that failed fast, headless or interactive: the hub keeps it with the
 	// run, so the person sees the agent started again from the carry-over
-	// prompt instead of resuming.
+	// prompt instead of resuming. The web matches its start ("resume failed;
+	// starting again without", web/src/runs/dialog/runLines.ts) to show a
+	// plain notice: keep the two in step.
 	resumeFailedText = "resume failed; starting again without the agent's memory"
 )
 

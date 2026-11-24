@@ -6,6 +6,8 @@ export const MAX_EVENT_TEXT = 16 << 10;
 
 const HUB_PREFIX = "hub: ";
 const EXIT_CODE_RE = /\bexited with code (-?\d+)\b/i;
+/** The runner's log when a resume fails (internal/runner resumeFailedText). */
+const RESUME_FAILED_PREFIX = "resume failed; starting again without";
 const encoder = new TextEncoder();
 
 export interface RunTurnInput {
@@ -94,6 +96,7 @@ export function buildRunLines(turns: readonly RunTurnInput[]): RunDialogLine[] {
     const toolIndexById = new Map<string, number>();
     let sawUserEvent = false;
     const errorTexts = new Set<string>();
+    let resumeLostShown = false;
 
     const flushSettledAsksBefore = (eventAt: string) => {
       const at = Date.parse(eventAt);
@@ -197,6 +200,16 @@ export function buildRunLines(turns: readonly RunTurnInput[]): RunDialogLine[] {
           // Hidden: tokens appear in the header/energy bar (§3.6, §11).
           break;
         case "log": {
+          // The runner's fixed sentence when a resume fails and the agent
+          // starts again without its memory (internal/runner resumeFailedText):
+          // one plain notice per turn instead of the raw log line.
+          if (text.startsWith(RESUME_FAILED_PREFIX)) {
+            if (!resumeLostShown) {
+              resumeLostShown = true;
+              out.push({ kind: "notice", key: `notice-resume-${runId}`, runId, notice: "resume_lost" });
+            }
+            break;
+          }
           const exitMatch = EXIT_CODE_RE.exec(text);
           if (exitMatch) {
             const code = Number(exitMatch[1]);

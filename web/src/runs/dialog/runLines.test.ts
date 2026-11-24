@@ -134,6 +134,21 @@ describe("buildRunLines", () => {
     }
   });
 
+  // The runner logs one fixed sentence when a resume fails and the agent
+  // starts again without its memory (internal/runner resumeFailedText).
+  it("turns the runner's resume-failed log into one resume_lost notice", () => {
+    const run = makeRun({ status: "succeeded" });
+    const failed = "resume failed; starting again without the agent's memory";
+    const events: RunEvent[] = [
+      { seq: 1, type: "log", text: failed, at: "2026-11-20T08:00:01.000Z" },
+      { seq: 2, type: "log", text: failed, at: "2026-11-20T08:00:02.000Z" },
+    ];
+    const lines = buildRunLines([{ run, events }]);
+    const notices = lines.filter((l) => l.kind === "notice" && l.notice === "resume_lost");
+    expect(notices).toHaveLength(1);
+    expect(lines.some((l) => l.kind === "log" && l.text === failed)).toBe(false);
+  });
+
   it("marks text truncated at MaxEventText and adds error/notice rows for run failures and pushRefused", () => {
     const huge = "a".repeat(MAX_EVENT_TEXT);
     const run = makeRun({ status: "failed", error: "boom", pushRefused: true, endReason: "quiet_waiting" });

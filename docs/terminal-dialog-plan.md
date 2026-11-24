@@ -396,7 +396,7 @@ A first turn has no PR yet; its publish is unchanged. §C's `continue` choice ca
 
 - **Capture is new work.** Each parser today only writes the id into a log line's text (`claude.go:395`, `codex.go:206`, `gemini.go:201, 281-283`). A1 adds `SessionReporter{Session() string}` to every parser, Gemini included. The id is validated with `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$` and stored only in `work.json`. It is passed in argv only, never in a shell string (the `.cmd` shim path keeps using `wrapBatch`).
 - **Resume rules.** Resume only when the agent kind matches the entry's. A different model is allowed for claude, codex and opencode.
-- **Fast-fail retry (graft).** If a resume exits non-zero with no `text` event within 30 s, the runner retries once with a fresh session and the fallback prompt, and logs "resume failed; continuing without the agent's memory".
+- **Fast-fail retry (graft).** If a resume exits non-zero with no `text` event within 30 s, the runner retries once with a fresh session and the fallback prompt, and logs "resume failed; starting again without the agent's memory" (a run event, `resumeFailedText` in `internal/runner`).
 - **Fallback prompt.** `adapter.ContinueSection`, built like `handoffSection`:
   > You are continuing your earlier work in this folder on branch X. Earlier task: … You reported: … Inspect `git log <base>..HEAD` and `git status`. The person now says: …
   When the work has a PR, it adds: "Your commits update pull request …; do not push, the runner does."
