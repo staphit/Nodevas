@@ -113,6 +113,9 @@ export function StartScreen() {
     dialogRef.current?.querySelector<HTMLButtonElement>("button.start-screen-blank")?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Escape inside the describe box's run dialog (its composer, an
+      // agent's screen) belongs to that dialog, not to the start screen.
+      if (event.target instanceof Element && event.target.closest(".run-dialog")) return;
       event.preventDefault();
       close();
     };

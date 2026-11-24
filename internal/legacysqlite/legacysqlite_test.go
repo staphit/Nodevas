@@ -189,9 +189,11 @@ func TestImportTableListCoversPGSchema(t *testing.T) {
 	}
 	for _, table := range testpg.Tables(t, target.Writer()) {
 		switch table.Name {
-		// theme_packs and run_plan_drafts came after SQLite was removed: no
+		// theme_packs, run_plan_drafts, run_groups, run_touched_files,
+		// run_overlaps and run_contests came after SQLite was removed: no
 		// legacy file holds one.
-		case "legacy_imports", "search_documents", "theme_packs", "run_plan_drafts":
+		case "legacy_imports", "search_documents", "theme_packs", "run_plan_drafts",
+			"run_groups", "run_touched_files", "run_overlaps", "run_contests":
 			if slices.Contains(Tables, table.Name) {
 				t.Errorf("%s must not be imported", table.Name)
 			}

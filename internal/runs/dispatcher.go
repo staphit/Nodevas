@@ -68,8 +68,14 @@ type Dispatcher struct {
 	onApproved func(project, nodeID, evidence string)
 	evidence   func(project, nodeID, runID, kind, outcome, summary string)
 
-	// createRun records a run (Store.Create); a seam for Start's tests.
-	createRun func(ctx context.Context, in New) (Record, error)
+	// createRun records a run through q, the start's transaction
+	// (Store.createWith); a seam for Start's tests.
+	createRun func(ctx context.Context, q querier, in New) (Record, error)
+
+	// budgetStatus reads an owner's budget for Pump's re-check of queued
+	// group members (overCostOrTokens, cancelOverBudget); nil means
+	// Store.BudgetStatus. A seam for Pump's tests.
+	budgetStatus func(ctx context.Context, ownerID string) (runnerwire.BudgetStatus, error)
 
 	// workspaceWaiters are the requests waiting for a workspace action's
 	// answer (AwaitWorkspaceAction), by action ID; closed when it comes.
@@ -83,6 +89,9 @@ type Dispatcher struct {
 	asksMu sync.Mutex
 	asks   map[string]pendingAsk
 	asked  map[string]bool
+
+	// coord holds coordination hooks and claim release callback (coordhooks.go).
+	coord coordHooks
 }
 
 // UsageAnnounceInterval is the least time between two runs changes a running
@@ -128,7 +137,7 @@ func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, no
 		stepUpRequired: true, stepUpWindow: runnerwire.StepUpWindowSeconds * time.Second, now: time.Now,
 	}
 	if store != nil {
-		d.createRun = store.Create
+		d.createRun = store.createWith
 	}
 	return d
 }
@@ -279,33 +288,73 @@ func (d *Dispatcher) Submit(ctx context.Context, r Record) Record {
 }
 
 // Pump offers the runner's queued runs, oldest first, while it has room.
+//
+// A queued group member over its owner's cost or token budget is cancelled,
+// but only once the runner's lock is released: the cancel's afterEnd pumps
+// other runners (busyEnded), and one of them pumping back into this runner
+// while its lock is held would wait forever. Nothing Pump calls with a runner
+// lock held ends a run or pumps another runner.
 func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
+	lookAgain := true
+	for {
+		over := d.pumpLocked(ctx, runnerID)
+		cancelled, kept := false, false
+		for _, r := range over {
+			if d.cancelOverBudget(ctx, r) {
+				cancelled = true
+			} else {
+				kept = true
+			}
+		}
+		switch {
+		case cancelled:
+			// A cancelled member no longer holds its repository, so a run
+			// on this runner waiting behind it may go now; busyEnded pumps
+			// only the other runners. Each such pass cancelled a queued
+			// run, so this ends.
+		case kept && lookAgain:
+			// The pass skipped a member as over budget, but the cancel's
+			// own read found it under (the day rolled over) or failed: it
+			// is still queued, and nothing else would pump this runner for
+			// it. One more pass, not more, so two reads that keep
+			// disagreeing cannot spin.
+			lookAgain = false
+		default:
+			return
+		}
+	}
+}
+
+// pumpLocked is Pump's pass under the runner's lock. It offers what fits and
+// returns the queued group members that are over budget, for Pump to cancel
+// after the lock is released.
+func (d *Dispatcher) pumpLocked(ctx context.Context, runnerID string) (over []Record) {
 	unlock := d.lock(runnerID)
 	defer unlock()
 	if !d.reg.Online(runnerID) {
-		return
+		return nil
 	}
 	runner, err := d.reg.Get(ctx, runnerID)
 	if err != nil || !Headless(runner.Info) {
-		return
+		return nil
 	}
 	busy, err := d.store.Busy(ctx, runnerID)
 	if err != nil {
 		slog.Warn("runs: count busy", slog.String("runner", runnerID), slog.Any("error", err))
-		return
+		return nil
 	}
 	room := Capacity(runner.Info) - busy
 	if room <= 0 {
-		return
+		return nil
 	}
 	queued, err := d.store.ForRunner(ctx, runnerID, runnerwire.RunQueued)
 	if err != nil {
 		slog.Warn("runs: read queue", slog.String("runner", runnerID), slog.Any("error", err))
-		return
+		return nil
 	}
 	for _, r := range queued {
 		if room <= 0 {
-			return
+			return over
 		}
 		if r.RetryAt != "" {
 			continue // waiting for a usage limit to reset (handoff.go)
@@ -319,10 +368,84 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		if ok, err := d.store.roleHasRoom(ctx, r); err != nil || !ok {
 			continue
 		}
+		// A queued follow-up waits until its prior run is final (§6.3).
+		if r.ContinueOf != "" {
+			if done, err := d.store.PriorFinal(ctx, r.ContinueOf); err != nil || !done {
+				continue
+			}
+		}
+		// A group member waits while its group's usage-limit hold is active (§10.2).
+		if r.GroupID != "" {
+			if held, err := d.store.GroupHeld(ctx, r.GroupID, d.clockNow()); err != nil || held {
+				continue
+			}
+		}
+		// Busy queue / pipeline ordering (§C.2.3).
+		if d.pumpWaitsBehind(ctx, r) || d.pumpHeldByOther(ctx, r) {
+			continue
+		}
+		// A queued group member is re-checked against cost and tokens
+		// before it is offered (§10.2), and cancelled after the lock.
+		if d.overCostOrTokens(ctx, r) {
+			over = append(over, r)
+			continue
+		}
 		if d.offer(ctx, r) {
 			room--
 		}
 	}
+	return over
+}
+
+// overCostOrTokens reports whether a queued group member's owner has reached
+// the daily cost or token budget (§10.2). Only group members are re-checked:
+// any other run was checked when it started, while a group's later members
+// wait in the queue as the earlier ones spend. A read-only kind (verify,
+// review) is never cancelled here. DailyRuns is not re-checked because queued
+// runs count in Used.Runs from creation: a group that exactly fills it would
+// otherwise cancel its own members.
+func (d *Dispatcher) overCostOrTokens(ctx context.Context, r Record) bool {
+	if r.GroupID == "" || r.OwnerID == "" || !isWritingKind(r.Kind, !r.Global) {
+		return false
+	}
+	budget, err := d.memberBudget(ctx, r.OwnerID)
+	if err != nil {
+		return false
+	}
+	return exceededCostOrTokens(budget) != ""
+}
+
+// memberBudget is the owner's budget as Pump's re-check reads it.
+func (d *Dispatcher) memberBudget(ctx context.Context, ownerID string) (runnerwire.BudgetStatus, error) {
+	if d.budgetStatus != nil {
+		return d.budgetStatus(ctx, ownerID)
+	}
+	return d.store.BudgetStatus(ctx, ownerID)
+}
+
+// cancelOverBudget cancels a queued group member with FailureCode
+// FailureBudget (§10.2). It reads the budget again, since time has passed
+// since pumpLocked, and the transition moves the run only if it is still
+// queued. The caller holds no runner lock: afterEnd may pump other runners.
+func (d *Dispatcher) cancelOverBudget(ctx context.Context, r Record) bool {
+	budget, err := d.memberBudget(ctx, r.OwnerID)
+	if err != nil {
+		return false
+	}
+	ex := exceededCostOrTokens(budget)
+	if ex == "" {
+		return false
+	}
+	budget.Exceeded = ex
+	next, err := d.store.Transition(ctx, r.ID, runnerwire.RunCancelled, Change{
+		Error: BudgetMessage(budget), FailureCode: FailureBudget,
+	})
+	if err != nil {
+		return false
+	}
+	d.notifyChanged(next)
+	d.afterEnd(ctx, next, false)
+	return true
 }
 
 // offer marks a queued run offered and sends it. If the send fails the run
@@ -334,6 +457,8 @@ func (d *Dispatcher) offer(ctx context.Context, r Record) bool {
 	}
 	job := offered.Job()
 	job.SteppedUp = d.SteppedUp(offered)
+	d.coordJob(ctx, offered, &job)
+	d.continueJob(ctx, offered, &job)
 	if err := d.reg.Send(r.RunnerID, runnerwire.Envelope{Type: runnerwire.TypeOffer, Job: &job}); err != nil {
 		slog.Warn("runs: send offer", slog.String("run", r.ID), slog.Any("error", err))
 		if back, err := d.store.Transition(ctx, r.ID, runnerwire.RunQueued, Change{}); err == nil {
@@ -425,6 +550,7 @@ func (d *Dispatcher) Accept(ctx context.Context, runnerID string, accept runnerw
 	if err != nil {
 		return err
 	}
+	d.callAcceptViewOnly(ctx, r, accept)
 	d.notifyChanged(r)
 	return nil
 }
@@ -521,6 +647,7 @@ func (d *Dispatcher) Changes(ctx context.Context, runnerID, runID string, change
 		return err
 	}
 	if stored {
+		d.changesTouched(ctx, r, changes.Files)
 		d.notifyChanged(r)
 	}
 	return nil
@@ -557,6 +684,15 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 	r, err := d.store.Finish(ctx, runID, runnerID, result)
 	if err != nil {
 		return err
+	}
+	// A group member that hits a quota or rate limit pauses the group before
+	// afterEnd's global early return and before Pump offers the next member (§10.2).
+	if r.GroupID != "" && r.Status == runnerwire.RunFailed &&
+		(r.FailureKind == runnerwire.FailureQuota || r.FailureKind == runnerwire.FailureRateLimit) {
+		at := resetTime(r, d.clockNow())
+		if err := d.store.SetGroupHold(ctx, r.GroupID, formatStamp(at)); err != nil {
+			slog.Warn("runs: set group hold", slog.String("group", r.GroupID), slog.Any("error", err))
+		}
 	}
 	d.finished(r)
 	// The follow-up (a fallback, a wait for a usage limit, a pipeline's next

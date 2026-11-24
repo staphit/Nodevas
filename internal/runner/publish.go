@@ -79,7 +79,11 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 	} else {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "opened " + pr.URL})
 		j.c.logf("run %s: opened %s", job.RunID, pr.URL)
-		watched := watchedPR{RunID: job.RunID, NodeID: job.NodeID, URL: pr.URL, Worktree: wt.Path, Repo: r.repo.Path,
+		root := r.workRoot
+		if root == "" {
+			root = job.RunID
+		}
+		watched := watchedPR{RunID: root, NodeID: job.NodeID, URL: pr.URL, Worktree: wt.Path, Repo: r.repo.Path,
 			Branch: wt.Branch, PR: pr}
 		if len(committed.Withheld) > 0 {
 			// It holds agent config the commit left out: it outlives the PR.

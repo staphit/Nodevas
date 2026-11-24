@@ -95,7 +95,7 @@ func TestPauseAll(t *testing.T) {
 	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeAccept, Accept: &runnerwire.Accept{RunID: running.ID}})
 	f.waitStatus(t, running.ID, runnerwire.RunRunning)
 	beaPilot, beaTaskRun := f.startGoal(t, f.bea, conn, "goal-bea", "task-bea")
-	pending := f.dispatch(t, f.bea, f.runBody(""))
+	pending := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	expectOffer(t, conn, pending.ID)
 
 	// cal: his own runner, run and autopilot.
@@ -107,6 +107,7 @@ func TestPauseAll(t *testing.T) {
 	}
 	body, _ := json.Marshal(runnerwire.CreateRunRequest{
 		NodeID: runsTestNode, RunnerID: calRunner.Runner.ID, Agent: "claude", RepoID: "repo-1",
+		OnBusy: runnerwire.OnBusyBoth,
 	})
 	calRun := f.dispatch(t, f.cal, string(body))
 	expectOffer(t, calConn, calRun.ID)

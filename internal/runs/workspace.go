@@ -58,6 +58,7 @@ var workspaceGateText = map[string][2]string{
 	runnerwire.WorkspaceGateHeadMoved:   {"the branch changed since you looked; reload", "你看過之後分支有變更；請重新載入"},
 	runnerwire.WorkspaceErrHasPR:        {"the run has an open pull request; merge it there", "這次執行有開啟中的 PR；請在 PR 合併"},
 	runnerwire.WorkspaceGateInUse:       {"another run or its pipeline is still working on this branch or pull request", "還有其他執行或它的流程正在使用這個分支或 PR"},
+	runnerwire.WorkspaceGateContinued:   {"this work continued in a later turn", "這份工作已在後續輪次繼續"},
 }
 
 func (e *WorkspaceBlocked) Error() string        { return e.message().Error() }
@@ -119,6 +120,8 @@ func WorkspaceGate(r Record, runner WorkspaceRunner) WorkspaceGates {
 	switch {
 	case !runnerwire.RunFinal(r.Status):
 		return both(runnerwire.WorkspaceGateRunning)
+	case r.ContinuedBy != "":
+		return both(runnerwire.WorkspaceGateContinued)
 	case r.Workspace == runnerwire.RunWorkspaceDiscarded:
 		g.DiscardDone = true
 		g = both(runnerwire.WorkspaceGateDiscarded)
@@ -208,6 +211,37 @@ func CheckWorkspaceAction(r Record, runner WorkspaceRunner, action, headSHA stri
 			return blocked(g.DiscardBlocked)
 		}
 		return nil
+	case runnerwire.WorkspaceOpenPR:
+		// open_pr is only for a succeeded contest entry with a commit, no PR
+		// yet, a live workspace and a runner with CapCoord (§C.4.4, §16.3).
+		switch {
+		case !runnerwire.RunFinal(r.Status):
+			return blocked(runnerwire.WorkspaceGateRunning)
+		case r.ContinuedBy != "":
+			return blocked(runnerwire.WorkspaceGateContinued)
+		case r.Status != runnerwire.RunSucceeded || r.ContestID == "" || r.ContestLabel == "" || r.ContestLabel == "J":
+			return blocked(runnerwire.WorkspaceGateKind)
+		case r.Workspace == runnerwire.RunWorkspaceDiscarded:
+			return blocked(runnerwire.WorkspaceGateDiscarded)
+		case r.Workspace == runnerwire.RunWorkspaceMergedLocal:
+			return blocked(runnerwire.WorkspaceGateMergedLocal)
+		case r.PRState == runnerwire.PRMerged:
+			return blocked(runnerwire.WorkspaceGatePRMerged)
+		case r.PRURL != "":
+			return blocked(runnerwire.WorkspaceErrHasPR)
+		case workspacePending(r) || (r.Merge != nil && r.Merge.Status == runnerwire.MergePending):
+			return blocked(runnerwire.WorkspaceGatePending)
+		case r.Commit == "":
+			return blocked(runnerwire.WorkspaceGateNoCommit)
+		case runner.InUse:
+			return blocked(runnerwire.WorkspaceGateInUse)
+		case !slices.Contains(runner.Caps, runnerwire.CapCoord):
+			return blocked(runnerwire.WorkspaceGateOutdated)
+		}
+		if code := runnerGate(runner); code != "" {
+			return blocked(code)
+		}
+		return nil
 	}
 	return locale.Errorf("%w: unknown workspace action", "%w：不明的工作區動作", ErrInvalid)
 }
@@ -227,9 +261,9 @@ WHERE id = ? AND runner_id = ? AND branch = ''`,
 	return s.Get(ctx, runID)
 }
 
-// WorkspaceInUse reports whether other work still needs r's branch or PR:
-// an unfinished run on the same PR or branch (a revise or review run, a
-// later stage), or r's pipeline still running.
+// WorkspaceInUse reports whether other work still needs r's branch, PR or
+// work_root: an unfinished run on the same PR, branch or work_root (a revise,
+// review or follow-up run, a later stage), or r's pipeline still running.
 func (s *Store) WorkspaceInUse(ctx context.Context, r Record) (bool, error) {
 	pr := r.PRURL
 	if pr == "" {
@@ -239,15 +273,21 @@ func (s *Store) WorkspaceInUse(ctx context.Context, r Record) (bool, error) {
 	if branch == "" {
 		branch = r.JobBranch
 	}
+	workRoot := r.WorkRoot
+	if workRoot == "" {
+		workRoot = r.ID
+	}
 	var n int
 	err := s.db.QueryRowContext(ctx, `
 SELECT
   (SELECT COUNT(*) FROM runs
    WHERE id <> ? AND status IN (?, ?, ?)
-     AND ((? <> '' AND (job_pr_url = ? OR pr_url = ?)) OR (? <> '' AND (job_branch = ? OR branch = ?))))
+     AND ((? <> '' AND (job_pr_url = ? OR pr_url = ?))
+       OR (? <> '' AND (job_branch = ? OR branch = ?))
+       OR (? <> '' AND (id = ? OR work_root = ?))))
 + (SELECT COUNT(*) FROM run_pipelines WHERE ? <> '' AND id = ? AND status = ?)`,
 		r.ID, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning,
-		pr, pr, pr, branch, branch, branch,
+		pr, pr, pr, branch, branch, branch, workRoot, workRoot, workRoot,
 		r.PipelineID, r.PipelineID, runnerwire.PipelineRunning).Scan(&n)
 	return n > 0, err
 }
@@ -379,7 +419,7 @@ func (s *Store) ExpireWorkspaceActions(ctx context.Context) ([]runnerwire.RunWor
 // on a run. At most one waits per run; a second is refused with
 // MsgWorkspacePending.
 func (s *Store) CreateWorkspaceAction(ctx context.Context, runID, action, headSHA, base, byID, byName string) (runnerwire.RunWorkspaceAction, error) {
-	if runID == "" || byID == "" || (action != runnerwire.WorkspaceMergeLocal && action != runnerwire.WorkspaceDiscard) {
+	if runID == "" || byID == "" || (action != runnerwire.WorkspaceMergeLocal && action != runnerwire.WorkspaceDiscard && action != runnerwire.WorkspaceOpenPR) {
 		return runnerwire.RunWorkspaceAction{}, locale.Errorf("%w: missing field", "%w：缺少欄位", ErrInvalid)
 	}
 	// A stale request must not block a fresh one.
@@ -414,7 +454,7 @@ ON CONFLICT DO NOTHING`,
 // ask, so whoever asked is the owner.
 func (s *Store) PendingWorkspaceActions(ctx context.Context, runnerID string) ([]runnerwire.WorkspaceActionJob, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT a.id, a.run_id, a.action, a.head_sha, a.base, r.owner_id, r.repo_id, r.node_id, r.branch_slug, r.kind, r.branch
+SELECT a.id, a.run_id, a.action, a.head_sha, a.base, r.owner_id, r.repo_id, r.node_id, r.branch_slug, r.kind, r.branch, r.work_root
 FROM run_workspace_actions a JOIN runs r ON r.id = a.run_id
 WHERE r.runner_id = ? AND a.status = ? ORDER BY a.created_at, a.id`, runnerID, runnerwire.WorkspacePending)
 	if err != nil {
@@ -425,7 +465,7 @@ WHERE r.runner_id = ? AND a.status = ? ORDER BY a.created_at, a.id`, runnerID, r
 	for rows.Next() {
 		var job runnerwire.WorkspaceActionJob
 		if err := rows.Scan(&job.ID, &job.RunID, &job.Action, &job.HeadSHA, &job.Base, &job.AccountID,
-			&job.RepoID, &job.NodeID, &job.Slug, &job.Kind, &job.Branch); err != nil {
+			&job.RepoID, &job.NodeID, &job.Slug, &job.Kind, &job.Branch, &job.WorkRoot); err != nil {
 			return nil, err
 		}
 		out = append(out, job)
@@ -436,7 +476,7 @@ WHERE r.runner_id = ? AND a.status = ? ORDER BY a.created_at, a.id`, runnerID, r
 // WorkspaceJob is the job a runner is sent for action a of run r.
 func WorkspaceJob(r Record, a runnerwire.RunWorkspaceAction) runnerwire.WorkspaceActionJob {
 	return runnerwire.WorkspaceActionJob{ID: a.ID, RunID: r.ID, AccountID: r.OwnerID, Action: a.Action, RepoID: r.RepoID,
-		NodeID: r.NodeID, Slug: r.BranchSlug, Kind: r.Kind, Branch: r.Branch, Base: a.Base, HeadSHA: a.HeadSHA}
+		NodeID: r.NodeID, Slug: r.BranchSlug, Kind: r.Kind, Branch: r.Branch, Base: a.Base, HeadSHA: a.HeadSHA, WorkRoot: r.WorkRoot}
 }
 
 // cleanText is runner text as stored: valid, NUL-free, capped.
@@ -469,6 +509,13 @@ func (s *Store) FinishWorkspaceAction(ctx context.Context, runnerID string, outc
 	if a.Action == runnerwire.WorkspaceMergeLocal && status == runnerwire.WorkspaceDone {
 		mergeCommit = Truncate(outcome.MergeCommit, 64)
 	}
+	prURL := ""
+	if a.Action == runnerwire.WorkspaceOpenPR && status == runnerwire.WorkspaceDone && outcome.PRURL != "" {
+		if err := ValidatePR(runnerwire.PRInfo{URL: outcome.PRURL, State: runnerwire.PROpen}); err != nil {
+			return Record{}, runnerwire.RunWorkspaceAction{}, err
+		}
+		prURL = outcome.PRURL
+	}
 	reason := cleanText(outcome.Error, runnerwire.MaxWorkspaceReason)
 	note := cleanText(outcome.Note, runnerwire.MaxWorkspaceReason)
 	now := s.stamp()
@@ -487,6 +534,15 @@ WHERE id = ? AND status IN (?, ?)`,
 		}
 		moved = true
 		if status != runnerwire.WorkspaceDone {
+			return nil
+		}
+		if a.Action == runnerwire.WorkspaceOpenPR {
+			if prURL != "" {
+				_, err = tx.ExecContext(ctx,
+					`UPDATE runs SET pr_url = ?, pr_state = CASE WHEN pr_state = '' THEN ? ELSE pr_state END WHERE id = ?`,
+					prURL, runnerwire.PROpen, a.RunID)
+				return err
+			}
 			return nil
 		}
 		workspace := runnerwire.RunWorkspaceDiscarded
@@ -554,11 +610,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return r, a, err
 }
 
-// BlockedCode is the gate code err carries (a WorkspaceBlocked), or "".
+// BlockedCode is the gate code err carries (a WorkspaceBlocked or a StartError
+// with Reason), or "".
 func BlockedCode(err error) string {
 	var b *WorkspaceBlocked
 	if errors.As(err, &b) {
 		return b.Code
+	}
+	var s *StartError
+	if errors.As(err, &s) && s.Reason != "" {
+		return s.Reason
 	}
 	return ""
 }

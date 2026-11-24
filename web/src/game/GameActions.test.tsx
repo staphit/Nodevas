@@ -9,7 +9,7 @@ import { api } from "../api";
 import { useRuns } from "../runs/runStore";
 import { useGlobalAgents } from "../station/globalAgentsStore";
 import { useStation } from "../station/stationStore";
-import { GameActionsProvider, useGameActions } from "./GameActions";
+import { GameActionsProvider, GameDialog, useGameActions } from "./GameActions";
 import type { ClickTarget } from "./world";
 
 function Trigger({ askId }: { askId: string }) {
@@ -316,5 +316,60 @@ describe("global agents", () => {
     await waitFor(() => expect(api.getRunChanges).toHaveBeenCalledWith("g2"));
     expect(screen.queryByText("This run is no longer loaded.")).not.toBeInTheDocument();
     useRuns.setState({ globalById: {} });
+  });
+});
+
+describe("GameDialog Escape inside xterm", () => {
+  it("does not swallow Escape when focus is inside .xterm, but still closes outside .xterm", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    const onClose = vi.fn();
+    const xtermKeyListener = vi.fn();
+
+    render(
+      <GameDialog title="Expanded session" onClose={onClose}>
+        <div className="xterm" onKeyDown={xtermKeyListener}>
+          <textarea aria-label="terminal input" />
+        </div>
+        <button type="button">Outside terminal</button>
+      </GameDialog>,
+    );
+
+    const xtermTextarea = screen.getByLabelText("terminal input");
+    fireEvent.keyDown(xtermTextarea, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(xtermKeyListener).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Outside terminal" }), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GameDialog focus", () => {
+  // RunDialog's "Open large" passes a new onClose arrow on every render and
+  // re-renders on every event; the dialog's first focus must not come back
+  // each time, or typing then Enter lands on the close button.
+  it("focuses its first control once, and a new onClose on re-render keeps focus where the person put it", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = render(
+      <GameDialog title="Expanded session" onClose={() => first()}>
+        <textarea aria-label="composer" />
+      </GameDialog>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+
+    const composer = screen.getByLabelText("composer");
+    composer.focus();
+    rerender(
+      <GameDialog title="Expanded session" onClose={() => second()}>
+        <textarea aria-label="composer" />
+      </GameDialog>,
+    );
+    expect(document.activeElement).toBe(composer);
+
+    fireEvent.keyDown(composer, { key: "Escape" });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });

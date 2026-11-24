@@ -25,6 +25,10 @@ export interface ThemeCast {
   url: (path: string) => string;
   /** The room under a scene as a URL, "" for a scene in none. */
   roomUrl: (scene: ThemeScene) => string;
+  /** Sorted room ids defined by the active pack (for stable folder-card art). */
+  roomIds: readonly string[];
+  /** Relative image path for a room id, or "" when missing or marked broken. */
+  roomPath: (id: string) => string;
   /** The pack's colours and font, when it has a skin. */
   skin?: ThemeSkin;
   /** The pack's own name for a place, or none: the app's name then. */
@@ -74,8 +78,17 @@ export function useActiveThemeCast(still: boolean): ThemeCast | undefined {
     [manifest],
   );
 
+  const roomIds = useMemo(
+    () => (manifest ? Object.keys(manifest.rooms).sort() : []),
+    [manifest],
+  );
+
   return useMemo(() => {
     if (!manifest || !imageUrl) return undefined;
+    const roomPath = (id: string): string => {
+      const path = Object.hasOwn(manifest.rooms, id) ? manifest.rooms[id] : undefined;
+      return path && !paths.has(path) ? path : "";
+    };
     return {
       canvas: manifest.canvas,
       figureOf: (who, wanted) => {
@@ -84,9 +97,11 @@ export function useActiveThemeCast(still: boolean): ThemeCast | undefined {
       },
       url: imageUrl,
       roomUrl: (scene) => {
-        const path = scene.room ? manifest.rooms[scene.room] : undefined;
+        const path = scene.room ? roomPath(scene.room) : "";
         return path ? imageUrl(path) : "";
       },
+      roomIds,
+      roomPath,
       skin: manifest.skin,
       placeName: (place, language) => inLanguage(manifest.places?.[place], language),
       word: (word, language) => inLanguage(manifest.words?.[word], language),
@@ -105,5 +120,5 @@ export function useActiveThemeCast(still: boolean): ThemeCast | undefined {
       still,
       broken,
     };
-  }, [manifest, imageUrl, paths, still, broken]);
+  }, [manifest, imageUrl, paths, roomIds, still, broken]);
 }

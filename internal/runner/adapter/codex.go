@@ -50,23 +50,39 @@ const codexToolTimeoutSec = 900
 
 func (Codex) Kind() string { return "codex" }
 
+// SupportsResume reports headless resume only: codex exec resume takes a
+// thread_id from thread.started, while interactive codex does not report a
+// session ID on startup and uses the carry-over fallback prompt.
+func (Codex) SupportsResume(interactive bool) bool { return !interactive }
+
 func (Codex) NewParser() Parser { return &codexParser{} }
 
 func (Codex) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("codex: binary and workdir are required")
 	}
+	if err := validateSessionID("codex", "resume session id", env.Resume); err != nil {
+		return nil, err
+	}
 	sandbox := env.PermissionMode
 	if sandbox == "" {
 		sandbox = DefaultCodexSandbox
 	}
-	args := []string{
-		"exec",
-		"--json",
-		// stderr is only read to explain a failure; no escape codes in it.
-		"--color", "never",
-		"-s", sandbox,
-		"-C", env.Workdir,
+	var args []string
+	if env.Resume != "" {
+		// `codex exec resume` rejects -s/--sandbox, -C and --color (checked on
+		// codex-cli 0.149.1): sandbox goes as -c sandbox_mode=... and the
+		// working directory comes from cmd.Dir.
+		args = []string{"exec", "resume", "--json"}
+	} else {
+		args = []string{
+			"exec",
+			"--json",
+			// stderr is only read to explain a failure; no escape codes in it.
+			"--color", "never",
+			"-s", sandbox,
+			"-C", env.Workdir,
+		}
 	}
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)
@@ -74,15 +90,25 @@ func (Codex) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.IgnoreUserConfig {
 		args = append(args, "--ignore-user-config")
 	}
+	if env.Resume != "" {
+		args = append(args, "-c", "sandbox_mode="+tomlString(sandbox))
+	}
 	// Headless, nobody can approve anything: a command the sandbox does
 	// not allow fails and the model sees that, instead of the run hanging.
 	args = append(args, "-c", "approval_policy='never'")
 	args = append(args, codexMCPArgs(env)...)
-	// The prompt is read from stdin.
+	// The prompt is read from stdin ("-"), after the session ID on resume.
+	if env.Resume != "" {
+		args = append(args, env.Resume)
+	}
 	args = append(args, "-")
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
+	prompt := Prompt(job, env.Branch)
+	if env.Resume != "" {
+		prompt = ResumePrompt(job, env.Branch)
+	}
+	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Env = jobEnv(job)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("codex: %w", err)
@@ -112,6 +138,8 @@ func codexMCPArgs(env RunEnv) []string {
 // The fixtures in testdata are real output from codex-cli 0.156.0.
 type codexParser struct {
 	outcome Outcome
+	// session is the validated thread_id from thread.started.
+	session string
 	// started holds the IDs of tool items whose tool_call went out at
 	// item.started, so item.completed adds only the result.
 	started map[string]bool
@@ -123,6 +151,8 @@ type codexParser struct {
 	usage     runnerwire.Usage
 	sawUsage  bool
 }
+
+func (p *codexParser) Session() string { return p.session }
 
 type codexLine struct {
 	Type     string          `json:"type"`
@@ -204,6 +234,9 @@ func (p *codexParser) Parse(line []byte) []runnerwire.RunEvent {
 	}
 	switch msg.Type {
 	case "thread.started":
+		if id := strings.TrimSpace(msg.ThreadID); runnerwire.ValidSessionID(id) {
+			p.session = id
+		}
 		text := "codex session started"
 		if msg.ThreadID != "" {
 			text += " " + msg.ThreadID

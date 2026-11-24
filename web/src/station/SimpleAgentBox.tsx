@@ -1,14 +1,8 @@
 // The describe box (single-user edition): say what you want in your own
 // words and an agent on this computer does it, in one folder, as a global
-// agent with no pull request. Whatever stands in the way comes first, one
-// thing at a time: this computer still starting, no agent ready ("Set one
-// up" opens the agent scan), no folder (the first folder step). Which agent
-// and which folder are remembered (simpleAgentKind, simpleAgentRepoId): the
-// agent is picked right in the box (with more than one ready), the folder
-// behind "Change". In Simple the hub adds its plain-words instruction to the
-// task (`simple: true`); it lifts no gate. Once started, a line follows the
-// run (at work, done, ended without a result) while the box is ready for
-// the next request.
+// agent with no pull request. Interactive by default inside RunDialog's
+// plain-word frame (§8.2), falling back to background when the folder is not
+// trusted, and showing sign-in help when the agent is signed out.
 //
 // On StartScreen (variant "start") and on Station (variant "station"). A team
 // hub renders nothing.
@@ -17,14 +11,18 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import {
+  BusyError,
   ConflictError,
   GlobalRunError,
   MAX_GLOBAL_TASK_BYTES,
+  type BusyResponse,
   type CreateGlobalRunRequest,
+  type OnBusy,
   type Run,
   type RunnerRepo,
 } from "../api";
 import { agentName } from "../game/labels";
+import { CastPortrait } from "../game/warroom/castArt";
 import { IconComputer } from "../icons";
 import { useI18n } from "../i18n";
 import { AddRepoDialog } from "../local/AddRepoDialog";
@@ -34,14 +32,21 @@ import { LocalNotReady } from "../local/LocalNotReady";
 import { useEdition, useLocalRunner, useLocalState } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
-import { useRuns } from "../runs/runStore";
+import { BusyChoice } from "../runs/coord/BusyChoice";
+import { useCoordStore } from "../runs/coord/coordStore";
+import { RunDialog } from "../runs/dialog/RunDialog";
 import { defaultModel, installedAgents } from "../runs/DispatchDialog";
+import { defaultDispatchMode } from "../runs/RunModePicker";
+import { useRuns } from "../runs/runStore";
 import { runSignedOut, signInCommand, signedOutText } from "../runs/signedOut";
 import { useSimpleMode } from "../simple/simpleMode";
 import { useApp, usePreference } from "../store";
 import { startFailure } from "./GlobalAgentForm";
 import { useGlobalAgents } from "./globalAgentsStore";
 import { openGlobalAgents } from "./openGlobalAgents";
+import { AgentCards } from "./pickers/AgentCards";
+import { AgentPlainAvatar } from "./pickers/PictureCards";
+import { RepoCards } from "./pickers/RepoCards";
 import { offerIsStarting } from "./waiting";
 
 const MIN_ROWS = 3;
@@ -49,6 +54,20 @@ const MAX_ROWS = 12;
 
 function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
+}
+
+function minutesSince(iso: string | undefined): number {
+  if (!iso) return 1;
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms <= 0) return 1;
+  return Math.max(1, Math.round(ms / 60_000));
+}
+
+function poseFor(run: Run): string {
+  if (run.status === "running") return run.mode === "interactive" ? "speak" : "write";
+  if (run.status === "succeeded") return "cheer";
+  if (run.status === "failed") return "frustrated";
+  return "idle";
 }
 
 /** The refusals the team form says in runner terms (and with a command to
@@ -88,6 +107,8 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
   const [problem, setProblem] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [started, setStarted] = useState<Run | null>(null);
+  const [pendingBusy, setPendingBusy] = useState<BusyResponse | null>(null);
+  const [busyChanged, setBusyChanged] = useState(false);
   const [changing, setChanging] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -102,6 +123,27 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
   const repos = runner?.info?.repos ?? [];
   const repo = repos.find((item) => item.id === repoPref) ?? repos[0];
 
+  const defaultMode = defaultDispatchMode({
+    runner,
+    agent,
+    viewer: null,
+    edition: "single",
+  });
+  const mode = defaultMode.mode;
+
+  // Preflight global busy for the picked folder.
+  useEffect(() => {
+    if (!runner?.online || !repo?.id) return;
+    void useCoordStore.getState().loadGlobalBusy(runner.id, [repo.id]);
+  }, [runner?.id, runner?.online, repo?.id]);
+
+  const preflightBusy = useCoordStore((s) =>
+    runner?.id && repo?.id ? s.globalBusy[runner.id]?.[repo.id] : undefined,
+  );
+  const hasPreflightBusy = Boolean(
+    preflightBusy && ((preflightBusy.holders?.length ?? 0) > 0 || preflightBusy.others > 0),
+  );
+
   const pickRepo = (picked: RunnerRepo) => useApp.getState().updateUIPreference("simpleAgentRepoId", picked.id);
   const pickAgent = (kind: string) =>
     useApp.getState().updateUIPreference("simpleAgentKind", kind as typeof kindPref);
@@ -113,7 +155,7 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
   const listed = useGlobalAgents((s) => (startedId ? s.runs.find((run) => run.id === startedId) : undefined));
   const current = started ? (stored ?? listed ?? started) : null;
 
-  const submit = async () => {
+  const submit = async (onBusy?: OnBusy, holderIds?: string[]) => {
     if (submitting || !runner || !agent || !repo) return;
     const value = task.trim();
     if (!value) {
@@ -127,24 +169,34 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
     }
     setSubmitting(true);
     setProblem("");
-    setStarted(null);
+    if (!onBusy) setStarted(null);
     const body: CreateGlobalRunRequest = {
       runnerId: runner.id,
       repoId: repo.id,
       agent: agent.kind,
       model: defaultModel(agent),
+      ...(mode === "interactive" ? { mode: "interactive" as const } : {}),
       task: value,
       openPR: false,
       simple,
+      ...(onBusy ? { onBusy } : {}),
+      ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
     };
     try {
       const run = await useGlobalAgents.getState().create(body);
       setTask("");
+      setPendingBusy(null);
+      setBusyChanged(false);
       setStarted(run);
       onStarted?.(run);
     } catch (caught) {
+      if (caught instanceof BusyError) {
+        setPendingBusy(caught.busy);
+        setBusyChanged(Boolean(onBusy));
+        return;
+      }
       const plain = plainStartProblem(t, caught);
-      const failure = startFailure(t, caught, { runner: "", interactive: false });
+      const failure = startFailure(t, caught, { runner: "", interactive: mode === "interactive" });
       setProblem(plain || failure.text);
       if (failure.budget) void useBudget.getState().load();
     } finally {
@@ -152,7 +204,7 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
     }
   };
 
-  let content;
+  let content: ReactNode;
   if (!runner?.online) {
     content = loaded ? (
       <LocalNotReady starting={state === "starting"} />
@@ -162,9 +214,7 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
       </p>
     );
   } else if (agents.length === 0) {
-    // An agent here but signed out (after a signed-out run the runner looks
-    // again and says so): how to sign it in, which brings the box back, not
-    // "no agent".
+    // Signed-out agent: show #17's sign-in help instead of "no agent".
     const signedOut = runner.info?.agents?.find((item) => item.signedOut);
     content = (
       <div className="run-empty run-empty-left simple-agent-need">
@@ -183,92 +233,129 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
   } else {
     const rows = Math.min(MAX_ROWS, Math.max(MIN_ROWS, task.split("\n").length + 1));
     content = (
-      <form
-        className="simple-agent-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <textarea
-          ref={taskRef}
-          id={fieldId}
-          value={task}
-          rows={rows}
-          aria-labelledby={titleId}
-          placeholder={t("globalAgents.simple.placeholder")}
-          aria-invalid={problem ? true : undefined}
-          onChange={(event) => {
-            setTask(event.target.value);
-            setProblem("");
+      <>
+        <form
+          className="simple-agent-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              void submit();
-            }
-          }}
-        />
-        {problem && (
-          <p className="notify-message error" role="alert">
-            {problem}
-          </p>
-        )}
-        {current && <StartedLine run={current} builtInRunnerId={runner.id} />}
-        <div className="simple-agent-foot">
-          {agents.length > 1 && (
-            <label className="simple-agent-who">
-              <span>{t("globalAgents.simple.agent")}</span>
-              <select value={agent.kind} onChange={(event) => pickAgent(event.target.value)}>
-                {agents.map((item) => (
-                  <option key={item.kind} value={item.kind}>
-                    {agentName(item.kind)}
-                  </option>
-                ))}
-              </select>
-            </label>
+        >
+          {hasPreflightBusy && !pendingBusy && (
+            <p className="run-hint simple-busy-preflight" role="status" data-testid="simple-busy-preflight">
+              {t("busy.simple.title", { minutes: minutesSince(preflightBusy?.holders?.[0]?.since) })}
+            </p>
           )}
-          <span className="simple-agent-using">
-            {t("globalAgents.simple.using", { agent: agentName(agent.kind), folder: repo.name })}{" "}
-            <button
-              type="button"
-              className="run-link-button"
-              aria-expanded={changing}
-              onClick={() => setChanging((open) => !open)}
-            >
-              {t("globalAgents.simple.change")}
-            </button>
-          </span>
-          <button type="submit" className="ap-btn is-primary" disabled={submitting}>
-            {submitting ? t("globalAgents.form.starting") : t("globalAgents.form.start")}
-          </button>
-        </div>
-        {changing && (
-          <div className="simple-agent-change">
-            <label className="run-field">
-              <span>{t("globalAgents.simple.folder")}</span>
-              <select
-                value={repo.id}
-                onChange={(event) => useApp.getState().updateUIPreference("simpleAgentRepoId", event.target.value)}
+          {defaultMode.reason === "untrusted" && (
+            <p className="run-hint simple-agent-untrusted" role="note">
+              {t("runDialog.simple.background.untrusted", { agent: agentName(agent.kind) })}
+            </p>
+          )}
+          <textarea
+            ref={taskRef}
+            id={fieldId}
+            value={task}
+            rows={rows}
+            aria-labelledby={titleId}
+            placeholder={t("globalAgents.simple.placeholder")}
+            aria-invalid={problem ? true : undefined}
+            onChange={(event) => {
+              setTask(event.target.value);
+              setProblem("");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+          />
+          {problem && (
+            <p className="notify-message error" role="alert">
+              {problem}
+            </p>
+          )}
+          {pendingBusy && (
+            <>
+              {busyChanged && (
+                <p className="notify-message error" role="status">
+                  {t("busy.changed")}
+                </p>
+              )}
+              <BusyChoice
+                busy={pendingBusy}
+                simple
+                maxConcurrent={runner.info?.maxConcurrent}
+                onChoose={(choice) => {
+                  const holderIds = (pendingBusy.holders ?? []).map((h) => h.runId);
+                  void submit(choice as OnBusy, holderIds);
+                }}
+                onCancel={() => {
+                  setPendingBusy(null);
+                  setBusyChanged(false);
+                }}
+              />
+            </>
+          )}
+          {agents.length > 1 && (
+            <AgentCards
+              agents={runner.info?.agents ?? []}
+              value={agent.kind}
+              onChange={pickAgent}
+              simple
+            />
+          )}
+          <div className="simple-agent-foot">
+            <span className="simple-agent-using">
+              {t("globalAgents.simple.using", { agent: agentName(agent.kind), folder: repo.name })}{" "}
+              <button
+                type="button"
+                className="run-link-button"
+                aria-expanded={changing}
+                onClick={() => setChanging((open) => !open)}
               >
-                {repos.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <span className="simple-agent-change-links">
-              <button type="button" className="run-link-button" onClick={() => setPicking(true)}>
-                {t("local.firstFolder.pickExisting")}
-              </button>
-              <button type="button" className="run-link-button" onClick={() => setScanOpen(true)}>
-                {t("local.scan.title")}
+                {t("globalAgents.simple.change")}
               </button>
             </span>
+            <button type="submit" className="ap-btn is-primary" disabled={submitting}>
+              {submitting ? t("globalAgents.form.starting") : t("globalAgents.form.start")}
+            </button>
+          </div>
+          {changing && (
+            <div className="simple-agent-change">
+              <RepoCards
+                mode="one"
+                repos={repos}
+                value={repo.id}
+                onChange={(id) => useApp.getState().updateUIPreference("simpleAgentRepoId", id)}
+                simple
+              />
+              <span className="simple-agent-change-links">
+                <button type="button" className="run-link-button" onClick={() => setPicking(true)}>
+                  {t("local.firstFolder.pickExisting")}
+                </button>
+                <button type="button" className="run-link-button" onClick={() => setScanOpen(true)}>
+                  {t("local.scan.title")}
+                </button>
+              </span>
+            </div>
+          )}
+        </form>
+        {current && (
+          <div className="simple-agent-dialog">
+            <RunDialog
+              runId={current.id}
+              variant="plain"
+              simple
+              header={<StartedHeader run={current} builtInRunnerId={runner.id} />}
+              onRunCreated={(next) => {
+                setStarted(next);
+                onStarted?.(next);
+              }}
+            />
           </div>
         )}
-      </form>
+      </>
     );
   }
 
@@ -306,13 +393,9 @@ function SimpleAgentBody({ variant, onStarted }: { variant: "start" | "station";
   );
 }
 
-/** How the run started here stands, in plain words, following it: at work
- * (or waiting for the person's OK), done (pointing to the result buttons),
- * done with nothing changed, applied, or ended without a result. Each with
- * the way to see it. An offer waits for an OK only when it asks: the
- * built-in runner's offer from the person's click is just starting (the
- * rule waiting.ts uses). */
-function StartedLine({ run, builtInRunnerId }: { run: Run; builtInRunnerId: string }) {
+/** Header inside the inline RunDialog: character pose portrait plus plain-word
+ * run status and jump link to Global agents (§11 item 15). */
+function StartedHeader({ run, builtInRunnerId }: { run: Run; builtInRunnerId: string }) {
   const { t } = useI18n();
   const open = (label: string) => (
     <button type="button" className="run-link-button" onClick={() => openGlobalAgents(run.id)}>
@@ -338,8 +421,6 @@ function StartedLine({ run, builtInRunnerId }: { run: Run; builtInRunnerId: stri
       }
       break;
     case "failed":
-      // Its agent is here but signed out (the box only runs on this
-      // computer): how to sign in, which is all a try again needs.
       text = runSignedOut(run) ? signedOutText(t, run, "local") : t("simple.box.failed");
       link = open(t("simple.box.seeWhat"));
       tone = " is-failed";
@@ -359,11 +440,20 @@ function StartedLine({ run, builtInRunnerId }: { run: Run; builtInRunnerId: stri
       link = open(t("globalAgents.simple.watch"));
   }
   return (
-    <p className={`simple-agent-started${tone}`} role="status">
-      {text}
-      {link && " "}
-      {link}
-    </p>
+    <div className={`simple-agent-started${tone}`} role="status" data-testid="simple-agent-status">
+      <CastPortrait
+        agent={run.agent}
+        model={run.model || "default"}
+        scene={poseFor(run)}
+        className="simple-agent-face"
+        fallback={<AgentPlainAvatar agent={run.agent} />}
+      />
+      <span>
+        {text}
+        {link && " "}
+        {link}
+      </span>
+    </div>
   );
 }
 
@@ -373,8 +463,6 @@ function AgentScanDialog({ onClose }: { onClose: () => void }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
 
-  // Escape closes this one only, and only while it is on top: the file
-  // picker opened over it closes first.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;

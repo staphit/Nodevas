@@ -1,8 +1,10 @@
 // The building as a theme pack's story tells it: six places to go to, and in
-// each the people there, one picture per character and state. Whoever wears
-// the same picture stands as one, with a count; those the pack has no picture
-// for stand as the unnamed, one per kind of agent. Pure, so it is testable
-// without a pack or a page.
+// each the people there, one picture per character and state. Multi-repo
+// global groups stand as one figure (`group:<id>`) even when their members'
+// states differ, contest entries stand together as one pair (`contest:<id>`),
+// and everyone else who wears the same picture stands as one, with a count;
+// those the pack has no picture for stand as the unnamed, one per kind of
+// agent. Pure, so it is testable without a pack or a page.
 
 import { THEME_PLACES, type ThemePlaceId } from "../../theme-pack/themeManifest";
 import type { Actor, Building, LoungeSpot } from "../world";
@@ -19,10 +21,15 @@ export type StoryPerson =
 /** What waits on the viewer: an answer, or a look at what went wrong. */
 export type StoryAlert = "ask" | "fail";
 
+/** Explicit cluster kinds that stand as one figure regardless of per-member state. */
+export type StoryGroupKind = "group" | "contest";
+
 export interface StoryGroup {
-  /** The picture's key, or UNNAMED and the agent's kind: what the stage tells
-   * its figures apart by. */
+  /** `group:<id>`, `contest:<id>`, the picture's key, or UNNAMED and the
+   * agent's kind: what the stage tells its figures apart by. */
   key: string;
+  /** Present for multi-repo global groups and contest entry pairs. */
+  kind?: StoryGroupKind;
   /** None for the unnamed. */
   figure?: CastFigure;
   members: StoryPerson[];
@@ -45,6 +52,15 @@ export type StoryPlaces = Record<ThemePlaceId, StoryPlace>;
 /** What the key of those the pack has no picture for starts with. */
 export const UNNAMED = "?";
 
+/** Priority order when a group or contest spans multiple places. */
+const PEOPLE_PLACES: readonly Exclude<ThemePlaceId, "runners">[] = [
+  "work",
+  "meeting",
+  "entrance",
+  "away",
+  "lounge",
+];
+
 export function personAlert(person: StoryPerson): StoryAlert | undefined {
   if (person.kind === "visitor") return undefined;
   const { actor } = person;
@@ -56,11 +72,30 @@ export function personWho(person: StoryPerson): { agent: string; model: string }
   return person.kind === "actor" ? person.actor : person.visitor;
 }
 
-type FigureOf = (who: { agent: string; model: string }, wanted: string) => CastFigure | undefined;
+export type FigureOf = (who: { agent: string; model: string }, wanted: string) => CastFigure | undefined;
 
-function figureOfPerson(person: StoryPerson, figureOf: FigureOf): CastFigure | undefined {
+export function figureOfPerson(person: StoryPerson, figureOf: FigureOf): CastFigure | undefined {
   if (person.kind === "actor") return figureOf(person.actor, sceneWanted(person.actor));
   return figureOf(person.visitor, sceneWanted({ id: person.id, pose: person.visitor.pose, area: "lounge" }));
+}
+
+function clusterOf(person: StoryPerson): { key: string; kind: StoryGroupKind } | undefined {
+  if (person.kind !== "actor") return undefined;
+  if (person.actor.groupId) return { key: `group:${person.actor.groupId}`, kind: "group" };
+  if (person.actor.contestId && person.actor.contestLabel !== "J") {
+    return { key: `contest:${person.actor.contestId}`, kind: "contest" };
+  }
+  return undefined;
+}
+
+function repoSortKey(person: StoryPerson): string {
+  if (person.kind !== "actor") return person.visitor.label;
+  return person.actor.repoName || person.actor.nodeTitle || person.id;
+}
+
+function contestSortKey(person: StoryPerson): string {
+  if (person.kind !== "actor") return person.id;
+  return person.actor.contestLabel || person.id;
 }
 
 function place(id: ThemePlaceId, people: readonly StoryPerson[], figureOf: FigureOf): StoryPlace {
@@ -70,10 +105,16 @@ function place(id: ThemePlaceId, people: readonly StoryPerson[], figureOf: Figur
   let fails = 0;
   for (const person of people) {
     const figure = figureOfPerson(person, figureOf);
-    const key = figure?.key ?? `${UNNAMED}/${personWho(person).agent.toLowerCase()}`;
+    const cluster = clusterOf(person);
+    const key = cluster?.key ?? figure?.key ?? `${UNNAMED}/${personWho(person).agent.toLowerCase()}`;
     let group = byKey.get(key);
     if (!group) {
-      group = figure ? { key, figure, members: [] } : { key, members: [] };
+      group = {
+        key,
+        ...(cluster ? { kind: cluster.kind } : undefined),
+        ...(figure ? { figure } : undefined),
+        members: [],
+      };
       byKey.set(key, group);
       groups.push(group);
     }
@@ -83,6 +124,21 @@ function place(id: ThemePlaceId, people: readonly StoryPerson[], figureOf: Figur
     if (alert === "fail") fails++;
     if (alert && group.alert !== "ask") group.alert = alert;
   }
+
+  for (const group of groups) {
+    if (group.kind === "group") {
+      group.members.sort((a, b) => repoSortKey(a).localeCompare(repoSortKey(b)) || a.id.localeCompare(b.id));
+    } else if (group.kind === "contest") {
+      group.members.sort((a, b) => contestSortKey(a).localeCompare(contestSortKey(b)) || a.id.localeCompare(b.id));
+    }
+    if (group.kind) {
+      const lead = leadMember(group, undefined);
+      group.figure =
+        figureOfPerson(lead, figureOf) ??
+        group.members.map((member) => figureOfPerson(member, figureOf)).find(Boolean);
+    }
+  }
+
   return { id, groups, count: people.length, asks, fails };
 }
 
@@ -116,14 +172,50 @@ export function storyPlaces(
     (pose === "limit" ? away : resting).push(person);
   }
 
-  const meeting = place("meeting", actors("meeting"), figureOf);
+  const raw: Record<Exclude<ThemePlaceId, "runners">, StoryPerson[]> = {
+    work: actors("work"),
+    meeting: actors("meeting"),
+    entrance: actors("entrance"),
+    lounge: resting,
+    away,
+  };
+
+  // Co-locate members of a multi-repo group (`group:<id>`) or contest pair
+  // (`contest:<id>`) into one shared place so queued/failed/working members
+  // stand together as a single figure.
+  const clusterPlace = new Map<string, Exclude<ThemePlaceId, "runners">>();
+  for (const placeId of PEOPLE_PLACES) {
+    for (const person of raw[placeId]) {
+      const cluster = clusterOf(person);
+      if (cluster && !clusterPlace.has(cluster.key)) {
+        clusterPlace.set(cluster.key, placeId);
+      }
+    }
+  }
+
+  const buckets: Record<Exclude<ThemePlaceId, "runners">, StoryPerson[]> = {
+    work: [],
+    meeting: [],
+    entrance: [],
+    lounge: [],
+    away: [],
+  };
+  for (const placeId of PEOPLE_PLACES) {
+    for (const person of raw[placeId]) {
+      const cluster = clusterOf(person);
+      const target = cluster ? (clusterPlace.get(cluster.key) ?? placeId) : placeId;
+      buckets[target].push(person);
+    }
+  }
+
+  const meeting = place("meeting", buckets.meeting, figureOf);
   meeting.asks += offices.reduce((sum, office) => sum + office.items.length, 0);
   return {
-    work: place("work", actors("work"), figureOf),
+    work: place("work", buckets.work, figureOf),
     meeting,
-    entrance: place("entrance", actors("entrance"), figureOf),
-    lounge: place("lounge", resting, figureOf),
-    away: place("away", away, figureOf),
+    entrance: place("entrance", buckets.entrance, figureOf),
+    lounge: place("lounge", buckets.lounge, figureOf),
+    away: place("away", buckets.away, figureOf),
     runners: { id: "runners", groups: [], count: building.racks.length, asks: 0, fails: 0 },
   };
 }

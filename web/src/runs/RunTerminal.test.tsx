@@ -1,11 +1,21 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Run } from "../api";
+import type { Run, TerminalConnection } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { FakeWebSocket } from "./fakeWebSocket";
 import { RunModeTabs } from "./RunModeTabs";
-import RunTerminal, { keySequence } from "./RunTerminal";
+import RunTerminal from "./RunTerminal";
+import {
+  hasScreenMenuPrompt,
+  keySequence,
+  MENU_LINES_ABOVE,
+  MENU_LINES_BELOW,
+  readCursorLines,
+  terminalTheme,
+} from "./terminalKeys";
 
 // xterm needs a real canvas and layout; a recording stand-in is enough to
 // check what reaches it and what it sends back.
@@ -251,5 +261,149 @@ describe("RunModeTabs", () => {
     // Still attached: switching tabs does not reconnect.
     fireEvent.click(screen.getByRole("tab", { name: "Terminal" }));
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("terminalKeys and story palette", () => {
+  it("keeps terminalKeys free of any @xterm import", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/runs/terminalKeys.ts"), "utf8");
+    expect(source).not.toMatch(/@xterm/);
+  });
+
+  it("reads --story-* palette tokens when mounted inside .px-story-talk", () => {
+    const storyBox = document.createElement("div");
+    storyBox.className = "px-story-talk";
+    storyBox.style.setProperty("--story-night", "#150e08");
+    storyBox.style.setProperty("--story-ink", "#efe6d0");
+    storyBox.style.setProperty("--story-soft", "#b3a48c");
+    storyBox.style.setProperty("--story-accent", "#d9b86c");
+    const host = document.createElement("div");
+    storyBox.appendChild(host);
+    document.body.appendChild(storyBox);
+
+    try {
+      const theme = terminalTheme(host);
+      expect(theme.background).toBe("#150e08");
+      expect(theme.foreground).toBe("#efe6d0");
+      expect(theme.cursor).toBe("#d9b86c");
+      expect(theme.brightBlack).toBe("#b3a48c");
+    } finally {
+      storyBox.remove();
+    }
+  });
+
+  it("exposes the live connection via onConnection so RunComposer shares one socket", () => {
+    const seen: Array<TerminalConnection | null> = [];
+    const { unmount } = render(<RunTerminal run={run} onConnection={(c) => seen.push(c)} />);
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]).not.toBeNull();
+    const socket = FakeWebSocket.last();
+    act(() => socket.serverOpen());
+    expect(seen[0]?.sendInput("hi")).toBe(true);
+    expect(socket.input()).toEqual(["hi"]);
+    unmount();
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+
+  it("detects verified CLI trust/menu prompts without false positives on idle main prompts", () => {
+    // Verified prompts from CLI smoke report §6.3
+    expect(hasScreenMenuPrompt(["Quick safety check", "❯ 1. Yes, I trust this folder", "Enter to confirm · Esc to cancel"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Do you trust the contents of this directory?", "› 1. Yes, continue", "Press enter to continue"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Update Available", "A new release is available", "Skip   Confirm"])).toBe(true);
+    expect(hasScreenMenuPrompt(["Do you trust the contents of this project?", "> Yes, I trust this folder", "↑/↓ Navigate · enter Confirm"])).toBe(true);
+
+    // Idle main prompts must NOT trigger false positives
+    expect(hasScreenMenuPrompt(["❯ ", "shift+tab to cycle"])).toBe(false);
+    expect(hasScreenMenuPrompt(["› Ask Codex to do anything"])).toBe(false);
+    expect(hasScreenMenuPrompt(["Ask anything...", "tab agents  ctrl+p commands"])).toBe(false);
+    expect(hasScreenMenuPrompt(["> ", "? for shortcuts"])).toBe(false);
+  });
+
+  // The agent's own prose ("you can allow or reject…", "approve or deny…",
+  // a quoted "> yes, do it") further up the screen must not lock text
+  // submit: only the cursor line and a few lines around it count (§3.1).
+  it("reads only the lines around the cursor, so the agent's prose never locks the composer", () => {
+    const prose = [
+      "I changed the permission check: callers can now allow or reject a request,",
+      "and reviewers approve or deny it in the panel.",
+      "As you said in the issue:",
+      "> yes, keep the old flag for now",
+    ];
+    const idle = ["", "", "", "", "", "", "", "", "", "", "╭────────╮", "│ >      │", "╰────────╯", "? for shortcuts"];
+    const screen = [...prose, ...idle];
+    // Cursor in the input box at the bottom: the prose is out of reach.
+    expect(hasScreenMenuPrompt(screen, screen.length - 3)).toBe(false);
+    // Without a cursor the last line stands for it: still out of reach.
+    expect(hasScreenMenuPrompt(screen)).toBe(false);
+    // A quoted "> yes," inside prose is not a focused option.
+    expect(hasScreenMenuPrompt(["she wrote > yes, ship it", "❯ "], 1)).toBe(false);
+
+    // A real menu at the cursor still locks it, prose above or not.
+    const menu = [...prose, ...idle.slice(0, 6), "Allow this command?", "❯ Allow once", "  Reject", "Esc to cancel"];
+    expect(hasScreenMenuPrompt(menu, menu.length - 2)).toBe(true);
+    expect(hasScreenMenuPrompt(["│ > Yes, I trust this folder", "│   No, exit"], 0)).toBe(true);
+  });
+
+  // xterm's cursorY counts from the top of the viewport; with scrollback the
+  // viewport starts at baseY, so the cursor's buffer line is baseY + cursorY.
+  it("reads the lines around baseY + cursorY, not around the buffer's last line", () => {
+    const text = Array.from({ length: 40 }, (_, index) => `line ${index}`);
+    const buffer = (baseY?: number, cursorY?: number) => ({
+      buffer: {
+        active: {
+          length: text.length,
+          baseY,
+          cursorY,
+          getLine: (index: number) => ({ translateToString: () => text[index] }),
+        },
+      },
+    });
+
+    // 30 lines of scrollback, cursor on the viewport's 2nd row: buffer line 31.
+    const scrolled = readCursorLines(buffer(30, 1));
+    expect(scrolled.lines).toEqual(text.slice(31 - MENU_LINES_ABOVE, 31 + MENU_LINES_BELOW + 1));
+    expect(scrolled.lines[scrolled.cursorRow!]).toBe("line 31");
+
+    // No scrollback: cursorY alone, clamped at the top.
+    const top = readCursorLines(buffer(0, 2));
+    expect(top.lines).toEqual(text.slice(0, 2 + MENU_LINES_BELOW + 1));
+    expect(top.lines[top.cursorRow!]).toBe("line 2");
+
+    // No cursor reported: the last line stands for it.
+    const last = readCursorLines(buffer());
+    expect(last.lines[last.cursorRow!]).toBe("line 39");
+    expect(last.lines).toEqual(text.slice(39 - MENU_LINES_ABOVE));
+
+    // An empty or missing buffer reads nothing.
+    expect(readCursorLines({ buffer: { active: { length: 0, getLine: () => undefined } } })).toEqual({ lines: [] });
+    expect(readCursorLines({})).toEqual({ lines: [] });
+  });
+
+  it("finds a menu at the cursor deep in scrollback through the live terminal", () => {
+    const onScreenAsksChange = vi.fn();
+    render(<RunTerminal run={run} onScreenAsksChange={onScreenAsksChange} />);
+    const screenText = [
+      ...Array.from({ length: 30 }, (_, index) => `old output ${index}`),
+      "Allow this command?",
+      "❯ Allow once",
+      "  Reject",
+      "Esc to cancel",
+      ...Array.from({ length: 20 }, () => ""),
+    ];
+    // The menu sits at baseY + cursorY (31); the buffer's last line is
+    // 20 blank lines further down, out of its reach.
+    Object.assign(term(), {
+      buffer: {
+        active: {
+          length: screenText.length,
+          baseY: 30,
+          cursorY: 1,
+          getLine: (index: number) => ({ translateToString: () => screenText[index] }),
+        },
+      },
+    });
+    act(() => FakeWebSocket.last().serverOpen());
+    act(() => FakeWebSocket.last().serverBinary("menu"));
+    expect(onScreenAsksChange).toHaveBeenLastCalledWith(true);
   });
 });

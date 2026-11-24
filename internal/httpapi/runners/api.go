@@ -371,7 +371,7 @@ func (a *API) connect(c *gin.Context) {
 			}
 		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish,
 			runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeMergeResult, runnerwire.TypeWorkspaceResult,
-			runnerwire.TypeOfferAsk:
+			runnerwire.TypeOfferAsk, runnerwire.TypeTouched:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
 				return
@@ -479,6 +479,11 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 		}
 		// For an action that is not this runner's, or already answered: dropped.
 		return a.runs.WorkspaceResult(ctx, runnerID, *env.WorkspaceResult)
+	case runnerwire.TypeTouched:
+		if env.RunID == "" || env.Touched == nil {
+			return errMalformed
+		}
+		return a.runs.Touched(ctx, runnerID, env.RunID, *env.Touched)
 	}
 	return errMalformed
 }

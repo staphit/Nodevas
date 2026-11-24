@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, GlobalRunError, type Run } from ".";
+import { api, BusyError, GlobalRunError, type Run } from ".";
 import {
   DEFAULT_GLOBAL_SLUG,
   globalRunError,
@@ -92,6 +92,196 @@ describe("global runs API", () => {
     expect(isGlobalRun("g1")).toBe(true);
   });
 
+  it("sends onBusy and holderIds and unwraps a takeOver {run, stopped} reply", async () => {
+    const fetch = mockFetch({ run: globalRun({ id: "g-new", afterRun: "g-old", busyChoice: "takeOver" }), stopped: ["g-old"] }, 201);
+    const run = await globalRunsApi.createGlobalRun({
+      runnerId: "r1",
+      repoId: "repo1",
+      agent: "claude",
+      task: "Take over",
+      openPR: false,
+      onBusy: "takeOver",
+      holderIds: ["g-old"],
+    });
+    expect(run.id).toBe("g-new");
+    expect(run.afterRun).toBe("g-old");
+    expect(isGlobalRun("g-new")).toBe(true);
+    expect(JSON.parse(calls(fetch)[0].body ?? "")).toMatchObject({
+      onBusy: "takeOver",
+      holderIds: ["g-old"],
+    });
+  });
+
+  it("throws BusyError on 409 BUSY from createGlobalRun and createGlobalGroup", async () => {
+    mockFetch(
+      {
+        code: "BUSY",
+        message: "Someone is already on this",
+        holders: [
+          {
+            runId: "g-hold",
+            title: "Upgrade deps",
+            agent: "claude",
+            model: "opus",
+            status: "running",
+            since: "2026-11-18T03:00:00Z",
+            mayStop: true,
+          },
+        ],
+        others: 0,
+        choices: ["queue", "continue", "takeOver", "both"],
+        continue: { runId: "g-hold", agent: "claude", model: "opus", openPR: false },
+      },
+      409,
+    );
+    const err = await globalRunsApi
+      .createGlobalRun({ runnerId: "r1", repoId: "repo1", agent: "claude", task: "x", openPR: false })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BusyError);
+    expect((err as BusyError).busy.choices).toEqual(["queue", "continue", "takeOver", "both"]);
+    expect((err as BusyError).busy.continue).toEqual({
+      runId: "g-hold",
+      agent: "claude",
+      model: "opus",
+      openPR: false,
+    });
+
+    vi.restoreAllMocks();
+    mockFetch(
+      {
+        code: "BUSY",
+        error: "busy repos",
+        repos: [{ repoId: "repo1", holders: [], others: 1 }],
+        choices: ["both", "skip"],
+      },
+      409,
+    );
+    const groupErr = await globalRunsApi
+      .createGlobalGroup({
+        runnerId: "r1",
+        repoIds: ["repo1", "repo2"],
+        agent: "claude",
+        task: "Upgrade",
+        openPR: true,
+      })
+      .catch((e: unknown) => e);
+    expect(groupErr).toBeInstanceOf(BusyError);
+    expect((groupErr as BusyError).busy.repos).toEqual([{ repoId: "repo1", holders: [], others: 1 }]);
+  });
+
+  it("sends follow-up, fetches thread, and reads latestId on 409 CONTINUED", async () => {
+    const fetch = mockFetch(globalRun({ id: "g2", continueOf: "g1", workRoot: "g1" }), 201);
+    const next = await api.followUpGlobalRun("g1", { message: "Make the button bigger", mode: "interactive" });
+    expect(next.continueOf).toBe("g1");
+    expect(isGlobalRun("g2")).toBe(true);
+    expect(calls(fetch)[0]).toMatchObject({ url: "/api/global-runs/g1/follow-up", method: "POST" });
+    expect(JSON.parse(calls(fetch)[0].body ?? "")).toEqual({
+      message: "Make the button bigger",
+      mode: "interactive",
+    });
+
+    vi.restoreAllMocks();
+    const threadFetch = mockFetch({ runs: [globalRun({ id: "g1" }), globalRun({ id: "g2", continueOf: "g1" })] });
+    const thread = await api.getGlobalRunThread("g1");
+    expect(thread.runs).toHaveLength(2);
+    expect(calls(threadFetch)[0]).toMatchObject({ url: "/api/global-runs/g1/thread", method: "GET" });
+    expect(isGlobalRun("g1") && isGlobalRun("g2")).toBe(true);
+
+    vi.restoreAllMocks();
+    mockFetch({ error: "already continued", code: "CONTINUED", latestId: "g3" }, 409);
+    await expect(api.followUpGlobalRun("g1", { message: "late" })).rejects.toMatchObject({
+      status: 409,
+      code: "CONTINUED",
+      latestId: "g3",
+    });
+  });
+
+  it("queries global busy preflight with comma-joined repoIds", async () => {
+    const fetch = mockFetch({ repos: [{ repoId: "a", holders: [], others: 0, choices: [] }] });
+    const res = await api.getGlobalRunBusy("r1", ["a", "b"]);
+    expect(res.repos).toHaveLength(1);
+    expect(calls(fetch)[0]).toMatchObject({
+      url: "/api/global-runs/busy?runnerId=r1&repoIds=a%2Cb",
+      method: "GET",
+    });
+  });
+
+  it("calls all global group endpoints and remembers returned runs", async () => {
+    const group = {
+      id: "grp1",
+      runnerId: "r1",
+      createdBy: "u1",
+      title: "Bump deps",
+      agent: "claude",
+      model: "opus",
+      noPR: false,
+      repoCount: 2,
+      createdAt: "2026-11-18T00:00:00Z",
+    };
+
+    const createFetch = mockFetch({ group, runs: [globalRun({ id: "gm1", groupId: "grp1" })] }, 201);
+    const created = await api.createGlobalGroup({
+      runnerId: "r1",
+      repoIds: ["a", "b"],
+      agent: "claude",
+      model: "opus",
+      task: "Bump deps",
+      openPR: true,
+      onBusy: "skip",
+    });
+    expect(created.group.id).toBe("grp1");
+    expect(isGlobalRun("gm1")).toBe(true);
+    expect(calls(createFetch)[0]).toMatchObject({ url: "/api/global-runs/groups", method: "POST" });
+    expect(JSON.parse(calls(createFetch)[0].body ?? "")).toMatchObject({
+      repoIds: ["a", "b"],
+      openPR: true,
+      onBusy: "skip",
+    });
+
+    vi.restoreAllMocks();
+    const getFetch = mockFetch({ group, runs: [globalRun({ id: "gm2", groupId: "grp1" })] });
+    await api.getGlobalGroup("grp1");
+    expect(calls(getFetch)[0]).toMatchObject({ url: "/api/global-runs/groups/grp1", method: "GET" });
+    expect(isGlobalRun("gm2")).toBe(true);
+
+    vi.restoreAllMocks();
+    const cancelFetch = mockFetch({ cancelled: 2, runs: [globalRun({ id: "gm1", status: "cancelled" })] });
+    const cancelled = await api.cancelGlobalGroup("grp1");
+    expect(cancelled.cancelled).toBe(2);
+    expect(calls(cancelFetch)[0]).toMatchObject({
+      url: "/api/global-runs/groups/grp1/cancel",
+      method: "POST",
+      body: "{}",
+    });
+
+    vi.restoreAllMocks();
+    const resumeFetch = mockFetch({ group });
+    const resumed = await api.resumeGlobalGroup("grp1");
+    expect(resumed.group.id).toBe("grp1");
+    expect(calls(resumeFetch)[0]).toMatchObject({
+      url: "/api/global-runs/groups/grp1/resume",
+      method: "POST",
+      body: "{}",
+    });
+
+    vi.restoreAllMocks();
+    const followFetch = mockFetch({
+      started: [globalRun({ id: "gm3", continueOf: "gm1" })],
+      skipped: [{ runId: "gm2", code: "WORK_GONE" }],
+    });
+    const followed = await api.followUpGlobalGroup("grp1", { message: "Fix lint", only: "failed" });
+    expect(followed.skipped).toEqual([{ runId: "gm2", code: "WORK_GONE" }]);
+    expect(isGlobalRun("gm3")).toBe(true);
+    expect(calls(followFetch)[0]).toMatchObject({ url: "/api/global-runs/groups/grp1/follow-up", method: "POST" });
+    expect(JSON.parse(calls(followFetch)[0].body ?? "")).toEqual({ message: "Fix lint", only: "failed" });
+
+    vi.restoreAllMocks();
+    mockFetch({ error: "over budget", code: "BUDGET_EXCEEDED", exceeded: "runs", room: 3 }, 429);
+    await expect(
+      api.createGlobalGroup({ runnerId: "r1", repoIds: ["a", "b"], agent: "claude", task: "x", openPR: false }),
+    ).rejects.toMatchObject({ status: 429, exceeded: "runs", room: 3 });
+  });
+
   it("lists with limit and before, and remembers every global run", async () => {
     const fetch = mockFetch({ runs: [globalRun(), globalRun({ id: "g2" })], more: true, runners: [] });
     const res = await globalRunsApi.listGlobalRuns({ limit: 50, before: "2026-11-14T07:00:00Z" });
@@ -168,6 +358,8 @@ describe("runPath", () => {
     await api.workspaceFile("g1", "README.md");
     await api.mergeRunLocal("g1", "abc");
     await api.discardRun("g1");
+    await api.endRun("g1");
+    await api.getRunOverlaps("g1");
     expect(calls(fetch).map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET /api/global-runs/g1/events?after=3&limit=500",
       "GET /api/global-runs/g1/asks",
@@ -180,6 +372,8 @@ describe("runPath", () => {
       "GET /api/global-runs/g1/workspace/file?path=README.md",
       "POST /api/global-runs/g1/workspace/merge",
       "POST /api/global-runs/g1/workspace/discard",
+      "POST /api/global-runs/g1/end",
+      "GET /api/global-runs/g1/overlaps",
     ]);
   });
 

@@ -71,7 +71,7 @@ const (
 // TermViewer is one attached browser. Its frames are read with Next.
 type TermViewer struct {
 	term    *Terminal
-	canType bool
+	canType atomic.Bool
 
 	frames chan TermFrame
 	done   chan struct{}
@@ -82,7 +82,7 @@ type TermViewer struct {
 }
 
 // CanType reports whether this viewer's input reaches the runner.
-func (v *TermViewer) CanType() bool { return v.canType }
+func (v *TermViewer) CanType() bool { return v.canType.Load() }
 
 // Reason says why the viewer was let go, or TermOpen.
 func (v *TermViewer) Reason() TermCloseReason {
@@ -155,13 +155,14 @@ type Terminal struct {
 	runID, runnerID string
 	owner           *Terminals
 
-	mu      sync.Mutex
-	status  string
-	buf     []byte
-	lastSeq int64
-	viewers map[*TermViewer]struct{}
-	expiry  *time.Timer
-	gone    bool
+	mu       sync.Mutex
+	status   string
+	viewOnly bool
+	buf      []byte
+	lastSeq  int64
+	viewers  map[*TermViewer]struct{}
+	expiry   *time.Timer
+	gone     bool
 	// cols and rows are the last size a typing viewer asked for.
 	cols, rows int
 }
@@ -263,6 +264,23 @@ func statusRank(status string) int {
 	return -1
 }
 
+// setViewOnly flips an interactive terminal to view-only when its runner
+// accepts without remote typing, notifying every attached viewer and blocking
+// any further input or resize (§7.3).
+func (t *Terminal) setViewOnly() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.gone || t.viewOnly {
+		return
+	}
+	t.viewOnly = true
+	frame := controlFrame(runnerwire.TermControl{Type: "readonly"})
+	for v := range t.viewers {
+		v.canType.Store(false)
+		v.push(frame)
+	}
+}
+
 // attach adds a viewer, queueing the scrollback, the status and, for a viewer
 // who may not type, the readonly notice ahead of any live output.
 func (t *Terminal) attach(canType bool) (*TermViewer, error) {
@@ -274,11 +292,15 @@ func (t *Terminal) attach(canType bool) (*TermViewer, error) {
 	if len(t.viewers) >= MaxTermViewers {
 		return nil, ErrTermBusy
 	}
+	if t.viewOnly {
+		canType = false
+	}
 	v := &TermViewer{
-		term: t, canType: canType,
+		term:   t,
 		frames: make(chan TermFrame, termViewerQueueFrames),
 		done:   make(chan struct{}),
 	}
+	v.canType.Store(canType)
 	if back := t.scrollback(); len(back) > 0 {
 		v.push(TermFrame{Binary: true, Data: back})
 	}
@@ -347,12 +369,15 @@ func (ts *Terminals) open(ctx context.Context, store *Store, r Record) *Terminal
 	if t == nil {
 		t = &Terminal{
 			runID: r.ID, runnerID: r.RunnerID, owner: ts,
-			status: r.Status, viewers: map[*TermViewer]struct{}{},
+			status: r.Status, viewOnly: r.ViewOnly, viewers: map[*TermViewer]struct{}{},
 		}
 		ts.runs[r.ID] = t
 	}
 	ts.mu.Unlock()
 	if latest, err := store.Get(ctx, r.ID); err == nil {
+		if latest.ViewOnly {
+			t.setViewOnly()
+		}
 		t.setStatus(latest.Status)
 	}
 	if runnerwire.RunFinal(r.Status) {
@@ -454,6 +479,9 @@ func (d *Dispatcher) TermAttach(ctx context.Context, r Record, canType bool) (*T
 	if r.Mode != runnerwire.ModeInteractive {
 		return nil, ErrPrecondition
 	}
+	if r.ViewOnly {
+		canType = false
+	}
 	t := d.Terminals().Get(r.ID)
 	if t == nil {
 		if runnerwire.RunFinal(r.Status) {
@@ -468,7 +496,7 @@ func (d *Dispatcher) TermAttach(ctx context.Context, r Record, canType bool) (*T
 // from a viewer who may not type, or while the run is not running, is
 // dropped.
 func (d *Dispatcher) TermInput(v *TermViewer, data []byte) error {
-	if !v.canType || len(data) == 0 {
+	if !v.CanType() || len(data) == 0 {
 		return ErrPrecondition
 	}
 	if len(data) > runnerwire.MaxTermChunk {
@@ -495,7 +523,7 @@ func ClampTermSize(cols, rows int) (int, int, bool) {
 // TermResize sends a typing viewer's terminal size to the runner, clamped.
 // The last resize from anyone wins.
 func (d *Dispatcher) TermResize(v *TermViewer, cols, rows int) error {
-	if !v.canType {
+	if !v.CanType() {
 		return ErrPrecondition
 	}
 	cols, rows, ok := ClampTermSize(cols, rows)

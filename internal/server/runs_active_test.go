@@ -33,7 +33,11 @@ func TestActiveRunsRoute(t *testing.T) {
 	conn := f.connect(t, runsHello(3))
 	var beas []runnerwire.Run
 	for i := 0; i < 3; i++ {
-		beas = append(beas, f.dispatch(t, f.bea, f.runBody("")))
+		if i == 0 {
+			beas = append(beas, f.dispatch(t, f.bea, f.runBody("")))
+		} else {
+			beas = append(beas, f.dispatch(t, f.bea, f.runBodyBoth("")))
+		}
 	}
 	first := expectOffer(t, conn, beas[0].ID)
 
@@ -46,6 +50,7 @@ func TestActiveRunsRoute(t *testing.T) {
 	}
 	body, _ := json.Marshal(runnerwire.CreateRunRequest{
 		NodeID: runsTestNode, RunnerID: calRunner.Runner.ID, Agent: "claude", RepoID: "repo-1",
+		OnBusy: runnerwire.OnBusyBoth,
 	})
 	cals := f.dispatch(t, f.cal, string(body))
 
@@ -133,7 +138,7 @@ func TestProxiedHeartbeatRecordsRunID(t *testing.T) {
 		t.Fatalf("run session = %+v", got)
 	}
 	// Set once: another run on the same runner cannot take the session over.
-	other := f.dispatch(t, f.bea, f.runBody(""))
+	other := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	refused := f.do(t, nil, http.MethodPost, proxy+"agents/heartbeat", `{"sessionId":"s1","state":"busy"}`,
 		map[string]string{"Authorization": "Bearer " + f.runner.Token, runnerwire.RunIDHeader: other.ID})
 	if refused.Code != http.StatusForbidden {

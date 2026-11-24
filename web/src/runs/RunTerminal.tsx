@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   connectTerminal,
@@ -10,107 +10,21 @@ import {
   type TerminalState,
 } from "../api";
 import { useI18n } from "../i18n";
+import {
+  hasScreenMenuPrompt,
+  keySequence,
+  readCursorLines,
+  terminalTheme,
+  type TermKey,
+} from "./terminalKeys";
 
-// Loaded on demand (see RunModeTabs): xterm is the bulk of this chunk and
-// only interactive runs need it.
+export { keySequence, terminalTheme, type TermKey };
+
+// Loaded on demand (see RunModeTabs / RunDialog): xterm is the bulk of this
+// chunk and only interactive runs need it.
 
 const PHONE_QUERY = "(max-width: 640px)";
 const FONT_SIZE = { phone: 11, wide: 13 } as const;
-
-// ANSI colours tuned per background: the stock xterm palette assumes a dark
-// screen, and its yellow and white vanish on a light one.
-const DARK_ANSI: ITheme = {
-  black: "#2b3640",
-  red: "#e08a88",
-  green: "#7fbd85",
-  yellow: "#d9a441",
-  blue: "#6cb2e0",
-  magenta: "#c79be8",
-  cyan: "#62b2c1",
-  white: "#d5dde3",
-  brightBlack: "#6f7d88",
-  brightRed: "#f0a5a3",
-  brightGreen: "#9bd6a0",
-  brightYellow: "#ecc06a",
-  brightBlue: "#8fc8ee",
-  brightMagenta: "#dbb8f3",
-  brightCyan: "#8dd0dc",
-  brightWhite: "#f4f7f9",
-};
-const LIGHT_ANSI: ITheme = {
-  black: "#17212b",
-  red: "#b3302d",
-  green: "#2f6f34",
-  yellow: "#8a5d00",
-  blue: "#1f5f9f",
-  magenta: "#7340c4",
-  cyan: "#1d6d7c",
-  white: "#8e99a3",
-  brightBlack: "#5a6672",
-  brightRed: "#cf4643",
-  brightGreen: "#3b8541",
-  brightYellow: "#a06c00",
-  brightBlue: "#2a71b8",
-  brightMagenta: "#8a55d9",
-  brightCyan: "#258497",
-  brightWhite: "#66727f",
-};
-
-function token(style: CSSStyleDeclaration, name: string, fallback: string): string {
-  return style.getPropertyValue(name).trim() || fallback;
-}
-
-/** The terminal's colours from the app's CSS tokens, for the current theme. */
-export function terminalTheme(): ITheme {
-  const dark = document.documentElement.dataset.theme === "dark";
-  const style = getComputedStyle(document.documentElement);
-  const accent = token(style, "--accent", dark ? "#62b2c1" : "#28798a");
-  return {
-    ...(dark ? DARK_ANSI : LIGHT_ANSI),
-    background: token(style, "--surface-2", dark ? "#171d22" : "#f7f9fb"),
-    foreground: token(style, "--text", dark ? "#e7edf1" : "#17212b"),
-    cursor: accent,
-    cursorAccent: token(style, "--surface-2", dark ? "#171d22" : "#f7f9fb"),
-    selectionBackground: /^#[0-9a-f]{6}$/i.test(accent) ? `${accent}55` : accent,
-  };
-}
-
-/** Bytes for the keys a phone keyboard lacks. Arrows follow the terminal's
- * cursor-key mode, as a real keyboard's would. */
-export function keySequence(key: TermKey, applicationCursor: boolean): string {
-  const arrow = (code: string) => (applicationCursor ? `\x1bO${code}` : `\x1b[${code}`);
-  switch (key) {
-    case "esc":
-      return "\x1b";
-    case "tab":
-      return "\t";
-    case "shiftTab":
-      return "\x1b[Z";
-    case "ctrlC":
-      return "\x03";
-    case "up":
-      return arrow("A");
-    case "down":
-      return arrow("B");
-    case "right":
-      return arrow("C");
-    case "left":
-      return arrow("D");
-    case "enter":
-      return "\r";
-  }
-}
-
-export type TermKey =
-  | "esc"
-  | "tab"
-  | "shiftTab"
-  | "ctrlC"
-  | "left"
-  | "up"
-  | "down"
-  | "right"
-  | "enter";
 
 const KEYS: { key: TermKey; label: string; wide?: boolean }[] = [
   { key: "esc", label: "Esc" },
@@ -130,19 +44,50 @@ function binaryStringBytes(data: string): Uint8Array {
   return bytes;
 }
 
+
+export interface TerminalModeReader {
+  bracketedPaste: () => boolean;
+  applicationCursor: () => boolean;
+}
+
+export interface RunTerminalProps {
+  run: Run;
+  /** Exposes the live connection so RunComposer shares the same WebSocket. */
+  onConnection?: (conn: TerminalConnection | null) => void;
+  /** Reports changes to the connection's read-only state. */
+  onReadonlyChange?: (readonly: boolean) => void;
+  /** Reports whether the terminal screen currently shows a CLI menu/trust prompt. */
+  onScreenAsksChange?: (asking: boolean) => void;
+  /** Exposes readers for xterm's bracketedPasteMode and applicationCursorKeysMode. */
+  onModes?: (reader: TerminalModeReader | null) => void;
+  /** Hide the built-in phone key row when RunDialog supplies its own composer key row. */
+  hideKeys?: boolean;
+}
+
 /**
  * An interactive run's terminal: the agent's own TUI, relayed from the PTY on
  * the runner. Typing goes back to it unless the hub says this viewer may only
  * watch, or the run has ended.
  */
-export default function RunTerminal({ run }: { run: Run }) {
+export default function RunTerminal({
+  run,
+  onConnection,
+  onReadonlyChange,
+  onScreenAsksChange,
+  onModes,
+  hideKeys = false,
+}: RunTerminalProps) {
   const { t } = useI18n();
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const connRef = useRef<TerminalConnection | null>(null);
   const [state, setState] = useState<TerminalState>("connecting");
-  const [readonly, setReadonly] = useState(false);
+  const [readonly, setReadonly] = useState(() => Boolean(run.viewOnly));
   const [liveStatus, setLiveStatus] = useState("");
+
+  // Keep latest callbacks in refs so prop identity changes never reconnect the socket.
+  const callbacksRef = useRef({ onConnection, onReadonlyChange, onScreenAsksChange, onModes });
+  callbacksRef.current = { onConnection, onReadonlyChange, onScreenAsksChange, onModes };
 
   const final = runFinal(run.status) || runFinal(liveStatus);
   const status = runFinal(liveStatus) ? liveStatus : final ? run.status : liveStatus || run.status;
@@ -151,6 +96,7 @@ export default function RunTerminal({ run }: { run: Run }) {
   // Read once at attach: whether this run had already ended decides whether
   // the socket retries, and later flips reach it through setFinal.
   const initialFinal = useRef(final);
+  const initialViewOnly = useRef(Boolean(run.viewOnly));
 
   useEffect(() => {
     const element = host.current;
@@ -160,12 +106,13 @@ export default function RunTerminal({ run }: { run: Run }) {
     element.style.setProperty("--run-term-font-size", `${fontSize()}px`);
 
     const term = new Terminal({
-      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() ||
+      fontFamily:
+        getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() ||
         "Consolas, monospace",
       fontSize: fontSize(),
       cursorBlink: true,
       scrollback: 5000,
-      theme: terminalTheme(),
+      theme: terminalTheme(element),
       allowProposedApi: false,
     });
     const fit = new FitAddon();
@@ -173,21 +120,53 @@ export default function RunTerminal({ run }: { run: Run }) {
     term.open(element);
     termRef.current = term;
 
+    let lastScreenAsks = false;
+    const inspectScreen = () => {
+      const { lines, cursorRow } = readCursorLines(term);
+      const next = hasScreenMenuPrompt(lines, cursorRow);
+      if (next !== lastScreenAsks) {
+        lastScreenAsks = next;
+        callbacksRef.current.onScreenAsksChange?.(next);
+      }
+    };
+
     const conn = connectTerminal(
       run.id,
       run.project,
       {
         // The hub replays the scrollback on every attach: start from a blank
         // screen so a reconnect does not print it twice.
-        onReset: () => term.reset(),
-        onOutput: (data) => term.write(data),
+        onReset: () => {
+          term.reset();
+          if (lastScreenAsks) {
+            lastScreenAsks = false;
+            callbacksRef.current.onScreenAsksChange?.(false);
+          }
+        },
+        onOutput: (data) => {
+          // Pass a callback when xterm supports it; also inspect immediately for synchronous fakes.
+          if (term.write.length >= 2) {
+            term.write(data, inspectScreen);
+          } else {
+            term.write(data);
+            inspectScreen();
+          }
+        },
         onStatus: setLiveStatus,
-        onReadonly: setReadonly,
+        onReadonly: (next) => {
+          setReadonly(next);
+          callbacksRef.current.onReadonlyChange?.(next);
+        },
         onState: setState,
       },
-      { final: initialFinal.current },
+      { final: initialFinal.current, viewOnly: initialViewOnly.current },
     );
     connRef.current = conn;
+    callbacksRef.current.onConnection?.(conn);
+    callbacksRef.current.onModes?.({
+      bracketedPaste: () => Boolean(term.modes?.bracketedPasteMode),
+      applicationCursor: () => Boolean(term.modes?.applicationCursorKeysMode),
+    });
 
     const fitNow = () => {
       // A hidden tab measures 0×0; fitting to that would shrink the PTY.
@@ -224,7 +203,7 @@ export default function RunTerminal({ run }: { run: Run }) {
     phone?.addEventListener?.("change", onPhoneChange);
 
     const themeObserver = new MutationObserver(() => {
-      term.options.theme = terminalTheme();
+      term.options.theme = terminalTheme(element);
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
@@ -234,6 +213,9 @@ export default function RunTerminal({ run }: { run: Run }) {
       themeObserver.disconnect();
       phone?.removeEventListener?.("change", onPhoneChange);
       for (const disposable of disposables) disposable.dispose();
+      callbacksRef.current.onConnection?.(null);
+      callbacksRef.current.onModes?.(null);
+      callbacksRef.current.onScreenAsksChange?.(false);
       conn.close();
       connRef.current = null;
       termRef.current = null;
@@ -244,6 +226,13 @@ export default function RunTerminal({ run }: { run: Run }) {
   useEffect(() => {
     connRef.current?.setFinal(final);
   }, [final]);
+
+  useEffect(() => {
+    if (run.viewOnly) {
+      connRef.current?.setViewOnly(true);
+      setReadonly(true);
+    }
+  }, [run.viewOnly]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -293,22 +282,24 @@ export default function RunTerminal({ run }: { run: Run }) {
           </div>
         )}
       </div>
-      <div className="run-term-keys" role="toolbar" aria-label={t("terminal.keys")}>
-        {KEYS.map(({ key, label, wide }) => (
-          <button
-            key={key}
-            type="button"
-            className={wide ? "wide" : undefined}
-            disabled={!canType}
-            aria-label={t(`terminal.key.${key}`)}
-            // Keep the focus (and a phone's keyboard) on the terminal.
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() => sendKey(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {!hideKeys && (
+        <div className="run-term-keys" role="toolbar" aria-label={t("terminal.keys")}>
+          {KEYS.map(({ key, label, wide }) => (
+            <button
+              key={key}
+              type="button"
+              className={wide ? "wide" : undefined}
+              disabled={!canType}
+              aria-label={t(`terminal.key.${key}`)}
+              // Keep the focus (and a phone's keyboard) on the terminal.
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => sendKey(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

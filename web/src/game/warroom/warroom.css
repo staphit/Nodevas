@@ -2191,7 +2191,8 @@
 .px-story-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  align-items: center;
+  gap: 4px 12px;
   margin: 6px 0 0;
   padding: 0;
   color: var(--story-soft);
@@ -2202,6 +2203,168 @@
 .px-story-meta b {
   color: var(--story-ink);
   font-weight: 400;
+}
+.px-story-meta.is-pictured > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.px-story-meta .picker-runner-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--story-soft);
+}
+.px-story-fact-meter {
+  width: 56px;
+  height: 6px;
+}
+.px-story-fact-tokens,
+.px-story-fact-mail,
+.px-story-fact-overlap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.px-story-fact-mail,
+.px-story-fact-overlap {
+  color: var(--story-ask);
+}
+.px-story-test-lamp {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.px-story-test-lamp.is-green {
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade8099;
+}
+.px-story-test-lamp.is-red {
+  background: var(--story-alert);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--story-alert) 60%, transparent);
+}
+
+/* Multi-repo group status pips and repo/contest member tabs (§10.2, §11). */
+.px-story-pips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.px-story-pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--story-soft);
+}
+.px-story-pip.is-working,
+.px-story-pip.is-reviewing {
+  background: var(--story-accent);
+}
+.px-story-pip.is-finished {
+  background: #4ade80;
+}
+.px-story-pip.is-failed {
+  background: var(--story-alert);
+}
+.px-story-pip.is-asking-user {
+  background: var(--story-ask);
+}
+.px-story-pip.is-awaiting-accept,
+.px-story-pip.is-waiting-ci {
+  background: color-mix(in srgb, var(--story-soft) 75%, var(--story-accent));
+}
+.px-story-pip.is-offline,
+.px-story-pip.is-limit,
+.px-story-pip.is-idle {
+  opacity: 0.55;
+}
+.px-story-pip.is-current {
+  box-shadow: 0 0 0 2px var(--story-ink);
+}
+
+.px-story-member.is-repo,
+.px-story-member.is-contest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 3px;
+}
+.px-story-member-face {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.px-story-member-face .px-story-face {
+  transform: scale(0.5263);
+  transform-origin: top left;
+}
+.px-story-member-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Contest entries standing together as a pair (§16.5 W5). */
+.px-story-pair {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 2px;
+}
+.px-story-pair-entry {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.px-story-pair-entry .px-figure-art {
+  width: 100%;
+  height: 100%;
+}
+.px-story-pair-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 1px 7px;
+  border: 1px solid var(--story-accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--story-night) 85%, transparent);
+  color: var(--story-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Run-backed story dialog (§3.2–§3.4): compact flavour line in header, compact
+   terminal/transcript inside the stage, static preview for off-screen list rows. */
+.px-story-talk.has-run .px-story-line {
+  min-height: 0;
+  max-height: 166px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.px-story-dlg-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.px-story-preview {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--story-line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--story-night) 70%, transparent);
+  color: var(--story-soft);
+  font-family: var(--font-sans, sans-serif);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .px-story-choices {
   display: flex;

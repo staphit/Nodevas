@@ -97,6 +97,36 @@ type RunEnv struct {
 	// Version is the CLI's `--version` line as the runner detected it; ""
 	// when unknown. OpenCode reads it (1.x and 2.x take different commands).
 	Version string
+	// SessionID is a runner-chosen session UUID passed to an interactive CLI
+	// that accepts one at start (e.g. Claude --session-id), so the runner can
+	// resume it or tail its transcript. Never supplied by the hub.
+	SessionID string
+	// Resume is a runner-verified session ID from work.json to resume on a
+	// follow-up turn. Never supplied by the hub.
+	Resume string
+}
+
+// SessionReporter is optionally implemented by a Parser that captures the
+// CLI's own session ID from its output stream.
+type SessionReporter interface {
+	Session() string
+}
+
+// Resumer is optionally implemented by an Adapter that can resume an earlier
+// CLI session on a follow-up turn (using RunEnv.Resume).
+type Resumer interface {
+	SupportsResume(interactive bool) bool
+}
+
+// ContinueInput holds the context for building a follow-up turn's fallback
+// prompt section when CLI session resume is not used.
+type ContinueInput struct {
+	Branch       string
+	Base         string
+	PriorTask    string
+	PriorSummary string
+	PRURL        string
+	Message      string
 }
 
 // MCPServer is a stdio MCP server: a command and its arguments.
@@ -179,8 +209,11 @@ const headlessAskNote = "Nobody is watching this terminal, but a person can answ
 // and after the task the review it must address. A global agent's job
 // (runnerwire.Job.Global) gets GlobalPrompt: it has no node and no board.
 func Prompt(job runnerwire.Job, branch string) string {
+	if job.Kind == runnerwire.JobCompare {
+		return comparePrompt(job)
+	}
 	if job.Global {
-		return GlobalPrompt(job, branch)
+		return GlobalPrompt(job, branch) + ContestPromptSection(job)
 	}
 	switch job.Kind {
 	case runnerwire.JobReview:
@@ -213,19 +246,30 @@ func Prompt(job runnerwire.Job, branch string) string {
 			"address that review, on top of the work already on the branch.\n\n", job.PRURL)
 	}
 	b.WriteString("Rules for this run:\n")
-	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, and read the reference notes it lists before writing.\n", job.NodeID)
+	if job.Coordinated {
+		b.WriteString(coordinatedReadRule(job.NodeID, true))
+	} else {
+		fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, and read the reference notes it lists before writing.\n", job.NodeID)
+	}
 	b.WriteString("2. Work only inside this worktree (the current directory). Do not touch other checkouts.\n")
 	if revise {
 		b.WriteString("3. Do not push, and do not open pull requests: the runner pushes your work to the " +
 			"pull request's branch after you finish.\n")
+	} else if job.NoPR {
+		b.WriteString("3. Do not push, and do not open pull requests: the runner keeps your branch for its owner to review.\n")
 	} else {
 		b.WriteString("3. Do not push, and do not open pull requests: the runner handles that after you finish.\n")
 	}
-	b.WriteString("4. When you are done, report the outcome with set_node_status, " +
-		"then finish with a short summary of what you changed.\n\n")
+	if job.Coordinated {
+		b.WriteString("4. Finish with a short summary of what you changed; the person updates the board.\n\n")
+	} else {
+		b.WriteString("4. When you are done, report the outcome with set_node_status, " +
+			"then finish with a short summary of what you changed.\n\n")
+	}
 	b.WriteString("The task:\n\n")
 	b.WriteString(job.Prompt)
 	b.WriteString("\n")
+	b.WriteString(ContestPromptSection(job))
 	if job.Role != "" {
 		b.WriteString(implementAcceptanceSection(job))
 	}

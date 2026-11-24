@@ -145,6 +145,15 @@ export interface Actor {
   global?: boolean;
   /** A global agent running headless: it has nobody to ask. */
   cannotAsk?: boolean;
+  /** Repository name (used by global agents and story-room group tabs). */
+  repoName?: string;
+  /** Multi-repo global run group id (§10.2). */
+  groupId?: string;
+  /** Coordination layer 3: contest id and entry label ("A" | "B" | "C" | "J"). */
+  contestId?: string;
+  contestLabel?: string;
+  /** Coordination layer 2: active strong file overlaps count. */
+  overlapCount?: number;
   /** What a click opens. */
   target: ClickTarget;
   /** Everything the character's popover offers, target first. */

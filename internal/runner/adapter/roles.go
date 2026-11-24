@@ -107,8 +107,12 @@ func stagedExecutorPrompt(job runnerwire.Job, branch string) string {
 	fmt.Fprintf(&b, ", in a git worktree on branch %s of pull request %s. "+headlessAskNote+"\n\n", branch, job.PRURL)
 	b.WriteString("Your job: make the failing tests on this branch pass by implementing the task.\n\n")
 	b.WriteString("Rules for this run:\n")
-	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, "+
-		"and the reference notes it lists.\n", job.NodeID)
+	if job.Coordinated {
+		b.WriteString(coordinatedReadRule(job.NodeID, true))
+	} else {
+		fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, "+
+			"and the reference notes it lists.\n", job.NodeID)
+	}
 	b.WriteString("2. The Tester wrote these test files; you may not modify them (changes need a reviewer's " +
 		"sign-off and are flagged):\n")
 	b.WriteString(fileList(job.TestFiles))
@@ -116,8 +120,13 @@ func stagedExecutorPrompt(job runnerwire.Job, branch string) string {
 		"manifests or CI files either: those changes are flagged too.\n")
 	b.WriteString("4. Work only inside this worktree. Do not push, and do not open pull requests: the runner pushes " +
 		"your work to the pull request's branch after you finish.\n")
-	b.WriteString("5. do NOT set the task done: the server marks it done once the tests pass on its own run and the " +
-		"remaining stages approve. If you cannot finish, give the task back with release_task and say why.\n")
+	if job.Coordinated {
+		b.WriteString("5. Do not claim the task or change its status; the person updates the board. " +
+			"If you cannot finish, explain why in your summary.\n")
+	} else {
+		b.WriteString("5. do NOT set the task done: the server marks it done once the tests pass on its own run and the " +
+			"remaining stages approve. If you cannot finish, give the task back with release_task and say why.\n")
+	}
 	b.WriteString("6. Finish with a short summary of what you changed and the test result.\n")
 	b.WriteString("7. " + untrustedRule + "\n\n")
 	b.WriteString("Acceptance criteria:\n")
@@ -273,6 +282,9 @@ func implementAcceptanceSection(job runnerwire.Job) string {
 	if len(job.Acceptance) == 0 {
 		return ""
 	}
-	return "\nAcceptance criteria (the work is judged against these):\n" + acceptanceList(job.Acceptance) +
-		"If set_node_status answers STAGE_GATE_PENDING, the server marks the node done after the remaining stages: stop there.\n"
+	section := "\nAcceptance criteria (the work is judged against these):\n" + acceptanceList(job.Acceptance)
+	if !job.Coordinated {
+		section += "If set_node_status answers STAGE_GATE_PENDING, the server marks the node done after the remaining stages: stop there.\n"
+	}
+	return section
 }

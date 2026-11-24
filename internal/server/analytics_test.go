@@ -254,7 +254,10 @@ func TestRoutePickLinkedToItsRun(t *testing.T) {
 VALUES ('cals-pick', 'u-cal', '.', ?, 'auto', '{}', '2026-10-28T00:00:00.000000Z')`, runsTestNode); err != nil {
 		t.Fatal(err)
 	}
-	f.dispatch(t, f.bea, f.createBody(func(r *runnerwire.CreateRunRequest) { r.RoutePick = "cals-pick" }))
+	f.dispatch(t, f.bea, f.createBody(func(r *runnerwire.CreateRunRequest) {
+		r.RoutePick = "cals-pick"
+		r.OnBusy = runnerwire.OnBusyBoth
+	}))
 	if err := database.QueryRow(`SELECT run_id FROM route_picks WHERE id = 'cals-pick'`).Scan(&linked); err != nil || linked != "" {
 		t.Fatalf("another owner's pick linked to %q, %v", linked, err)
 	}

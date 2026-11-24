@@ -922,6 +922,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 		NodeID: t.NodeID, RunnerID: runnerID, Agent: head.Agent, Model: head.Model, RepoID: pol.RepoID,
 		Prompt: runs.Truncate(extra, runs.MaxExtraPrompt), Fallbacks: choice.Implement[1:],
 		Pipeline: pipelineFor(pol, head),
+		OnBusy:   runnerwire.OnBusyQueue,
 	}
 	var acceptance *engine.Acceptance
 	if n := w.graph.NodeByID(t.NodeID); n != nil {

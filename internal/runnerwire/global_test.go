@@ -117,3 +117,47 @@ func TestGlobalTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupRequestBounds(t *testing.T) {
+	if CapContinue != "continue" || MaxFollowUpBytes != MaxGlobalTaskBytes || MinGroupRepos != 2 || MaxGroupRepos != 30 {
+		t.Fatal("continue/group constants changed")
+	}
+	makeIDs := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "repo-" + strings.Repeat("x", 1) + string(rune('a'+i%26)) + string(rune('0'+i/26))
+		}
+		return out
+	}
+	if ValidGroupRepoIDs(nil) || ValidGroupRepoIDs([]string{"r1"}) {
+		t.Fatal("fewer than 2 repos accepted")
+	}
+	if !ValidGroupRepoIDs(makeIDs(2)) {
+		t.Fatal("2 distinct repos rejected")
+	}
+	if !ValidGroupRepoIDs(makeIDs(30)) {
+		t.Fatal("30 distinct repos rejected")
+	}
+	if ValidGroupRepoIDs(makeIDs(31)) {
+		t.Fatal("31 repos accepted")
+	}
+	if ValidGroupRepoIDs([]string{"r1", "r1"}) {
+		t.Fatal("duplicate repos accepted")
+	}
+	if ValidGroupRepoIDs([]string{"r1", "  "}) {
+		t.Fatal("blank repo accepted")
+	}
+
+	req := CreateGlobalGroupRequest{
+		RunnerID: "rn1", RepoIDs: []string{"r1", "r2"}, Agent: "claude", Model: "opus",
+		Task: "bump dep", OpenPR: true, OnBusy: OnBusySkip,
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back CreateGlobalGroupRequest
+	if err := json.Unmarshal(raw, &back); err != nil || !reflect.DeepEqual(back, req) {
+		t.Fatalf("group request round trip = %+v, %v", back, err)
+	}
+}

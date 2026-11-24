@@ -1,25 +1,29 @@
 // Starts a global agent (agent workspace, phase 2): an agent on one of the
-// viewer's own runners, in one of that runner's registered repositories, for
-// no project and no node. Runner, then repository, then agent and model, the
-// mode, where its branch starts and what it is called, then the task. On a
-// team hub nothing starts here: the runner shows the offer (or takes it by
-// its own policy). In the single-user edition there is no runner to pick:
-// this computer's built-in runner starts it, and repos are added right here.
+// viewer's own runners, in one or more of that runner's registered repositories,
+// for no project and no node. Multiple repositories fan out as a background
+// group (§10.2); one repository defaults to interactive when supported (§8.1).
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
+  api,
   AuthError,
+  BusyError,
+  CAP_COORD,
   CAP_GLOBAL_RUNS,
   CAP_GLOBAL_RUNS_ON,
   ConflictError,
   GlobalRunError,
   globalTitle,
+  MAX_CONTEST_ENTRIES,
   MAX_GLOBAL_TASK_BYTES,
+  MAX_GROUP_REPOS,
   RequestError,
   slugFrom,
   validSlug,
+  type BusyResponse,
   type CreateGlobalRunRequest,
+  type OnBusy,
   type Run,
   type Runner,
   type RunnerLoad,
@@ -30,18 +34,34 @@ import { useI18n } from "../i18n";
 import { LocalNotReady } from "../local/LocalNotReady";
 import { permissionOf } from "../local/ThisComputerPanel";
 import { builtInRunner, localState, useEdition } from "../runners/edition";
-import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
+import { agentCatalog, catalogDefaultModel } from "../runs/AgentModelFields";
 import { AutoAcceptNote } from "../runs/AutoAcceptNote";
 import { budgetExceededText } from "../runs/BudgetSettings";
 import { useBudget } from "../runs/budgetStore";
+import { BusyChoice } from "../runs/coord/BusyChoice";
+import { ContestForm, type ContestDraft } from "../runs/coord/ContestForm";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { AddRepoButton, defaultModel, installedAgents, ownRunners, validBranchName } from "../runs/DispatchDialog";
-import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "../runs/RunModePicker";
+import {
+  defaultDispatchMode,
+  isInteractiveDisabled,
+  resolveDispatchMode,
+  RunModePicker,
+  type DispatchMode,
+} from "../runs/RunModePicker";
+import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
-import { StepUpDialog } from "../stepup/StepUpDialog";
 import { useSimpleMode } from "../simple/simpleMode";
+import { StepUpDialog } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
+import { usePreference } from "../store";
 import { useGlobalAgents } from "./globalAgentsStore";
+import { AgentCards } from "./pickers/AgentCards";
+import { ModelCards } from "./pickers/ModelCards";
+import { RunnerCards } from "./pickers/PictureCards";
+import { RepoCards } from "./pickers/RepoCards";
 
 type Translate = ReturnType<typeof useI18n>["t"];
 
@@ -78,12 +98,85 @@ function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+function minutesSince(iso: string | undefined): number {
+  if (!iso) return 1;
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms <= 0) return 1;
+  return Math.max(1, Math.round(ms / 60_000));
+}
+
+function buildInitialContestDraft(runner: Runner | undefined): ContestDraft {
+  const runnerId = runner?.id ?? "";
+  const catalog = agentCatalog(runner ? [runner] : []);
+  const options: { runnerId: string; agent: string; model: string }[] = [];
+  for (const item of catalog) {
+    const def = catalogDefaultModel(item);
+    if (def) options.push({ runnerId, agent: item.kind, model: def });
+  }
+  for (const item of catalog) {
+    for (const model of item.models) {
+      if (!options.some((o) => o.agent === item.kind && o.model === model.id)) {
+        options.push({ runnerId, agent: item.kind, model: model.id });
+      }
+    }
+  }
+  if (options.length === 0) {
+    return {
+      entries: [
+        { runnerId, agent: "claude", model: "default" },
+        { runnerId, agent: "codex", model: "default" },
+      ],
+      reviewer: null,
+    };
+  }
+  return {
+    entries: [options[0], options[1] ?? { ...options[0] }],
+    reviewer: null,
+  };
+}
+
+function contestDraftValid(draft: ContestDraft | null, runner: Runner | undefined): boolean {
+  if (!draft || !runner?.info?.capabilities?.includes(CAP_COORD)) return false;
+  if (draft.entries.length < 2 || draft.entries.length > MAX_CONTEST_ENTRIES) return false;
+  const seen = new Set<string>();
+  for (const entry of draft.entries) {
+    if (!entry.agent.trim() || !entry.model.trim()) return false;
+    const key = `${entry.agent.trim().toLowerCase()}::${entry.model.trim().toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  if (draft.reviewer && (!draft.reviewer.agent.trim() || !draft.reviewer.model.trim())) {
+    return false;
+  }
+  return true;
+}
+
+/** Normalizes a group 409 BUSY payload (which may store holders per repo) for BusyChoice. */
+function normalizeBusy(busy: BusyResponse, isGroup: boolean): BusyResponse {
+  if (!busy.repos || busy.repos.length === 0) return busy;
+  const holders =
+    busy.holders && busy.holders.length > 0
+      ? busy.holders
+      : busy.repos.flatMap((repo) => repo.holders ?? []);
+  const others =
+    busy.others > 0
+      ? busy.others
+      : busy.repos.reduce((sum, repo) => sum + (repo.others || 0), 0);
+  const choices =
+    busy.choices && busy.choices.length > 0
+      ? busy.choices
+      : isGroup
+        ? ["both", "skip"]
+        : [];
+  return { ...busy, holders, others, choices };
+}
+
 /** A refused start in the reader's words: the field the hub refused, and
  * whether a step-up or the budget line should follow. */
 export interface StartFailure {
   text: string;
   /** The request field the hub named (task, slug, base, mode, agent, model,
-   * repoId), "" for none. */
+   * repoId, repoIds), "" for none. */
   field: string;
   /** The hub wants a fresh step-up first. */
   stepUp: boolean;
@@ -145,18 +238,17 @@ export function GlobalAgentForm({
   const { t } = useI18n();
   const id = useId();
   const viewer = useViewer();
+  const edition = useEdition();
   const runners = useRunners((s) => s.runners);
   const runnersLoaded = useRunners((s) => s.loaded);
   const runnersLoading = useRunners((s) => s.loading);
   const runnersError = useRunners((s) => s.error);
   const loads = useGlobalAgents((s) => s.runners);
 
-  const single = useEdition() === "single";
-  // Simple mode: finished work stays on this computer (no pull request to
-  // ask for), and the hub adds its plain-words instruction.
+  const single = edition === "single";
   const simple = useSimpleMode();
+  const modePref = usePreference("runMode");
   const mine = useMemo(() => ownRunners(runners, viewer), [runners, viewer]);
-  // Single-user: this computer's built-in runner, and no choice.
   const localRunner = single ? builtInRunner(mine) : undefined;
   const blockOf = useCallback(
     (runner: Runner) => globalRunnerBlock(runner, loads.find((load) => load.runnerId === runner.id)),
@@ -171,8 +263,12 @@ export function GlobalAgentForm({
   const [runnerId, setRunnerId] = useState("");
   const [agentKind, setAgentKind] = useState("");
   const [modelChoice, setModel] = useState("");
-  const [repoChoice, setRepoId] = useState("");
-  const [modeChoice, setMode] = useState<DispatchMode>("headless");
+  const [repoChoiceIds, setRepoIds] = useState<string[] | null>(null);
+  const [modeChoice, setModeChoice] = useState<DispatchMode | null>(null);
+  const [contestOn, setContestOn] = useState(false);
+  const [contestDraft, setContestDraft] = useState<ContestDraft | null>(null);
+  const [pendingBusy, setPendingBusy] = useState<BusyResponse | null>(null);
+  const [busyChanged, setBusyChanged] = useState(false);
   const [base, setBase] = useState("");
   const [slugText, setSlugText] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
@@ -184,14 +280,10 @@ export function GlobalAgentForm({
   const [copied, setCopied] = useState(false);
   const taskRef = useRef<HTMLTextAreaElement>(null);
 
-  // The runner list itself is the panel's to load; a form opened on its own
-  // still asks once.
   useEffect(() => {
     if (!useRunners.getState().loaded) void useRunners.getState().refresh();
   }, []);
 
-  // Whether the viewer is stepped up decides if a runner that asks for it
-  // auto-accepts; asked afresh whenever the form opens.
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const closeStepUp = useCallback(() => setStepUpOpen(false), []);
   useEffect(() => {
@@ -204,8 +296,6 @@ export function GlobalAgentForm({
   }, []);
   const budgetWarning = budgetExceededText(t, budgetStatus);
 
-  // Each choice stays valid as the one above it changes (or a push replaces
-  // the runner list): derived on every render, as in the dispatch dialog.
   const runner = eligible.find((item) => item.id === runnerId) ?? eligible[0];
   const runnerName = runner ? runnerDisplayName(t, runner.name) : "";
   const agents = installedAgents(runner);
@@ -213,8 +303,56 @@ export function GlobalAgentForm({
   const models = agent?.models ?? [];
   const model = models.some((item) => item.id === modelChoice) ? modelChoice : defaultModel(agent);
   const repos = runner?.info?.repos ?? [];
-  const repoId = repos.some((repo) => repo.id === repoChoice) ? repoChoice : (repos[0]?.id ?? "");
-  const mode = effectiveDispatchMode(modeChoice, runner);
+
+  const selectedRepoIds = useMemo(() => {
+    if (repos.length === 0) return [];
+    if (repoChoiceIds === null) return [repos[0].id];
+    if (repoChoiceIds.length === 0) return [];
+    const valid = repoChoiceIds.filter((rid) => repos.some((repo) => repo.id === rid));
+    return valid.length > 0 ? valid : [repos[0].id];
+  }, [repos, repoChoiceIds]);
+
+  const repoId = selectedRepoIds[0] ?? "";
+  const activeContest = !simple && contestOn;
+  const isGroup = !activeContest && selectedRepoIds.length > 1;
+  const effectiveRepoIds = useMemo(
+    () => (activeContest ? (repoId ? [repoId] : []) : selectedRepoIds),
+    [activeContest, repoId, selectedRepoIds],
+  );
+  const effectiveRepoKey = effectiveRepoIds.join(",");
+
+  // Preflight global busy whenever runner or picked folders change.
+  useEffect(() => {
+    if (!runner?.id || !effectiveRepoKey) return;
+    void useCoordStore.getState().loadGlobalBusy(runner.id, effectiveRepoKey.split(","));
+  }, [runner?.id, effectiveRepoKey]);
+
+  const busyByRepo = useCoordStore((s) => (runner?.id ? s.globalBusy[runner.id] : undefined));
+  const preflightBusyRepo = useMemo(() => {
+    if (!busyByRepo) return undefined;
+    return effectiveRepoIds
+      .map((rid) => busyByRepo[rid])
+      .find((entry) => entry && ((entry.holders?.length ?? 0) > 0 || entry.others > 0));
+  }, [busyByRepo, effectiveRepoIds]);
+
+  const activeDraft = useMemo(
+    () => (activeContest ? (contestDraft ?? buildInitialContestDraft(runner)) : null),
+    [activeContest, contestDraft, runner],
+  );
+
+  const modeCtx = useMemo(
+    () => ({
+      runner,
+      agent,
+      viewer,
+      edition,
+      group: isGroup,
+      contest: activeContest,
+    }),
+    [runner, agent, viewer, edition, isGroup, activeContest],
+  );
+  const defaultModeResult = defaultDispatchMode(modeCtx);
+  const mode = resolveDispatchMode(modeChoice, modePref, defaultModeResult, modeCtx);
 
   const baseValue = base.trim();
   const baseError = baseValue && !validBranchName(baseValue) ? t("runs.baseInvalid") : "";
@@ -226,7 +364,6 @@ export function GlobalAgentForm({
       : attempted && !taskValue
         ? t("globalAgents.form.taskRequired")
         : "";
-  // The branch name follows the task's title until the person writes one.
   const derivedSlug = slugFrom(globalTitle(task));
   const slugValue = slugText.trim();
   const sendSlug = slugEdited && slugValue !== "";
@@ -234,14 +371,28 @@ export function GlobalAgentForm({
   const slugError = sendSlug && !validSlug(slugValue) ? t("globalAgents.form.slugInvalid") : "";
   const taskRows = Math.min(MAX_TASK_ROWS, Math.max(MIN_TASK_ROWS, task.split("\n").length + 1));
 
-  const ready =
-    Boolean(runner && agent && model && repoId) &&
-    !baseError &&
-    !slugError &&
-    taskBytes <= MAX_GLOBAL_TASK_BYTES &&
-    !submitting;
+  const ready = activeContest
+    ? Boolean(runner && repoId && contestDraftValid(activeDraft, runner)) &&
+      !baseError &&
+      !slugError &&
+      taskBytes <= MAX_GLOBAL_TASK_BYTES &&
+      !submitting
+    : Boolean(runner && agent && model && selectedRepoIds.length > 0 && selectedRepoIds.length <= MAX_GROUP_REPOS) &&
+      !baseError &&
+      !slugError &&
+      taskBytes <= MAX_GLOBAL_TASK_BYTES &&
+      !submitting;
 
-  const submit = async () => {
+  const clearAfterStart = () => {
+    setTask("");
+    setSlugText("");
+    setSlugEdited(false);
+    setAttempted(false);
+    setPendingBusy(null);
+    setBusyChanged(false);
+  };
+
+  const submit = async (onBusy?: OnBusy, holderIds?: string[]) => {
     if (submitting) return;
     setAttempted(true);
     if (!taskValue) {
@@ -249,35 +400,93 @@ export function GlobalAgentForm({
       taskRef.current?.focus();
       return;
     }
-    if (!ready || !runner || !agent) return;
+    if (!ready || !runner) return;
+    if (!activeContest && !agent) return;
     setSubmitting(true);
     setFailure(null);
-    const body: CreateGlobalRunRequest = {
-      runnerId: runner.id,
-      repoId,
-      agent: agent.kind,
-      model,
-      ...(mode === "interactive" ? { mode: "interactive" as const } : {}),
-      ...(baseValue ? { base: baseValue } : {}),
-      task: taskValue,
-      ...(sendSlug ? { slug: slugValue } : {}),
-      openPR: simple ? false : openPR,
-      ...(simple ? { simple: true } : {}),
-    };
     try {
+      if (activeContest && activeDraft) {
+        const res = await api.createGlobalContest({
+          runnerId: runner.id,
+          repoId,
+          ...(baseValue ? { base: baseValue } : {}),
+          task: taskValue,
+          ...(sendSlug ? { slug: slugValue } : {}),
+          entries: activeDraft.entries.map((entry) => ({ agent: entry.agent, model: entry.model })),
+          ...(activeDraft.reviewer
+            ? { reviewer: { agent: activeDraft.reviewer.agent, model: activeDraft.reviewer.model } }
+            : {}),
+          ...(onBusy ? { onBusy } : {}),
+          ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
+        });
+        const runs = res.runs ?? [];
+        useRuns.getState().putRuns(runs);
+        if (runs[0]) useGlobalAgents.getState().setFocus(runs[0].id);
+        clearAfterStart();
+        if (runs[0]) onStarted?.(runs[0]);
+        return;
+      }
+
+      if (isGroup) {
+        const groupOnBusy = onBusy === "both" || onBusy === "skip" ? onBusy : undefined;
+        const res = await api.createGlobalGroup({
+          runnerId: runner.id,
+          repoIds: selectedRepoIds,
+          agent: agent!.kind,
+          model,
+          ...(baseValue ? { base: baseValue } : {}),
+          task: taskValue,
+          ...(sendSlug ? { slug: slugValue } : {}),
+          openPR: simple ? false : openPR,
+          ...(simple ? { simple: true } : {}),
+          ...(groupOnBusy ? { onBusy: groupOnBusy } : {}),
+          ...(groupOnBusy && holderIds && holderIds.length > 0 ? { holderIds } : {}),
+        });
+        const runs = res.runs ?? [];
+        useRuns.getState().putRuns(runs);
+        if (runs[0]) useGlobalAgents.getState().setFocus(runs[0].id);
+        clearAfterStart();
+        if (runs[0]) onStarted?.(runs[0]);
+        return;
+      }
+
+      const body: CreateGlobalRunRequest = {
+        runnerId: runner.id,
+        repoId,
+        agent: agent!.kind,
+        model,
+        ...(mode === "interactive" ? { mode: "interactive" as const } : {}),
+        ...(baseValue ? { base: baseValue } : {}),
+        task: taskValue,
+        ...(sendSlug ? { slug: slugValue } : {}),
+        openPR: simple ? false : openPR,
+        ...(simple ? { simple: true } : {}),
+        ...(onBusy ? { onBusy } : {}),
+        ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
+      };
       const run = await useGlobalAgents.getState().create(body);
-      // The next one likely goes to the same place: only what was this
-      // task's is cleared.
-      setTask("");
-      setSlugText("");
-      setSlugEdited(false);
-      setAttempted(false);
+      clearAfterStart();
       onStarted?.(run);
     } catch (caught) {
+      if (caught instanceof BusyError) {
+        setPendingBusy(normalizeBusy(caught.busy, isGroup));
+        setBusyChanged(Boolean(onBusy));
+        return;
+      }
+      if (caught instanceof GlobalRunError && caught.status === 429 && caught.room > 0 && isGroup) {
+        setRepoIds(selectedRepoIds.slice(0, caught.room));
+        setFailure({
+          text: t("globalAgents.group.room", { count: caught.room }),
+          field: "repoIds",
+          stepUp: false,
+          budget: true,
+        });
+        void useBudget.getState().load();
+        return;
+      }
       const mapped = startFailure(t, caught, { runner: runnerName, interactive: mode === "interactive" });
       setFailure(mapped);
       if (mapped.stepUp) setStepUpOpen(true);
-      // The refusal names the limit; the warning line catches up with it.
       if (mapped.budget) void useBudget.getState().load();
     } finally {
       setSubmitting(false);
@@ -294,27 +503,56 @@ export function GlobalAgentForm({
   };
 
   const invalid = (field: string, local = false) => (local || failure?.field === field ? true : undefined);
-  const runnerLabel = (item: Runner) => {
+  const runnerDisabledReason = (item: Runner) => {
     const block = blockOf(item);
-    const name = runnerDisplayName(t, item.name);
-    return block ? t(`globalAgents.runner.${block}`, { runner: name }) : name;
+    return block ? t(`globalAgents.runner.${block}`, { runner: runnerDisplayName(t, item.name) }) : "";
   };
   const loadingRunners = !runnersLoaded || (runnersLoading && runners.length === 0);
   const fieldId = (name: string) => `${id}-${name}`;
 
   const onRepoAdded = (repo: { id: string; name: string }) => {
-    setRepoId(repo.id);
+    setRepoIds([repo.id]);
     setAddedNote(t("repoAdd.added", { name: repo.name }));
   };
-  // The agent may run any command on this computer: said beside Start.
-  const fullAccess = Boolean(localRunner && agent && runner?.id === localRunner.id && permissionOf(runner, agent.kind) === "full");
+
+  const fullAccess = Boolean(
+    !activeContest &&
+      localRunner &&
+      agent &&
+      runner?.id === localRunner.id &&
+      permissionOf(runner, agent.kind) === "full",
+  );
+
+  const emptyRepoNode = localRunner ? (
+    <div className="run-empty run-empty-left global-agent-form-norepo" id={fieldId("repo-help")}>
+      <p>{t("runs.noReposLocal")}</p>
+      {runner && <AddRepoButton runner={runner} onAdded={onRepoAdded} />}
+      <details className="run-advanced">
+        <summary>{t("repoAdd.advancedCli")}</summary>
+        <div className="global-agent-form-command">
+          <code>{REPO_ADD_COMMAND}</code>
+          <button type="button" className="run-link-button" onClick={() => void copyCommand()}>
+            {copied ? t("globalAgents.form.copied") : t("globalAgents.form.copy")}
+          </button>
+        </div>
+      </details>
+    </div>
+  ) : (
+    <div className="run-empty run-empty-left global-agent-form-norepo" id={fieldId("repo-help")}>
+      <p>{t("globalAgents.form.noRepos", { runner: runnerName })}</p>
+      <div className="global-agent-form-command">
+        <code>{REPO_ADD_COMMAND}</code>
+        <button type="button" className="run-link-button" onClick={() => void copyCommand()}>
+          {copied ? t("globalAgents.form.copied") : t("globalAgents.form.copy")}
+        </button>
+      </div>
+    </div>
+  );
 
   let fields: ReactNode;
   if (loadingRunners) {
     fields = <p className="run-empty">{t("common.loading")}</p>;
   } else if (single && eligible.length === 0) {
-    // Single-user with nothing that can start one: this computer is not
-    // ready, in its own words, as in the dispatch dialog.
     fields = (
       <LocalNotReady starting={localState(mine) === "starting"} onOpenSettings={() => openSettings("runners")} />
     );
@@ -331,114 +569,117 @@ export function GlobalAgentForm({
     fields = (
       <>
         {!localRunner && (
-          <label className="run-field">
-            <span>{t("globalAgents.form.runner")}</span>
-            <select
-              value={runner?.id ?? ""}
-              onChange={(event) => setRunnerId(event.target.value)}
-              disabled={eligible.length === 0}
-            >
-              {mine.map((item) => (
-                <option key={item.id} value={item.id} disabled={blockOf(item) !== ""}>
-                  {runnerLabel(item)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <RunnerCards
+            runners={mine}
+            value={runner?.id ?? ""}
+            onChange={setRunnerId}
+            disabled={eligible.length === 0}
+            disabledReason={runnerDisabledReason}
+          />
         )}
         {eligible.length === 0 ? (
           <p className="run-empty">{t("globalAgents.form.noRunnerAvailable")}</p>
         ) : (
           <>
+            {preflightBusyRepo && !pendingBusy && (
+              <p className="run-stage-warning" role="status" data-testid="global-busy-preflight">
+                {simple
+                  ? t("busy.simple.title", { minutes: minutesSince(preflightBusyRepo.holders?.[0]?.since) })
+                  : t("busy.title")}
+              </p>
+            )}
+
             <div className="run-field">
-              <span className="run-field-label-row">
-                <label className="run-field-label" htmlFor={fieldId("repo")}>
-                  {t("globalAgents.form.repo")}
-                </label>
-                {runner && repos.length > 0 && <AddRepoButton runner={runner} onAdded={onRepoAdded} />}
-              </span>
-              <select
-                id={fieldId("repo")}
-                value={repoId}
-                onChange={(event) => setRepoId(event.target.value)}
-                disabled={repos.length === 0}
-                aria-invalid={invalid("repoId")}
-                aria-describedby={fieldId("repo-help")}
-              >
-                {repos.length === 0 && <option value="">{t("runs.noReposOption")}</option>}
-                {repos.map((repo) => (
-                  <option key={repo.id} value={repo.id}>
-                    {repo.path ? `${repo.name} — ${repo.path}` : repo.name}
-                  </option>
-                ))}
-              </select>
-              {repos.length === 0 && localRunner ? (
-                <div className="run-empty run-empty-left global-agent-form-norepo" id={fieldId("repo-help")}>
-                  <p>{t("runs.noReposLocal")}</p>
-                  {runner && <AddRepoButton runner={runner} onAdded={onRepoAdded} />}
-                  <details className="run-advanced">
-                    <summary>{t("repoAdd.advancedCli")}</summary>
-                    <div className="global-agent-form-command">
-                      <code>{REPO_ADD_COMMAND}</code>
-                      <button type="button" className="run-link-button" onClick={() => void copyCommand()}>
-                        {copied ? t("globalAgents.form.copied") : t("globalAgents.form.copy")}
-                      </button>
-                    </div>
-                  </details>
-                </div>
-              ) : repos.length === 0 ? (
-                <div className="run-empty run-empty-left global-agent-form-norepo" id={fieldId("repo-help")}>
-                  <p>{t("globalAgents.form.noRepos", { runner: runnerName })}</p>
-                  <div className="global-agent-form-command">
-                    <code>{REPO_ADD_COMMAND}</code>
-                    <button type="button" className="run-link-button" onClick={() => void copyCommand()}>
-                      {copied ? t("globalAgents.form.copied") : t("globalAgents.form.copy")}
-                    </button>
-                  </div>
-                </div>
+              {activeContest ? (
+                <RepoCards
+                  mode="one"
+                  repos={repos}
+                  value={repoId}
+                  onChange={(picked) => setRepoIds([picked])}
+                  simple={simple}
+                  invalid={Boolean(invalid("repoId") || invalid("repoIds"))}
+                  describedBy={fieldId("repo-help")}
+                  headerAction={runner && repos.length > 0 ? <AddRepoButton runner={runner} onAdded={onRepoAdded} /> : undefined}
+                  empty={emptyRepoNode}
+                />
               ) : (
+                <RepoCards
+                  mode="many"
+                  repos={repos}
+                  values={selectedRepoIds}
+                  onChange={setRepoIds}
+                  simple={simple}
+                  invalid={Boolean(invalid("repoId") || invalid("repoIds"))}
+                  describedBy={fieldId("repo-help")}
+                  headerAction={runner && repos.length > 0 ? <AddRepoButton runner={runner} onAdded={onRepoAdded} /> : undefined}
+                  empty={emptyRepoNode}
+                />
+              )}
+              {repos.length > 0 && (
                 <small className="run-hint" id={fieldId("repo-help")}>
                   {addedNote || t(localRunner ? "globalAgents.form.repoHelpLocal" : "globalAgents.form.repoHelp")}
                 </small>
               )}
             </div>
 
-            <div className="run-field-row">
-              <label className="run-field">
-                <span>{t("globalAgents.form.agent")}</span>
-                <select
-                  value={agent?.kind ?? ""}
-                  onChange={(event) => setAgentKind(event.target.value)}
-                  disabled={agents.length === 0}
-                  aria-invalid={invalid("agent")}
-                >
-                  {agents.length === 0 && <option value="">{t("runs.noAgentsOption")}</option>}
-                  {agents.map((item) => (
-                    <option key={item.kind} value={item.kind}>
-                      {item.version ? `${item.kind} · ${item.version}` : item.kind}
-                    </option>
-                  ))}
-                </select>
+            {!simple && (
+              <label className="route-toggle">
+                <input
+                  type="checkbox"
+                  checked={contestOn}
+                  onChange={(event) => {
+                    const on = event.target.checked;
+                    setContestOn(on);
+                    if (on && !contestDraft) {
+                      setContestDraft(buildInitialContestDraft(runner));
+                    }
+                  }}
+                />
+                <span>{t("contest.toggle")}</span>
               </label>
-              <label className="run-field">
-                <span>{t("globalAgents.form.model")}</span>
-                <select
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  disabled={models.length === 0}
-                  aria-invalid={invalid("model")}
-                >
-                  {models.length === 0 && <option value="">{t("runs.noModelsOption")}</option>}
-                  {models.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {runnerModelLabel(t, item) + (item.default ? t("runs.defaultSuffix") : "")}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            )}
 
-            <RunModePicker runner={runner} value={mode} onChange={setMode} />
+            {activeContest ? (
+              <ContestForm
+                runners={runner ? [runner] : []}
+                value={activeDraft ?? undefined}
+                disabled={submitting}
+                onChange={setContestDraft}
+              />
+            ) : (
+              <>
+                <AgentCards
+                  agents={runner?.info?.agents ?? []}
+                  value={agent?.kind ?? ""}
+                  onChange={setAgentKind}
+                  simple={simple}
+                  invalid={Boolean(invalid("agent"))}
+                />
+
+                {models.length > 0 && (
+                  <ModelCards
+                    agent={agent?.kind ?? ""}
+                    models={models}
+                    value={model}
+                    onChange={setModel}
+                    simple={simple}
+                    invalid={Boolean(invalid("model"))}
+                  />
+                )}
+
+                <RunModePicker
+                  runner={runner}
+                  agent={agent}
+                  model={model}
+                  value={mode}
+                  onChange={setModeChoice}
+                  fallbackReason={defaultModeResult.reason}
+                  interactiveDisabled={isInteractiveDisabled(modeCtx)}
+                  simple={simple}
+                  invalid={Boolean(invalid("mode"))}
+                />
+              </>
+            )}
 
             <div className="run-field-row global-agent-form-branch">
               <div className="run-field">
@@ -532,7 +773,7 @@ export function GlobalAgentForm({
               )}
             </div>
 
-            {!simple && (
+            {!simple && !activeContest && (
               <div className="global-agent-form-pr">
                 <label className="route-toggle">
                   <input type="checkbox" checked={openPR} onChange={(event) => setOpenPR(event.target.checked)} />
@@ -546,7 +787,7 @@ export function GlobalAgentForm({
 
             <p className="run-hint global-agent-form-noboard">{t("globalAgents.form.noBoard")}</p>
 
-            {runner && (
+            {runner && !activeContest && (
               <AutoAcceptNote
                 runner={runner}
                 repoId={repoId}
@@ -589,6 +830,28 @@ export function GlobalAgentForm({
           </p>
         )}
         {fields}
+        {pendingBusy && (
+          <>
+            {busyChanged && (
+              <p className="notify-message error" role="status">
+                {t("busy.changed")}
+              </p>
+            )}
+            <BusyChoice
+              busy={pendingBusy}
+              simple={simple}
+              maxConcurrent={runner?.info?.maxConcurrent}
+              onChoose={(choice) => {
+                const holderIds = (pendingBusy.holders ?? []).map((h) => h.runId);
+                void submit(choice as OnBusy, holderIds);
+              }}
+              onCancel={() => {
+                setPendingBusy(null);
+                setBusyChanged(false);
+              }}
+            />
+          </>
+        )}
         {failure && (
           <div className="notify-message error" role="alert">
             {failure.text}

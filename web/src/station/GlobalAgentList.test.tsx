@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { api, forgetGlobalRuns, WorkspaceActionError, type Run, type RunnerLoad } from "../api";
+import { api, forgetGlobalRuns, rememberGlobalRuns, WorkspaceActionError, type Run, type RunnerLoad } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
 import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { useRuns } from "../runs/runStore";
 import { makeView } from "../runs/workspaceFixtures";
 import { useWorkspace } from "../runs/workspaceStore";
@@ -92,7 +93,12 @@ beforeEach(() => {
   useWorkspace.getState().reset();
   useWorkspace.setState({ open: null });
   useRunners.setState({ runners: [], loaded: false });
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunWorkspace").mockResolvedValue(makeView({ runId: "g1" }));
+  vi.spyOn(api, "getGlobalRunThread").mockResolvedValue({ runs: [] });
+  vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+  vi.spyOn(api, "getRunAsks").mockResolvedValue({ asks: [] });
+  vi.spyOn(api, "getRunOverlaps").mockResolvedValue({ overlaps: [] });
 });
 
 afterEach(() => {
@@ -145,11 +151,11 @@ describe("GlobalAgentList", () => {
     expect(within(row).getByText("nodevas · agent/fix-the-flaky-login-test-g1aaaaaa ← main")).toBeInTheDocument();
     expect(within(row).getByText("desktop")).toBeInTheDocument();
     expect(within(row).getByText("12.3K tokens · $0.042")).toBeInTheDocument();
-    // Headless and at work: it cannot ask anything.
-    expect(within(row).getByText("Cannot ask")).toHaveAttribute(
-      "title",
-      "Runs in the background: it cannot ask you anything. Start one Interactive to talk with it.",
-    );
+    // The old noAsk chip is gone; replyNote takes its place in the list.
+    expect(within(row).queryByText("Cannot ask")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Background runs cannot ask you anything; reply here when it finishes to continue."),
+    ).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Copy the branch name" })).toBeInTheDocument();
 
     const interactive = rowOf("Talk it through");
@@ -440,6 +446,113 @@ describe("GlobalAgentList", () => {
         finishedAt: "2026-11-14T08:10:00Z",
       });
 
+    // "Start new work with this" on a merged PR opens the row and fills its
+    // composer with the whole task; nothing starts until the person sends.
+    it("opens the row's composer with the whole task for Start new work", async () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const merged = makeGlobalRun({
+        id: "g3",
+        title: "Bakery page",
+        runnerId: "local1",
+        runnerName: "this machine",
+        status: "succeeded",
+        noPR: false,
+        prUrl: "https://github.com/o/r/pull/9",
+        prState: "merged",
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      rememberGlobalRuns([merged]);
+      useRuns.getState().putRun(merged);
+      seed([merged]);
+      const task = "Bakery page\n\nWith a menu and opening hours.";
+      vi.mocked(api.getRunEvents).mockResolvedValue({
+        events: [{ seq: 0, type: "user", text: task, at: "2026-11-14T08:00:00Z" }],
+        more: false,
+      });
+      const create = vi.spyOn(api, "createGlobalRun");
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() =>
+        expect(document.querySelector(".global-agent-dialog-row textarea.run-dlg-textarea")).toHaveValue(task),
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    // The composer may not be on screen yet when the row opens (its run still
+    // loading): the task lands once it shows during that opening, and never
+    // at some later opening after the row was closed.
+    it("fills the composer when it shows up, and drops the task once the row closes", async () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const merged = makeGlobalRun({
+        id: "g3",
+        title: "Bakery page",
+        runnerId: "local1",
+        runnerName: "this machine",
+        status: "succeeded",
+        noPR: false,
+        prUrl: "https://github.com/o/r/pull/9",
+        prState: "merged",
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      seed([merged]);
+      const task = "Bakery page\n\nWith a menu and opening hours.";
+      vi.mocked(api.getRunEvents).mockResolvedValue({
+        events: [{ seq: 0, type: "user", text: task, at: "2026-11-14T08:00:00Z" }],
+        more: false,
+      });
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      rememberGlobalRuns([merged]);
+      const textarea = () => document.querySelector(".global-agent-dialog-row textarea.run-dlg-textarea");
+      const toggle = () => within(rowOf("Bakery page")).getByRole("button", { name: "Bakery page" });
+      // Opening a row puts its run in the run store; holding that back keeps
+      // the dialog (and so its composer) off screen for a while.
+      const putRun = useRuns.getState().putRun;
+      const holdBack = () => useRuns.setState({ putRun: () => undefined });
+      const letThrough = () => useRuns.setState({ putRun });
+
+      // Opened while the dialog has no run yet: no composer to fill.
+      holdBack();
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() => expect(toggle()).toHaveAttribute("aria-expanded", "true"));
+      await act(async () => {});
+      expect(textarea()).toBeNull();
+
+      // Closed before it showed: the task is dropped, so a later opening
+      // starts with an empty box.
+      fireEvent.click(toggle());
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      letThrough();
+      fireEvent.click(toggle());
+      await waitFor(() => expect(textarea()).not.toBeNull());
+      await act(async () => {});
+      expect(textarea()).toHaveValue("");
+      fireEvent.click(toggle());
+
+      // Opened again before its run is in the store, which it reaches during
+      // the same opening: the composer gets the task once it shows.
+      act(() => useRuns.setState({ globalById: {} }));
+      holdBack();
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() => expect(toggle()).toHaveAttribute("aria-expanded", "true"));
+      await act(async () => {});
+      expect(textarea()).toBeNull();
+      letThrough();
+      act(() => useRuns.getState().putRun(merged));
+      await waitFor(() => expect(textarea()).toHaveValue(task));
+    });
+
     it("shows Take a look and Apply to my folder in place of Merge locally", () => {
       viewer = null;
       useRunners.setState({ runners: [localRunner()], loaded: true });
@@ -556,6 +669,136 @@ describe("GlobalAgentList", () => {
       const row = rowOf("Bakery page");
       expect(within(row).getByRole("button", { name: "Merge locally" })).toBeInTheDocument();
       expect(within(row).queryByRole("button", { name: "Apply to my folder" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("chains, single expansion, overlap, waiting-behind, and contests", () => {
+    it("shows only the latest turn for a follow-up chain and expands one row at a time", () => {
+      const turn1 = makeGlobalRun({
+        id: "g1",
+        workRoot: "g1",
+        continuedBy: "g2",
+        title: "First draft",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:00:00Z",
+        startedAt: "2026-11-14T08:00:05Z",
+        finishedAt: "2026-11-14T08:05:00Z",
+      });
+      const turn2 = makeGlobalRun({
+        id: "g2",
+        continueOf: "g1",
+        workRoot: "g1",
+        title: "Make the button bigger",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:10:00Z",
+        startedAt: "2026-11-14T08:10:05Z",
+        finishedAt: "2026-11-14T08:15:00Z",
+      });
+      const other = makeGlobalRun({
+        id: "g3",
+        title: "Update README",
+        status: "succeeded",
+        createdAt: "2026-11-14T08:20:00Z",
+        finishedAt: "2026-11-14T08:25:00Z",
+      });
+      useRuns.getState().putRuns([turn1, turn2, other]);
+      seed([turn1, turn2, other]);
+      show();
+
+      expect(screen.queryByText("First draft")).not.toBeInTheDocument();
+      expect(screen.getByText("Make the button bigger")).toBeInTheDocument();
+      expect(screen.getByText("Turn 2")).toBeInTheDocument();
+
+      fireEvent.click(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" }));
+      expect(screen.getAllByRole("region", { name: /session/i })).toHaveLength(1);
+      expect(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+
+      fireEvent.click(within(rowOf("Update README")).getByRole("button", { name: "Update README" }));
+      expect(screen.getAllByRole("region", { name: /session/i })).toHaveLength(1);
+      expect(within(rowOf("Make the button bigger")).getByRole("button", { name: "Make the button bigger" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      expect(within(rowOf("Update README")).getByRole("button", { name: "Update README" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+
+    it("shows the overlap badge and the waiting-behind line", () => {
+      const overlapping = makeGlobalRun({
+        id: "g1",
+        title: "Touch auth",
+        overlapCount: 2,
+      });
+      const waiting = makeGlobalRun({
+        id: "g2",
+        title: "Queued task",
+        status: "queued",
+        afterRun: "g1",
+        startedAt: undefined,
+      });
+      seed([overlapping, waiting]);
+      show();
+
+      expect(within(rowOf("Touch auth")).getByText("2 overlap")).toBeInTheDocument();
+      expect(within(rowOf("Queued task")).getByText("Waiting for an earlier run to end")).toBeInTheDocument();
+    });
+
+    it("renders a contest row with entry pips and expands to ContestView", async () => {
+      const a = makeGlobalRun({
+        id: "ca",
+        contestId: "c1",
+        contestLabel: "A",
+        title: "Solve caching",
+        status: "succeeded",
+        commit: "aaa1111",
+        noPR: true,
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      const b = makeGlobalRun({
+        id: "cb",
+        contestId: "c1",
+        contestLabel: "B",
+        title: "Solve caching",
+        agent: "codex",
+        model: "o3",
+        status: "running",
+        noPR: true,
+      });
+      vi.spyOn(api, "getContest").mockResolvedValue({
+        contest: {
+          id: "c1",
+          title: "Solve caching",
+          global: true,
+          state: "running",
+          entryCount: 2,
+          createdBy: "u1",
+          createdAt: "2026-11-14T08:00:00Z",
+        },
+        runs: [a, b],
+        compare: {
+          entries: [
+            { label: "A", runId: "ca", agent: "claude", model: "opus", status: "succeeded", files: [], additions: 10, deletions: 2 },
+            { label: "B", runId: "cb", agent: "codex", model: "o3", status: "running", files: [], additions: 0, deletions: 0 },
+          ],
+          scores: null,
+        },
+      });
+      seed([a, b]);
+      show();
+
+      const contestRow = screen.getByTestId("global-contest-c1");
+      expect(contestRow).toHaveTextContent("Solve caching");
+      expect(contestRow).toHaveTextContent("2 agents on the same task");
+      expect(within(contestRow).getByLabelText(/Entry A/i)).toBeInTheDocument();
+      expect(within(contestRow).getByLabelText(/Entry B/i)).toBeInTheDocument();
+
+      fireEvent.click(within(contestRow).getByRole("button", { name: /Solve caching/i }));
+      await waitFor(() => expect(screen.getByTestId("contest-col-A")).toBeInTheDocument());
     });
   });
 });

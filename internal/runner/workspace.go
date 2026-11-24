@@ -55,6 +55,13 @@ func findRunWorktree(ctx context.Context, dataDir, repoPath, runID string) (runW
 	if !validRunID.MatchString(runID) {
 		return runWorktree{}, refuseRepo(runnerwire.RepoErrBadPath, "run id is not usable on this runner")
 	}
+	return findRunWorktreeDirect(ctx, dataDir, repoPath, resolveWorkRoot(dataDir, runID))
+}
+
+func findRunWorktreeDirect(ctx context.Context, dataDir, repoPath, runID string) (runWorktree, error) {
+	if !validRunID.MatchString(runID) {
+		return runWorktree{}, refuseRepo(runnerwire.RepoErrBadPath, "run id is not usable on this runner")
+	}
 	base, err := filepath.EvalSymlinks(dataDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return runWorktree{Path: filepath.Join(dataDir, "worktrees", runID)}, nil
@@ -168,7 +175,11 @@ func listWorktrees(ctx context.Context, repoPath string) ([]gitWorktree, error) 
 // a revise or review run checked out. A global agent's run has no node; its
 // branch is named by its slug (global.go).
 func ownBranch(job runnerwire.WorkspaceActionJob) bool {
-	return job.Branch != "" && job.Branch == BranchName(branchKey(job.NodeID, job.Slug), job.RunID) &&
+	root := job.RunID
+	if job.WorkRoot != "" {
+		root = job.WorkRoot
+	}
+	return job.Branch != "" && job.Branch == BranchName(branchKey(job.NodeID, job.Slug), root) &&
 		(job.Kind == runnerwire.JobImplement || job.Kind == runnerwire.JobTest)
 }
 
@@ -254,7 +265,7 @@ func (j *jobs) browseRun(ctx context.Context, ownerID string, req runnerwire.Rep
 		}
 		done.Status = &status
 	case runnerwire.RepoOpRunPreview:
-		preview, err := j.c.previewRun(ctx, dataDir, req.RepoID, wt, req.RunID)
+		preview, err := j.c.previewRun(ctx, dataDir, req.RepoID, wt, resolveWorkRoot(dataDir, req.RunID))
 		if err != nil {
 			return fail(err)
 		}
@@ -268,6 +279,7 @@ func (j *jobs) browseRun(ctx context.Context, ownerID string, req runnerwire.Rep
 // runInfo is run_info's answer: reads only. ok is false when the worktree
 // failed its checks; it is then reported as not there.
 func (j *jobs) runInfo(ctx context.Context, dataDir, repo string, req runnerwire.RepoRequest, wt runWorktree, ok bool) runnerwire.RunWorkspaceInfo {
+	rootID := resolveWorkRoot(dataDir, req.RunID)
 	info := runnerwire.RunWorkspaceInfo{BaseCheckout: runnerwire.BaseCheckoutMissing}
 	if ok && wt.Exists {
 		info.Exists, info.Path, info.Branch, info.Head = true, wt.Path, wt.Branch, wt.Head
@@ -288,20 +300,25 @@ func (j *jobs) runInfo(ctx context.Context, dataDir, repo string, req runnerwire
 	}
 	if branch != "" && checkBase(branch) == nil {
 		info.Branch = branch
-		info.OwnBranch = branch == BranchName(branchKey(req.NodeID, req.Slug), req.RunID)
+		info.OwnBranch = branch == BranchName(branchKey(req.NodeID, req.Slug), rootID) ||
+			branch == BranchName(branchKey(req.NodeID, req.Slug), req.RunID)
 		if head, err := revParse(ctx, repo, "refs/heads/"+branch); err == nil {
 			info.BranchExists, info.BranchHead = true, head
 		}
 	}
 	j.mu.Lock()
-	if r := j.runs[req.RunID]; r != nil && r.finish == nil {
+	if j.workRootActiveLocked(rootID, "") || j.workRootActiveLocked(req.RunID, "") {
 		info.Running = true
 	}
 	if w := j.watched[req.RunID]; w != nil && !w.closing {
 		info.WatchedPR = w.URL
+	} else if w := j.watched[rootID]; w != nil && !w.closing {
+		info.WatchedPR = w.URL
 	}
 	j.mu.Unlock()
-	info.Kept = keptListed(dataDir, filepath.Join(dataDir, "worktrees", req.RunID)) || (wt.Path != "" && keptListed(dataDir, wt.Path))
+	info.Kept = keptListed(dataDir, filepath.Join(dataDir, "worktrees", rootID)) ||
+		keptListed(dataDir, filepath.Join(dataDir, "worktrees", req.RunID)) ||
+		(wt.Path != "" && keptListed(dataDir, wt.Path))
 	if req.Base != "" && checkBase(req.Base) == nil && refExists(ctx, repo, "refs/heads/"+req.Base) {
 		where, _ := baseCheckout(ctx, repo, req.Base)
 		info.BaseCheckout = where

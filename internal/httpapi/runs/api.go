@@ -87,6 +87,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/asks", a.runAsks)
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/end", personOnly, a.endRun)
 	api.POST("/runs/:id/retry-now", a.retryNow)
 	// A single-user hub's built-in runner asks in the app (offer.go).
 	api.POST("/runs/:id/offer", a.offer)
@@ -101,6 +102,9 @@ func (a *API) Register(api *gin.RouterGroup) {
 	// A finished run's page, on the built-in runner's own listener.
 	api.POST("/runs/:id/workspace/preview", a.workspacePreview)
 	api.GET("/runs/:id/terminal", a.terminal)
+	api.GET("/runs/:id/overlaps", personOnly, a.runOverlaps)
+	api.GET("/runs/busy", personOnly, a.runsBusy)
+	api.POST("/runs/contests", personOnly, a.createContest)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
 	api.GET("/runs/roles", a.roleSettings)
@@ -111,10 +115,28 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/pipelines/:id", a.pipeline)
 	api.POST("/runs/pipelines/:id/review", a.review)
 	api.GET("/runs/:id/verdicts", a.verdicts)
+	// Contests (§C.4, §C.6): deliberate competition (比稿).
+	api.GET("/contests/:id", personOnly, a.getContest)
+	api.POST("/contests/:id/judge", personOnly, a.judgeContest)
+	api.POST("/contests/:id/pick", personOnly, a.pickContest)
+	api.POST("/contests/:id/cancel", personOnly, a.cancelContest)
 	// A review or QA run's structured verdict, through its runner's proxy.
 	api.POST("/verdicts", a.submitVerdict)
 	// Global agents (global.go): no project, a person's own.
 	a.registerGlobal(api)
+}
+
+// errNoRuns is what a run route says on a hub built without a dispatcher.
+var errNoRuns = locale.Errorf("this hub takes no runs", "這個 hub 不接受執行")
+
+// takesRuns reports whether the hub has a dispatcher. Without one, the route
+// answers 503 UNAVAILABLE, as other features a server is built without do.
+func (a *API) takesRuns(c *gin.Context) bool {
+	if a.d != nil {
+		return true
+	}
+	httpx.Coded(c, http.StatusServiceUnavailable, "UNAVAILABLE", errNoRuns, nil)
+	return false
 }
 
 // missing is what notFound says is not there, in both languages.
@@ -209,7 +231,7 @@ func (a *API) create(c *gin.Context) {
 		return
 	}
 	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
-		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
+		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name, IsAdmin: actor.IsAdmin(),
 		// A person's click, never an agent's (refused above).
 		SteppedUpAt: steppedUpAt, Origin: runnerwire.OriginPerson,
 		// The project's roles (tool allowlists, custom roles) and the
@@ -260,6 +282,35 @@ func startFailed(c *gin.Context, err error) {
 	case runs.StartNodeType:
 		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, refused,
 			map[string]any{"nodeType": refused.NodeType, "agentMode": refused.AgentMode})
+	case runs.StartForbidden:
+		code := "PERMISSION_DENIED"
+		if refused.Reason != "" {
+			code = refused.Reason
+		}
+		httpx.Coded(c, http.StatusForbidden, code, refused, nil)
+	case runs.StartBusy:
+		extras := map[string]any{}
+		if refused.Busy != nil {
+			if len(refused.Busy.Repos) > 0 {
+				extras["repos"] = refused.Busy.Repos
+			} else {
+				holders := refused.Busy.Holders
+				if holders == nil {
+					holders = []runnerwire.RunHolder{}
+				}
+				choices := refused.Busy.Choices
+				if choices == nil {
+					choices = []string{}
+				}
+				extras["holders"] = holders
+				extras["others"] = refused.Busy.Others
+				extras["choices"] = choices
+				if refused.Busy.Continue != nil {
+					extras["continue"] = refused.Busy.Continue
+				}
+			}
+		}
+		httpx.Coded(c, http.StatusConflict, "BUSY", refused, extras)
 	default:
 		var extras map[string]any
 		if refused.Field != "" {

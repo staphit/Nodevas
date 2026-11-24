@@ -2,10 +2,24 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
+
+// MsgTurnRunning is returned when a merge approval is asked for while a turn
+// of the work root is still unfinished (§6.3).
+const MsgTurnRunning = "a turn of this work is still running; merge after it ends"
+
+func init() {
+	preconditionChinese[MsgTurnRunning] = "這份工作還有一輪在執行，結束後再合併"
+}
+
+func turnRunningRefusal() error {
+	return stageRefusal(CodeTurnRunning, locale.Errorf(MsgTurnRunning, "這份工作還有一輪在執行，結束後再合併"))
+}
 
 // Approver is who approves a merge.
 type Approver struct{ ID, Name string }
@@ -18,10 +32,33 @@ func (d *Dispatcher) Merge(ctx context.Context, runID string, by Approver, headS
 	if err != nil {
 		return Record{}, err
 	}
+	// Block a remote merge while any turn of a global work is unfinished
+	// (§6.3). A node run has no follow-up turns (only global runs are
+	// continued), so it has no work root and nothing here to wait for.
+	workRoot := workRootOf(r)
+	if workRoot != "" {
+		active, err := d.store.ActiveInWork(ctx, workRoot, "")
+		if err != nil {
+			return r, err
+		}
+		if active {
+			return r, turnRunningRefusal()
+		}
+	}
+	// A merge approval through an older row that has been continued fails its
+	// head check (§6.3).
+	if r.ContinuedBy != "" {
+		return r, Precondition(MsgHeadMoved)
+	}
 	if err := CheckMergeable(r, headSHA); err != nil {
 		return r, err
 	}
-	m, err := d.store.CreateMerge(ctx, r.ID, r.PRHeadSHA, by.ID, by.Name)
+	// The check above reads without a lock, for the refusal order; the
+	// insert re-checks under the work's lock, which a follow-up also takes.
+	m, err := d.store.createMergeInWork(ctx, workRoot, r.ID, r.PRHeadSHA, by.ID, by.Name)
+	if errors.Is(err, errTurnRunning) {
+		return r, turnRunningRefusal()
+	}
 	if err != nil {
 		return r, err
 	}

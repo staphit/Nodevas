@@ -58,11 +58,16 @@ const claudeRelayMCPTimeoutMs = 11 * 60 * 1000
 
 func (Claude) Kind() string { return "claude" }
 
+func (Claude) SupportsResume(interactive bool) bool { return true }
+
 func (Claude) NewParser() Parser { return &claudeParser{} }
 
 func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("claude: binary, workdir and temp dir are required")
+	}
+	if err := validateSessionID("claude", "resume session id", env.Resume); err != nil {
+		return nil, err
 	}
 	// The MCP config goes in a file rather than inline JSON: on Windows the
 	// CLI is a .cmd shim, and cmd.exe's quoting rules mangle JSON arguments.
@@ -75,8 +80,11 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if mode == "" {
 		mode = DefaultClaudePermissionMode
 	}
-	args := []string{
-		"-p",
+	args := []string{"-p"}
+	if env.Resume != "" {
+		args = append(args, "--resume", env.Resume)
+	}
+	args = append(args,
 		"--output-format", "stream-json",
 		// stream-json with -p requires --verbose.
 		"--verbose",
@@ -85,7 +93,7 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		// Only the nodevas server: the owner's own MCP servers (with their own
 		// credentials) are not this run's business.
 		"--strict-mcp-config",
-	}
+	)
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "--model", job.Model)
 	}
@@ -116,7 +124,11 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	cmd.Dir = env.Workdir
 	// On stdin, not as an argument: no command-line length limit and no
 	// cmd.exe quoting for a prompt full of quotes and percent signs.
-	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
+	prompt := Prompt(job, env.Branch)
+	if env.Resume != "" {
+		prompt = ResumePrompt(job, env.Branch)
+	}
+	cmd.Stdin = strings.NewReader(prompt)
 	var extra []string
 	if relay && !claudeMCPTimeoutAtLeast(claudeRelayMCPTimeoutMs) {
 		extra = append(extra, ClaudeMCPTimeoutEnv+"="+strconv.Itoa(claudeRelayMCPTimeoutMs))
@@ -304,9 +316,13 @@ type claudeParser struct {
 	// model is the model the init line named, for the usage when the result
 	// does not name one.
 	model string
+	// session is the validated session_id from system/init.
+	session string
 }
 
 func (p *claudeParser) Outcome() Outcome { return p.outcome }
+
+func (p *claudeParser) Session() string { return p.session }
 
 type claudeLine struct {
 	Type    string `json:"type"`
@@ -392,6 +408,9 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 			return nil // hook chatter, retries: not progress
 		}
 		p.model = strings.TrimSpace(msg.Model)
+		if id := strings.TrimSpace(msg.SessionID); runnerwire.ValidSessionID(id) {
+			p.session = id
+		}
 		text := "claude session started"
 		if msg.SessionID != "" {
 			text += " " + msg.SessionID

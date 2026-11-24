@@ -352,8 +352,8 @@ func TestRunBudgets(t *testing.T) {
 	if code != http.StatusOK || st.Budget.DailyRuns != 2 || st.Budget.DailyCostUSD != 1.5 || st.Exceeded != "" {
 		t.Fatalf("PUT budget = %d %+v", code, st)
 	}
-	f.dispatch(t, f.bea, f.runBody(""))
-	f.dispatch(t, f.bea, f.runBody(""))
+	f.dispatch(t, f.bea, f.runBodyBoth(""))
+	f.dispatch(t, f.bea, f.runBodyBoth(""))
 	response = f.do(t, &f.bea, http.MethodPost, "/api/runs", f.runBody(""), nil)
 	var failure apiError
 	_ = json.Unmarshal(response.Body.Bytes(), &failure)
@@ -372,5 +372,5 @@ func TestRunBudgets(t *testing.T) {
 	if code, st := f.budget(t, &f.bea, http.MethodPut, `{"dailyRuns":0,"dailyCostUsd":0,"dailyTokens":0}`); code != http.StatusOK || st.Exceeded != "" {
 		t.Fatalf("lifted budget = %d %+v", code, st)
 	}
-	f.dispatch(t, f.bea, f.runBody(""))
+	f.dispatch(t, f.bea, f.runBodyBoth(""))
 }

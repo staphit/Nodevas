@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   AuthError,
+  BusyError,
   ConflictError,
   GlobalRunError,
   RequestError,
   type Actor,
+  type BusyResponse,
   type Run,
   type RunBudgetStatus,
   type Runner,
@@ -18,6 +20,7 @@ import { readPreferences } from "../preferences";
 import { EditionProvider } from "../runners/edition";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { useRuns } from "../runs/runStore";
 import { useStepUp } from "../stepup/stepUpStore";
 import { useApp } from "../store";
@@ -29,7 +32,7 @@ vi.mock("../components/SignIn", () => ({ useViewer: () => viewer.current }));
 
 const alice: Actor = { id: "u1", name: "alice", role: "admin" };
 
-const CAPS = ["headless", "interactive", "global-runs", "global-runs-on"];
+const CAPS = ["headless", "interactive", "global-runs", "global-runs-on", "coord"];
 
 const desktop: Runner = {
   id: "r1",
@@ -49,6 +52,7 @@ const desktop: Runner = {
       {
         kind: "claude",
         installed: true,
+        interactive: true,
         version: "2.1.0",
         models: [
           { id: "opus", label: "Opus" },
@@ -56,7 +60,7 @@ const desktop: Runner = {
         ],
       },
       { kind: "gemini", installed: false, models: [{ id: "flash" }] },
-      { kind: "codex", installed: true, models: [{ id: "gpt-5" }] },
+      { kind: "codex", installed: true, interactive: true, models: [{ id: "gpt-5" }] },
     ],
     repos: [
       { id: "repo1", name: "nodevas", path: "H:\\visual-editor" },
@@ -69,7 +73,11 @@ const studio: Runner = {
   ...desktop,
   id: "r6",
   name: "studio",
-  info: { ...desktop.info!, capabilities: ["headless", "global-runs", "global-runs-on"], repos: [{ id: "repo9", name: "docs" }] },
+  info: {
+    ...desktop.info!,
+    capabilities: ["headless", "global-runs", "global-runs-on"],
+    repos: [{ id: "repo9", name: "docs" }],
+  },
 };
 const laptop: Runner = { ...desktop, id: "r2", name: "laptop", online: false };
 const oldie: Runner = { ...desktop, id: "r3", name: "oldie", info: { ...desktop.info!, capabilities: ["headless"] } };
@@ -87,6 +95,26 @@ const withinBudget: RunBudgetStatus = {
   budget: { dailyRuns: 10, dailyCostUsd: 5, dailyTokens: 0 },
   used: { runs: 2, costUsd: 0.5, tokens: 1000 },
   exceeded: "",
+};
+
+const busyPayload: BusyResponse = {
+  holders: [
+    {
+      runId: "g-hold-1",
+      title: "Earlier job",
+      agent: "claude",
+      model: "sonnet",
+      mode: "interactive",
+      status: "running",
+      since: "2026-11-14T07:50:00Z",
+      by: "alice",
+      repoName: "nodevas",
+      mayStop: true,
+    },
+  ],
+  others: 0,
+  choices: ["queue", "takeOver", "both", "continue"],
+  continue: { runId: "g-hold-1", agent: "claude", model: "sonnet", openPR: false },
 };
 
 function started(overrides: Partial<Run> = {}): Run {
@@ -135,14 +163,33 @@ function seedRunners(runners: Runner[]) {
   useRunners.setState({ loaded: true, loading: false, runners, error: null, creating: false, revoking: {} });
 }
 
-function combo(name: string): HTMLSelectElement {
-  return screen.getByRole("combobox", { name }) as HTMLSelectElement;
+function radioGroup(name: string) {
+  return screen.getByRole("radiogroup", { name });
 }
 
-function optionTexts(select: HTMLSelectElement): string[] {
-  return within(select)
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+function cardText(el: HTMLElement): string {
+  return (el.querySelector(".picker-card-text")?.textContent ?? el.textContent ?? "").trim();
+}
+
+function radioTexts(groupName: string): string[] {
+  return within(radioGroup(groupName))
+    .getAllByRole("radio")
+    .map(cardText);
+}
+
+function checkedRadioText(groupName: string): string {
+  const checked = within(radioGroup(groupName))
+    .getAllByRole("radio")
+    .find((el) => el.getAttribute("aria-checked") === "true");
+  return checked ? cardText(checked) : "";
+}
+
+function pickCard(groupName: string, label: string | RegExp) {
+  fireEvent.click(within(radioGroup(groupName)).getByRole("radio", { name: label }));
+}
+
+function repoGroup() {
+  return screen.getByRole("group", { name: "Which folders" });
 }
 
 function taskBox(): HTMLTextAreaElement {
@@ -155,15 +202,17 @@ function startButton(): HTMLButtonElement {
 
 beforeEach(() => {
   viewer.current = alice;
-  useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  useApp.setState({ preferences: { ...readPreferences(), language: "en", runMode: "auto" } });
   seedRunners([desktop]);
   useGlobalAgents.getState().reset();
   useRuns.getState().reset();
   useRuns.setState({ globalById: {} });
   useBudget.getState().reset();
   useStepUp.getState().reset();
+  useCoordStore.getState().reset();
   vi.spyOn(api, "getRunBudget").mockResolvedValue(withinBudget);
   vi.spyOn(api, "getStepUp").mockResolvedValue({ required: false, active: false });
+  vi.spyOn(api, "getGlobalRunBusy").mockResolvedValue({ repos: [] });
 });
 
 afterEach(() => {
@@ -190,34 +239,32 @@ describe("GlobalAgentForm", () => {
   it("lists the viewer's runners, the unavailable ones disabled with why", () => {
     seedRunners([desktop, laptop, oldie, offbox, nohl, bobs]);
     render(<GlobalAgentForm />);
-    const runner = combo("Runner");
-    expect(optionTexts(runner)).toEqual([
+    const radios = within(radioGroup("Which computer")).getAllByRole("radio") as HTMLButtonElement[];
+    expect(radios.map((el) => el.textContent)).toEqual([
       "desktop",
-      "laptop (offline)",
-      "oldie (update nodevas on it)",
-      "offbox (global agents turned off there)",
-      "nohl (takes no runs)",
+      "laptoplaptop (offline)",
+      "oldieoldie (update nodevas on it)",
+      "offboxoffbox (global agents turned off there)",
+      "nohlnohl (takes no runs)",
     ]);
-    const disabled = within(runner)
-      .getAllByRole("option")
-      .map((option) => (option as HTMLOptionElement).disabled);
-    expect(disabled).toEqual([false, true, true, true, true]);
-    expect(runner.value).toBe("r1");
+    expect(radios.map((el) => el.disabled)).toEqual([false, true, true, true, true]);
+    expect(checkedRadioText("Which computer")).toBe("desktop");
   });
 
   it("follows the hub's word on a runner over its hello", () => {
     seedRunners([desktop, studio]);
     useGlobalAgents.setState({ runners: [load("r1", "off"), load("r6", "")] });
     render(<GlobalAgentForm />);
-    expect(optionTexts(combo("Runner"))).toEqual(["desktop (global agents turned off there)", "studio"]);
-    expect(combo("Runner").value).toBe("r6");
+    expect(radioTexts("Which computer")).toEqual(["desktopdesktop (global agents turned off there)", "studio"]);
+    expect(checkedRadioText("Which computer")).toBe("studio");
   });
 
   it("says when none of the viewer's runners can start one", () => {
     seedRunners([laptop, oldie]);
     render(<GlobalAgentForm />);
     expect(screen.getByText("None of your runners can start a global agent now.")).toBeInTheDocument();
-    expect(combo("Runner")).toBeDisabled();
+    const radios = within(radioGroup("Which computer")).getAllByRole("radio") as HTMLButtonElement[];
+    expect(radios.every((el) => el.disabled)).toBe(true);
     expect(screen.queryByRole("textbox", { name: "Task" })).not.toBeInTheDocument();
   });
 
@@ -236,16 +283,24 @@ describe("GlobalAgentForm", () => {
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 
-  it("offers the chosen runner's repositories and follows a runner change", () => {
+  it("offers the chosen runner's repositories as checkboxes and follows a runner change", () => {
     seedRunners([desktop, studio]);
     render(<GlobalAgentForm />);
-    expect(optionTexts(combo("Repository"))).toEqual(["nodevas — H:\\visual-editor", "site"]);
+    const repos = repoGroup();
+    const checkboxes = within(repos).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]).toBeChecked();
+    expect(checkboxes[1]).not.toBeChecked();
     expect(screen.getByText("Only repositories added on that runner can be used.")).toBeInTheDocument();
-    fireEvent.change(combo("Repository"), { target: { value: "repo2" } });
-    expect(combo("Repository").value).toBe("repo2");
-    fireEvent.change(combo("Runner"), { target: { value: "r6" } });
-    expect(optionTexts(combo("Repository"))).toEqual(["docs"]);
-    expect(combo("Repository").value).toBe("repo9");
+
+    fireEvent.click(checkboxes[1]);
+    expect(checkboxes[1]).toBeChecked();
+
+    pickCard("Which computer", "studio");
+    const studioBoxes = within(repoGroup()).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(studioBoxes).toHaveLength(1);
+    expect(studioBoxes[0]).toBeChecked();
+    expect(within(repoGroup()).getByText("docs")).toBeInTheDocument();
   });
 
   it("shows the command that adds a repository, and copies it", async () => {
@@ -263,23 +318,180 @@ describe("GlobalAgentForm", () => {
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
   });
 
-  it("offers the installed agents and their models, the default first chosen", () => {
+  it("offers the installed agents and their models as cards, the default first chosen, and notes signed-out agents", () => {
+    const withSignedOut: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        agents: [
+          ...desktop.info!.agents!.filter((a) => a.kind !== "gemini"),
+          { kind: "gemini", installed: false, signedOut: true, models: [] },
+        ],
+      },
+    };
+    seedRunners([withSignedOut]);
     render(<GlobalAgentForm />);
-    expect(optionTexts(combo("Agent"))).toEqual(["claude · 2.1.0", "codex"]);
-    expect(optionTexts(combo("Model"))).toEqual(["Opus", "Sonnet (default)"]);
-    expect(combo("Model").value).toBe("sonnet");
-    fireEvent.change(combo("Agent"), { target: { value: "codex" } });
-    expect(combo("Model").value).toBe("gpt-5");
+    expect(radioTexts("Who works")).toEqual(["Claude2.1.0", "Codex"]);
+    expect(
+      screen.getByText("Gemini is not signed in on that computer; sign in there to use it"),
+    ).toBeInTheDocument();
+    expect(radioTexts("Which model")).toEqual(["Sonnet", "Opus"]);
+    expect(checkedRadioText("Which model")).toBe("Sonnet");
+    pickCard("Who works", /Codex/);
+    expect(checkedRadioText("Which model")).toBe("gpt-5");
   });
 
-  it("offers interactive only on a runner that can do it", () => {
+  it("defaults to interactive when supported, disables it when unsupported, and remembers runMode", () => {
     seedRunners([studio]);
     const { unmount } = render(<GlobalAgentForm />);
-    expect(screen.getByRole("radio", { name: "Interactive" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
     unmount();
+
     seedRunners([desktop]);
+    const view = render(<GlobalAgentForm />);
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Background" }));
+    expect(useApp.getState().preferences.runMode).toBe("background");
+    view.unmount();
+
     render(<GlobalAgentForm />);
-    expect(screen.getByRole("radio", { name: "Interactive" })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("sends repoIds to createGlobalGroup and forces background when several folders are picked", async () => {
+    const groupRuns = [started({ id: "g1", repoId: "repo1", groupId: "grp1" }), started({ id: "g2", repoId: "repo2", groupId: "grp1" })];
+    const createGroup = vi.spyOn(api, "createGlobalGroup").mockResolvedValue({
+      group: {
+        id: "grp1",
+        runnerId: "r1",
+        createdBy: "u1",
+        title: "Bump deps",
+        agent: "claude",
+        model: "sonnet",
+        noPR: true,
+        repoCount: 2,
+        createdAt: "2026-11-14T08:00:00Z",
+      },
+      runs: groupRuns,
+    });
+    const onStarted = vi.fn();
+    render(<GlobalAgentForm onStarted={onStarted} />);
+
+    // Pick both folders -> becomes a group (background only).
+    fireEvent.click(within(repoGroup()).getByRole("checkbox", { name: /site/ }));
+    expect(screen.getByRole("radio", { name: "Talk with it" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Background" })).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByText("Several folders run in the background; talk to any one after it finishes"),
+    ).toBeInTheDocument();
+
+    fireEvent.change(taskBox(), { target: { value: "Bump deps" } });
+    fireEvent.click(startButton());
+
+    await waitFor(() => expect(createGroup).toHaveBeenCalledTimes(1));
+    const sent = createGroup.mock.calls[0][0];
+    expect(sent).toEqual({
+      runnerId: "r1",
+      repoIds: ["repo1", "repo2"],
+      agent: "claude",
+      model: "sonnet",
+      task: "Bump deps",
+      openPR: false,
+    });
+    expect(sent).not.toHaveProperty("mode");
+    expect(onStarted).toHaveBeenCalledWith(groupRuns[0]);
+  });
+
+  it("trims picked folders when a group start hits 429 with room", async () => {
+    vi.spyOn(api, "createGlobalGroup").mockRejectedValue(
+      new GlobalRunError(429, "BUDGET_EXCEEDED", "", "", 0, "only 1 fits", "runs", "", 1),
+    );
+    render(<GlobalAgentForm />);
+    fireEvent.click(within(repoGroup()).getByRole("checkbox", { name: /site/ }));
+    fireEvent.change(taskBox(), { target: { value: "Bump deps" } });
+    fireEvent.click(startButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Today's limit leaves room for 1 runs");
+    const boxes = within(repoGroup()).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes[0]).toBeChecked();
+    expect(boxes[1]).not.toBeChecked();
+  });
+
+  it("preflights global busy, opens BusyChoice on 409, and resends with holderIds", async () => {
+    const busySpy = vi.spyOn(api, "getGlobalRunBusy").mockResolvedValue({
+      repos: [{ repoId: "repo1", ...busyPayload }],
+    });
+    const run = started({ id: "g2", continueOf: "g-hold-1" });
+    const create = vi
+      .spyOn(api, "createGlobalRun")
+      .mockRejectedValueOnce(new BusyError("busy", busyPayload))
+      .mockResolvedValueOnce(run);
+    const onStarted = vi.fn();
+
+    render(<GlobalAgentForm onStarted={onStarted} />);
+    await waitFor(() => expect(busySpy).toHaveBeenCalledWith("r1", ["repo1"]));
+    expect(await screen.findByTestId("global-busy-preflight")).toHaveTextContent(
+      "Someone is already on this",
+    );
+
+    fireEvent.change(taskBox(), { target: { value: "Also fix footer" } });
+    fireEvent.click(startButton());
+
+    const busyRegion = await screen.findByRole("region", { name: "Someone is already on this" });
+    fireEvent.click(within(busyRegion).getByRole("radio", { name: /Add this to its work instead/ }));
+    fireEvent.click(within(busyRegion).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith(run));
+    expect(create).toHaveBeenNthCalledWith(2, {
+      runnerId: "r1",
+      repoId: "repo1",
+      agent: "claude",
+      model: "sonnet",
+      mode: "interactive",
+      task: "Also fix footer",
+      openPR: false,
+      onBusy: "continue",
+      holderIds: ["g-hold-1"],
+    });
+  });
+
+  it("renders ContestForm when Compare agents is toggled and calls createGlobalContest", async () => {
+    const contestRun = started({ id: "gc1", contestId: "c1", contestLabel: "A" });
+    const createContest = vi.spyOn(api, "createGlobalContest").mockResolvedValue({
+      contest: {
+        id: "c1",
+        title: "Refactor auth",
+        global: true,
+        state: "running",
+        entryCount: 2,
+        createdBy: "u1",
+        createdAt: "2026-11-14T08:00:00Z",
+      },
+      runs: [contestRun, started({ id: "gc2", contestId: "c1", contestLabel: "B" })],
+    });
+    const onStarted = vi.fn();
+
+    render(<GlobalAgentForm onStarted={onStarted} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents" }));
+    expect(screen.getByText("2 agents on the same task")).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
+
+    fireEvent.change(taskBox(), { target: { value: "Refactor auth" } });
+    fireEvent.click(startButton());
+
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith(contestRun));
+    expect(createContest).toHaveBeenCalledWith({
+      runnerId: "r1",
+      repoId: "repo1",
+      task: "Refactor auth",
+      entries: [
+        { agent: "claude", model: "sonnet" },
+        { agent: "codex", model: "gpt-5" },
+      ],
+    });
   });
 
   it("checks the base branch and the branch name while typing", () => {
@@ -345,8 +557,8 @@ describe("GlobalAgentForm", () => {
     expect(taskBox().rows).toBe(16);
   });
 
-  it("sends exactly what was chosen: no pull request, no slug unless written", async () => {
-    const run = started();
+  it("sends exactly what was chosen: interactive by default, no pull request, no slug unless written", async () => {
+    const run = started({ mode: "interactive" });
     const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(run);
     const onStarted = vi.fn();
     render(<GlobalAgentForm onStarted={onStarted} />);
@@ -363,23 +575,26 @@ describe("GlobalAgentForm", () => {
       repoId: "repo1",
       agent: "claude",
       model: "sonnet",
+      mode: "interactive",
       task: "Fix it\nproperly",
       openPR: false,
     });
     // Ready for the next one: the place stays, the task goes.
     expect(taskBox().value).toBe("");
-    expect(combo("Runner").value).toBe("r1");
-    expect(combo("Model").value).toBe("sonnet");
+    expect(checkedRadioText("Which computer")).toBe("desktop");
+    expect(checkedRadioText("Which model")).toBe("Sonnet");
     expect(useGlobalAgents.getState().focus).toBe("g1");
     expect(useRuns.getState().globalById.g1).toEqual(run);
   });
 
-  it("sends the mode, base, written slug and pull request when chosen", async () => {
+  it("sends background mode, base, written slug and pull request when chosen", async () => {
     const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(started());
     render(<GlobalAgentForm />);
-    fireEvent.change(combo("Agent"), { target: { value: "codex" } });
-    fireEvent.change(combo("Repository"), { target: { value: "repo2" } });
-    fireEvent.click(screen.getByRole("radio", { name: "Interactive" }));
+    pickCard("Who works", /Codex/);
+    // Uncheck repo1 and check repo2 so only repo2 is selected.
+    fireEvent.click(within(repoGroup()).getByRole("checkbox", { name: /nodevas/ }));
+    fireEvent.click(within(repoGroup()).getByRole("checkbox", { name: /site/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "Background" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Base branch" }), { target: { value: " develop " } });
     fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "login-fix" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Open a pull request when done" }));
@@ -391,7 +606,6 @@ describe("GlobalAgentForm", () => {
       repoId: "repo2",
       agent: "codex",
       model: "gpt-5",
-      mode: "interactive",
       base: "develop",
       task: "Fix the login",
       slug: "login-fix",
@@ -480,14 +694,14 @@ describe("GlobalAgentForm", () => {
 });
 
 // Simple mode (single-user edition): finished work stays on this computer,
-// so there is no pull request to ask for, and the hub adds its plain-words
-// instruction to the task.
+// so there is no pull request to ask for, no contest toggle, and the hub adds
+// its plain-words instruction to the task.
 describe("GlobalAgentForm in Simple mode", () => {
   const PR = "Open a pull request when done";
 
   function simpleForm(experience: "simple" | "full") {
     viewer.current = null;
-    useApp.setState((state) => ({ preferences: { ...state.preferences, experience } }));
+    useApp.setState((state) => ({ preferences: { ...state.preferences, experience, runMode: "auto" } }));
     seedRunners([localRunner()]);
     return render(
       <EditionProvider edition="single">
@@ -496,10 +710,11 @@ describe("GlobalAgentForm in Simple mode", () => {
     );
   }
 
-  it("sends simple and no pull request, with no pull request box", async () => {
+  it("sends simple and no pull request, with no pull request box and no contest toggle", async () => {
     const create = vi.spyOn(api, "createGlobalRun").mockResolvedValue(started({ runnerId: "local1" }));
     simpleForm("simple");
     expect(screen.queryByRole("checkbox", { name: PR })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Compare agents/ })).not.toBeInTheDocument();
     fireEvent.change(taskBox(), { target: { value: "Make a page for my bakery" } });
     fireEvent.click(startButton());
     await waitFor(() => expect(create).toHaveBeenCalled());

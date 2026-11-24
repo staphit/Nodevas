@@ -490,3 +490,43 @@ func TestAppendRevision(t *testing.T) {
 		t.Fatalf("empty = %q", empty)
 	}
 }
+
+func TestReviseGoalBusyIsAnAnswer(t *testing.T) {
+	fixRevisionClock(t)
+	api := revisingAPI()
+	api.busy = &runnerwire.BusyResponse{
+		Holders: []runnerwire.RunHolder{{
+			RunID: "run-9", Title: "Login page", Agent: "claude", Model: "opus",
+			Status: runnerwire.RunRunning, Since: "2026-11-18T03:12:00Z", By: "alice",
+			NodeID: "node-0042", RepoName: "app", MayStop: true, SameNode: true,
+		}},
+		Choices: []string{runnerwire.OnBusyQueue, runnerwire.OnBusyTakeOver, runnerwire.OnBusyBoth},
+	}
+	env := toolEnv(api)
+	env.followup = func(string, string, *Revision) error {
+		t.Error("follow-up should not be recorded when busy")
+		return nil
+	}
+	result := runReviseGoal(context.Background(), env,
+		json.RawMessage(`{"goalNodeId":"node-0042","change":"Add SSO login"}`))
+	if result.IsError {
+		t.Fatalf("busy revise_goal should return a plain answer, got error: %s", result.Output)
+	}
+	var out struct {
+		Busy    bool                   `json:"busy"`
+		Holders []runnerwire.RunHolder `json:"holders"`
+		Note    string                 `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, result.Output)
+	}
+	if !out.Busy || len(out.Holders) != 1 || out.Holders[0].RunID != "run-9" {
+		t.Fatalf("output = %+v", out)
+	}
+	// Must not pause autopilot, mutate goal node, or dispatch any run.
+	for _, r := range api.calls() {
+		if r.method != http.MethodGet {
+			t.Fatalf("busy revise_goal performed write: %s %s", r.method, r.path)
+		}
+	}
+}

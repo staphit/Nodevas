@@ -199,6 +199,8 @@ function browserLanguage(): "en" | "zh-TW" {
 export const COPILOT_START_MODES = ["plan", "default", "acceptEdits", "bypassPermissions"] as const;
 /** Copilot intents: "make" drafts nodes, "ask" is the chat. */
 export const COPILOT_INTENTS = ["make", "ask"] as const;
+/** Preferred dispatch/global run mode: "auto" follows the default interactive rule. */
+export const RUN_MODES = ["auto", "interactive", "background"] as const;
 
 export const PREFERENCE_SCHEMA = {
   // appearance
@@ -513,6 +515,8 @@ export const PREFERENCE_SCHEMA = {
   copilotIntent: account(enumPref("vised-copilot-intent", "agents", COPILOT_INTENTS, () => "make" as const)),
   /** Whether a spoken request is sent when the person stops talking, or left in the box to check. */
   copilotVoiceAutoSend: account(boolPref("vised-copilot-voice-send", "agents", false)),
+  /** Preferred mode for new runs; "auto" resolves by the default interactive rule. */
+  runMode: account(enumPref("vised-run-mode", "agents", RUN_MODES, () => "auto" as const)),
   /** How a run's changes are shown: side by side (where there is room) or one column. */
   diffLayout: account(
     enumPref("vised-diff-layout", "agents", ["split", "unified"] as const, () => "split" as const),

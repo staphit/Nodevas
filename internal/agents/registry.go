@@ -179,6 +179,10 @@ type Hub struct {
 	// beforeAskInsert, set by tests only, runs as CreateAndWait is about to
 	// store a pending ask.
 	beforeAskInsert func()
+
+	// claimStores resolves a project's board claim store for
+	// ReleaseRunClaim (SetClaimStore, runclaims.go); guarded by mu.
+	claimStores ClaimStoreFunc
 }
 
 // NewHub constructs an agent network hub backed by database (which may be nil

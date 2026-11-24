@@ -1,15 +1,19 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type ThemePack } from "../../api";
+import { api, type Run, type RunEvent, type ThemePack } from "../../api";
 import { readPreferences, writePreference } from "../../preferences";
+import { EditionProvider } from "../../runners/edition";
+import { useCoordStore } from "../../runs/coord/coordStore";
+import { useRuns } from "../../runs/runStore";
+import type { ControlRow } from "../../station/control";
 import { useApp } from "../../store";
 import { parseThemeManifest } from "../../theme-pack/themeManifest";
 import { useThemePacks } from "../../theme-pack/themePackStore";
 import { buildBuilding, type BuildingInputs } from "../building";
 import { GameActionsProvider } from "../GameActions";
-import { ago, makeRun, makeRunner, NOW } from "../testFixtures";
+import { ago, makeBudget, makeMessage, makePipeline, makeRun, makeRunner, makeSession, NOW } from "../testFixtures";
 import type { Building } from "../world";
 import { StoryChoices } from "./StoryTalk";
 import WarRoomStage from "./WarRoom";
@@ -81,10 +85,10 @@ function building(over: Partial<BuildingInputs> = {}): Building {
   });
 }
 
-function mount(world: Building) {
+function mount(world: Building, rowOf: (runId: string) => ControlRow | undefined = () => undefined) {
   return render(
     <GameActionsProvider>
-      <WarRoomStage building={world} titleOf={titleOf} rowOf={() => undefined} />
+      <WarRoomStage building={world} titleOf={titleOf} rowOf={rowOf} />
     </GameActionsProvider>,
   );
 }
@@ -805,5 +809,526 @@ describe("the story's choices", () => {
   it("are nothing when there is nothing to do", () => {
     const { container } = render(<StoryChoices items={[]} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("story room dialog, pictures, group view and coordination (W5)", () => {
+  function seedRuns(runs: Run[], events: Record<string, RunEvent[]> = {}) {
+    useRuns.getState().reset();
+    useRuns.setState({ globalById: {}, threadsByRoot: {}, watched: {}, eventsByRun: {} });
+    useCoordStore.getState().reset();
+    for (const run of runs) useRuns.getState().putRun(run);
+    for (const [id, list] of Object.entries(events)) {
+      useRuns.getState().appendEvents(id, list);
+    }
+    const byId = new Map(runs.map((run) => [run.id, { run } as ControlRow]));
+    return (runId: string) => byId.get(runId);
+  }
+
+  beforeEach(() => {
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    vi.spyOn(api, "getRunAsks").mockResolvedValue({ asks: [] });
+    vi.spyOn(api, "getGlobalRunThread").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "getRunOverlaps").mockResolvedValue({ overlaps: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    useRuns.getState().reset();
+    useRuns.setState({ globalById: {}, threadsByRoot: {}, watched: {}, eventsByRun: {} });
+    useCoordStore.getState().reset();
+  });
+
+  it("renders RunDialog variant='story' for a run actor with canned line in header and real output in body", () => {
+    withPack();
+    const run = makeRun({ id: "r-out", nodeId: "login", status: "running" });
+    const rowOf = seedRuns([run], {
+      "r-out": [
+        { seq: 1, type: "text", at: ago(1_000), text: "Updating the login handler now." },
+        {
+          seq: 2,
+          type: "tool_call",
+          at: ago(500),
+          tool: "edit",
+          toolId: "t1",
+          input: JSON.stringify({ file_path: "src/login.ts" }),
+        },
+        { seq: 3, type: "tool_result", at: ago(200), toolId: "t1", text: "ok" },
+      ],
+    });
+    const session = makeSession({ id: "s-out", runId: "r-out", nodeId: "login", state: "busy" });
+    const msg = makeMessage({ id: "m-out", senderSession: session.name, body: "Agent mail bubble text" });
+
+    const { container } = mount(building({ runs: [run], sessions: [session], messages: [msg] }), rowOf);
+
+    const talk = container.querySelector(".px-story-talk")!;
+    expect(talk).toHaveClass("has-run");
+    const dlg = talk.querySelector(".run-dialog.run-dialog-story")!;
+    expect(dlg).not.toBeNull();
+    // Canned flavour line stays in header (and agent mail bubble does not override it for a run actor).
+    const headerLine = dlg.querySelector(".run-dlg-head .px-story-line .visually-hidden");
+    expect(headerLine).toHaveTextContent("I'm working on “Login form”.");
+    expect(headerLine).not.toHaveTextContent("Agent mail bubble text");
+    // Body shows real transcript output, not the canned line, and no typewriter span.
+    const body = dlg.querySelector(".run-dlg-body")!;
+    expect(body).toHaveTextContent("Updating the login handler now.");
+    expect(body).toHaveTextContent("Edit src/login.ts");
+    expect(body.querySelector(".px-story-untyped")).toBeNull();
+  });
+
+  it("shows the canned line in the body empty state when a run has no events yet", () => {
+    withPack();
+    const run = makeRun({ id: "r-empty", nodeId: "login", status: "queued" });
+    const rowOf = seedRuns([run]);
+
+    const { container } = mount(building({ runs: [run] }), rowOf);
+    const dlg = container.querySelector(".run-dialog.run-dialog-story")!;
+    expect(dlg.querySelector(".run-dlg-head .px-story-line .visually-hidden")).toHaveTextContent(
+      "I'm waiting to be let in for “Login form”.",
+    );
+    const empty = dlg.querySelector(".run-dlg-empty")!;
+    expect(empty).toHaveTextContent("I'm waiting to be let in for “Login form”.");
+    expect(empty).toHaveTextContent("Nothing said yet");
+  });
+
+  it("keeps the flavour line in header and puts a failed run error in the body as alert", () => {
+    withPack();
+    const run = makeRun({
+      id: "r-fail",
+      nodeId: "docs",
+      status: "failed",
+      error: "Build failed with exit code 2",
+      finishedAt: ago(1_000),
+    });
+    const rowOf = seedRuns([run]);
+
+    const { container } = mount(building({ runs: [run] }), rowOf);
+    const dlg = container.querySelector(".run-dialog.run-dialog-story")!;
+    expect(dlg.querySelector(".run-dlg-head .px-story-line .visually-hidden")?.textContent).toBe(
+      "I could not finish “API docs”.",
+    );
+    expect(within(dlg as HTMLElement).getByRole("alert")).toHaveTextContent("Build failed with exit code 2");
+  });
+
+  it("honours cast.still on the header flavour line and never typewrites transcript lines", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce"),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    withPack();
+    const run = makeRun({ id: "r-still", nodeId: "login", status: "running" });
+    const rowOf = seedRuns([run], {
+      "r-still": [{ seq: 1, type: "text", at: ago(500), text: "Immediate output" }],
+    });
+
+    const { container } = mount(building({ runs: [run] }), rowOf);
+    // Under reduced motion (cast.still === true), the untyped span is empty immediately.
+    const untyped = container.querySelector(".run-dlg-head .px-story-line .px-story-untyped");
+    expect(untyped?.textContent).toBe("");
+    // Transcript never has typewriter spans.
+    expect(container.querySelector(".run-dlg-log-list .px-story-untyped")).toBeNull();
+  });
+
+  it("does not hijack arrow or digit keys while typing in the dialog textarea", async () => {
+    withPack();
+    const g1 = makeRun({
+      id: "g-type-1",
+      project: "",
+      nodeId: "",
+      global: true,
+      title: "Upgrade deps",
+      status: "running",
+    });
+    const g2 = makeRun({
+      id: "g-type-2",
+      project: "",
+      nodeId: "",
+      global: true,
+      agent: "codex",
+      model: "gpt-5",
+      title: "Fix CI",
+      status: "running",
+    });
+    const rowOf = seedRuns([g1, g2]);
+
+    const { container } = render(
+      <EditionProvider edition="single">
+        <GameActionsProvider>
+          <WarRoomStage building={building({ activeProject: "", globalRuns: [g1, g2] })} titleOf={titleOf} rowOf={rowOf} />
+        </GameActionsProvider>
+      </EditionProvider>,
+    );
+    const textarea = container.querySelector<HTMLTextAreaElement>(".run-dlg-textarea")!;
+    expect(textarea).not.toBeNull();
+    expect(textarea).toBeEnabled();
+
+    textarea.focus();
+    await userEvent.keyboard("123{ArrowRight}{ArrowLeft}6");
+    // Place must still be Work area (digit 6 did not jump to Server room).
+    expect(within(places()).getByRole("button", { name: /^Work area/ })).toHaveAttribute("aria-pressed", "true");
+    // Focused figure must still be the first group (ArrowRight did not turn the stage).
+    expect(within(roster()).getByRole("button", { name: /Claude opus/ })).toHaveAttribute("aria-pressed", "true");
+    // ArrowLeft moved the caret left one character inside the textarea before "6" was typed.
+    expect(textarea.value).toBe("1263");
+  });
+
+  it("uses compact sizing inside the stage and opens full size via Open large", async () => {
+    withPack();
+    const run = makeRun({ id: "r-expand", nodeId: "login", status: "running" });
+    const rowOf = seedRuns([run], {
+      "r-expand": [{ seq: 1, type: "text", at: ago(500), text: "Compact output" }],
+    });
+
+    const { container } = mount(building({ runs: [run] }), rowOf);
+    const inlineDialog = container.querySelector(".px-story-talk.has-run .run-dialog")!;
+    expect(inlineDialog).not.toBeNull();
+    expect(inlineDialog).not.toHaveClass("is-expanded");
+
+    await userEvent.click(within(inlineDialog as HTMLElement).getByRole("button", { name: "Open large" }));
+    const expandedModal = document.body.querySelector(".run-dialog-portal-theme .run-dialog.is-expanded");
+    expect(expandedModal).not.toBeNull();
+    expect(expandedModal).toHaveTextContent("Compact output");
+  });
+
+  it("subscribes at most 6 in-view boxes in list layout and shows static last text for the rest", () => {
+    const watched: { target: Element; report: (inSight: boolean) => void }[] = [];
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly callback: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          watched.push({
+            target,
+            report: (inSight) =>
+              this.callback(
+                [{ target, isIntersecting: inSight } as IntersectionObserverEntry],
+                this as unknown as IntersectionObserver,
+              ),
+          });
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+
+    // 8 distinct agents so list layout has 8 rows (each its own group).
+    withPack();
+    const runs = Array.from({ length: 8 }, (_, i) =>
+      makeRun({
+        id: `list-run-${i + 1}`,
+        project: "",
+        nodeId: "",
+        global: true,
+        agent: `agent${i + 1}`,
+        model: `m${i + 1}`,
+        title: `Task ${i + 1}`,
+        status: "running",
+      }),
+    );
+    const events: Record<string, RunEvent[]> = {};
+    for (const run of runs) {
+      events[run.id] = [{ seq: 1, type: "text", at: ago(500), text: `Output of ${run.title}` }];
+    }
+    const rowOf = seedRuns(runs, events);
+    const watchSpy = vi.spyOn(useRuns.getState(), "watchRun");
+
+    useApp.getState().updateUIPreference("storyLayout", "list");
+    const { container } = mount(building({ activeProject: "", globalRuns: runs }), rowOf);
+
+    const listRows = [...container.querySelectorAll(".px-story-row")];
+    expect(listRows).toHaveLength(8);
+    // Before anything intersects, nothing is subscribed.
+    expect(watchSpy).not.toHaveBeenCalled();
+
+    // Report all 8 rows intersecting at once: at most 6 should subscribe.
+    act(() => {
+      for (const entry of watched) {
+        if (entry.target.classList.contains("px-story-row")) entry.report(true);
+      }
+    });
+
+    const subscribedCount = Object.keys(useRuns.getState().watched).length;
+    expect(subscribedCount).toBeLessThanOrEqual(6);
+    expect(subscribedCount).toBe(6);
+
+    // Unsubscribed rows (the remaining 2) still display the flavour line + last loaded text event.
+    const previews = container.querySelectorAll(".px-story-preview");
+    expect(previews).toHaveLength(2);
+    expect(previews[0].textContent).toContain("Output of Task");
+  });
+
+  it("turns pack facts into pictures while keeping visually-hidden text and using the fixed runner icon", () => {
+    withPack();
+    const verifyRun = makeRun({
+      id: "r-facts-verify",
+      nodeId: "login",
+      kind: "verify",
+      pipelineId: "p1",
+      status: "succeeded",
+      finishedAt: ago(60 * 60 * 1000),
+      verify: { phase: "green", passed: true, exitCode: 0, durationMs: 1200, noCommand: false },
+    });
+    const run = makeRun({
+      id: "r-facts",
+      nodeId: "login",
+      role: "tester",
+      pipelineId: "p1",
+      status: "running",
+      usage: { inputTokens: 3000, outputTokens: 2000 },
+      overlapCount: 2,
+    });
+    const session = makeSession({ id: "s-facts", runId: "r-facts", nodeId: "login", state: "busy" });
+    const held = [makeMessage({ id: "h1", to: session.name, status: "held" })];
+    const rowOf = seedRuns([run]);
+
+    const { container } = mount(
+      building({
+        runs: [verifyRun, run],
+        sessions: [session],
+        held,
+        pipelines: { p1: makePipeline({ id: "p1", nodeId: "login" }) },
+        budget: makeBudget(5000, 10000),
+      }),
+      rowOf,
+    );
+
+    const meta = container.querySelector(".px-story-meta")!;
+    // Status is visually hidden (text still accessible).
+    const statusLi = meta.querySelector("li.is-status")!;
+    expect(statusLi).toHaveClass("visually-hidden");
+    expect(statusLi).toHaveTextContent("Status working");
+
+    // Role and node stay visible text.
+    const roleLi = meta.querySelector("li.is-role")!;
+    expect(roleLi).not.toHaveClass("visually-hidden");
+    expect(roleLi).toHaveTextContent("Tester");
+    const nodeLi = meta.querySelector("li.is-node")!;
+    expect(nodeLi).not.toHaveClass("visually-hidden");
+    expect(nodeLi).toHaveTextContent("Login form");
+
+    // Runner uses the fixed runner icon with tooltip, no pack image, visually-hidden text kept.
+    const runnerLi = meta.querySelector("li.is-runner")!;
+    expect(runnerLi.querySelector(".picker-runner-badge")).toHaveAttribute("title", "mac-mini");
+    expect(runnerLi.querySelector("svg")).not.toBeNull();
+    expect(runnerLi.querySelector("img")).toBeNull();
+    expect(runnerLi.querySelector(".visually-hidden")).toHaveTextContent("Runner mac-mini");
+
+    // Tokens uses EnergyHud-style meter + visually-hidden text.
+    const tokensLi = meta.querySelector("li.is-tokens")!;
+    expect(within(tokensLi as HTMLElement).getByRole("meter")).toBeInTheDocument();
+    expect(tokensLi.querySelector(".visually-hidden")).toHaveTextContent(/Tokens/);
+
+    // Held mail shows mail icon + count + visually-hidden text.
+    const heldLi = meta.querySelector("li.is-held")!;
+    expect(heldLi.querySelector("svg")).not.toBeNull();
+    expect(heldLi).toHaveTextContent("1");
+    expect(heldLi.querySelector(".visually-hidden")).toHaveTextContent("Held messages 1");
+
+    // Tests shows a test lamp + visually-hidden text.
+    const testsLi = meta.querySelector("li.is-tests")!;
+    expect(testsLi.querySelector(".px-story-test-lamp.is-green")).not.toBeNull();
+    expect(testsLi.querySelector(".visually-hidden")).toHaveTextContent(/Tests/);
+
+    // Overlap shows a small same-files mark with tooltip + visually-hidden text.
+    const overlapLi = meta.querySelector("li.is-overlap")!;
+    expect(overlapLi.querySelector(".px-story-fact-overlap")).toHaveAttribute("title", "2 overlap");
+    expect(overlapLi.querySelector(".visually-hidden")).toHaveTextContent("2 overlap");
+  });
+
+  it("stands group members as one figure (group:<id>) with repo tabs, pose faces, and status pips without merging unrelated runs", async () => {
+    withPack();
+    const gWorking = makeRun({
+      id: "grp-a",
+      project: "",
+      nodeId: "",
+      global: true,
+      groupId: "grp1",
+      repoId: "repo-b",
+      repoName: "billing-svc",
+      title: "Upgrade Go",
+      status: "running",
+    });
+    const gFailed = makeRun({
+      id: "grp-b",
+      project: "",
+      nodeId: "",
+      global: true,
+      groupId: "grp1",
+      repoId: "repo-a",
+      repoName: "auth-svc",
+      title: "Upgrade Go",
+      status: "failed",
+      error: "test failed",
+      finishedAt: ago(1_000),
+    });
+    const gQueued = makeRun({
+      id: "grp-c",
+      project: "",
+      nodeId: "",
+      global: true,
+      groupId: "grp1",
+      repoId: "repo-c",
+      repoName: "web-app",
+      title: "Upgrade Go",
+      status: "queued",
+    });
+    // Unrelated global run in the same scene (Claude opus working).
+    const unrelated = makeRun({
+      id: "other-1",
+      project: "",
+      nodeId: "",
+      global: true,
+      repoId: "repo-x",
+      repoName: "solo-repo",
+      title: "Unrelated fix",
+      status: "running",
+    });
+    const rowOf = seedRuns([gWorking, gFailed, gQueued, unrelated], {
+      "grp-a": [{ seq: 1, type: "text", at: ago(500), text: "Working on billing-svc" }],
+      "grp-b": [{ seq: 1, type: "text", at: ago(500), text: "Failed on auth-svc" }],
+    });
+
+    const { container } = mount(
+      building({ activeProject: "", globalRuns: [gWorking, gFailed, gQueued, unrelated] }),
+      rowOf,
+    );
+
+    // Two figures in Work area: one for group:grp1 (3 members across running/failed/queued), one for unrelated.
+    expect(container.querySelectorAll(".px-story-figure")).toHaveLength(2);
+    // Nothing split off into Entrance!
+    expect(within(places()).getByRole("button", { name: /^Entrance/ })).toHaveTextContent("Nobody");
+
+    // Group is focused first (because auth-svc failed) and shows ×3.
+    expect(container.querySelector(".px-story-figure:not(.is-side) .px-story-count")).toHaveTextContent("×3");
+
+    // Pip strip shows 3 status pips in repo-name order: auth-svc (failed), billing-svc (working), web-app (awaiting-accept).
+    const pips = [...container.querySelectorAll(".px-story-pips .px-story-pip")];
+    expect(pips).toHaveLength(3);
+    expect(pips[0]).toHaveClass("is-failed");
+    expect(pips[1]).toHaveClass("is-working");
+    expect(pips[2]).toHaveClass("is-awaiting-accept");
+
+    // Member tabs ordered by repo name, each showing repo name + pose face.
+    const tabs = [...container.querySelectorAll(".px-story-members .px-story-member")];
+    expect(tabs).toHaveLength(3);
+    expect(tabs[0]).toHaveTextContent("auth-svc");
+    expect(tabs[0].querySelector(".px-story-face")).not.toBeNull();
+    expect(tabs[1]).toHaveTextContent("billing-svc");
+    expect(tabs[1].querySelector(".px-story-face")).not.toBeNull();
+    expect(tabs[2]).toHaveTextContent("web-app");
+    expect(tabs[2].querySelector(".px-story-face")).not.toBeNull();
+
+    // Initially focused member is auth-svc (failed); clicking billing-svc switches RunDialog.
+    expect(container.querySelector(".run-dlg-body")).toHaveTextContent("Failed on auth-svc");
+    await userEvent.click(tabs[1]);
+    expect(tabs[1]).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector(".run-dlg-body")).toHaveTextContent("Working on billing-svc");
+  });
+
+  it("renders OverlapNotice in the RunDialog header and pre-fills the composer on Tell it", async () => {
+    withPack();
+    const run = makeRun({
+      id: "r-ov",
+      project: "",
+      nodeId: "",
+      global: true,
+      title: "Refactor auth",
+      status: "running",
+      overlapCount: 1,
+    });
+    const rowOf = seedRuns([run]);
+    useCoordStore.setState({
+      overlapsByRun: {
+        "r-ov": [
+          {
+            runId: "r-other",
+            title: "Login tweak",
+            mine: true,
+            hidden: false,
+            paths: ["src/auth.ts"],
+            pathCount: 1,
+            strongCount: 1,
+            since: ago(1_000),
+          },
+        ],
+      },
+    });
+
+    const { container } = mount(building({ activeProject: "", globalRuns: [run] }), rowOf);
+    const head = container.querySelector(".run-dlg-head")!;
+    expect(head.querySelector(".coord-overlap")).not.toBeNull();
+    expect(head).toHaveTextContent("Also being changed by another run");
+
+    await userEvent.click(within(head as HTMLElement).getByRole("button", { name: "Tell it" }));
+    const textarea = container.querySelector<HTMLTextAreaElement>(".run-dlg-textarea")!;
+    expect(textarea.value).toContain("src/auth.ts");
+  });
+
+  it("stands contest entries together as a pair with per-entry figures and tabs", async () => {
+    withPack();
+    const entryA = makeRun({
+      id: "ct-a",
+      nodeId: "login",
+      contestId: "contest-1",
+      contestLabel: "A",
+      agent: "claude",
+      model: "opus",
+      status: "running",
+    });
+    const entryB = makeRun({
+      id: "ct-b",
+      nodeId: "login",
+      contestId: "contest-1",
+      contestLabel: "B",
+      agent: "codex",
+      model: "gpt-5",
+      status: "queued",
+    });
+    const rowOf = seedRuns([entryA, entryB], {
+      "ct-a": [{ seq: 1, type: "text", at: ago(500), text: "Entry A approach" }],
+      "ct-b": [{ seq: 1, type: "text", at: ago(500), text: "Entry B approach" }],
+    });
+
+    const { container } = mount(building({ runs: [entryA, entryB] }), rowOf);
+    // Both entries stand together as ONE contest figure pair in Work area.
+    expect(container.querySelectorAll(".px-story-figure")).toHaveLength(1);
+    const pair = container.querySelector(".px-story-pair")!;
+    expect(pair).not.toBeNull();
+    expect(pair.querySelectorAll(".px-story-pair-entry")).toHaveLength(2);
+    expect(pair).toHaveTextContent("A");
+    expect(pair).toHaveTextContent("B");
+
+    // Member tabs switch between Entry A and Entry B.
+    const tabs = [...container.querySelectorAll(".px-story-members .px-story-member")];
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]).toHaveTextContent("Entry A");
+    expect(tabs[1]).toHaveTextContent("Entry B");
+    expect(container.querySelector(".run-dlg-body")).toHaveTextContent("Entry A approach");
+
+    await userEvent.click(tabs[1]);
+    expect(container.querySelector(".run-dlg-body")).toHaveTextContent("Entry B approach");
+
+    // The pair is where a node contest is decided: Compare and pick opens it.
+    const getContest = vi.spyOn(api, "getContest").mockResolvedValue({
+      contest: {
+        id: "contest-1",
+        title: "Login",
+        global: false,
+        state: "running",
+        entryCount: 2,
+        createdBy: "u1",
+        createdAt: "2026-11-20T08:00:00Z",
+      },
+      runs: [entryA, entryB],
+      compare: { entries: [], scores: null },
+    });
+    await userEvent.click(within(container.querySelector(".px-story-contest") as HTMLElement).getByRole("button", { name: "Compare and pick" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => expect(getContest).toHaveBeenCalledWith("contest-1"));
   });
 });

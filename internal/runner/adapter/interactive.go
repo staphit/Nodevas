@@ -49,11 +49,20 @@ func InteractivePrompt(job runnerwire.Job, branch string) string {
 	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. The person who dispatched this run "+
 		"may be watching this terminal and may type to you.\n\n", branch)
 	b.WriteString("Rules for this run:\n")
-	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node.\n", job.NodeID)
+	if job.Coordinated {
+		b.WriteString(coordinatedReadRule(job.NodeID, false))
+	} else {
+		fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node.\n", job.NodeID)
+	}
 	b.WriteString("2. Work only inside this worktree (the current directory). Do not touch other checkouts.\n")
 	b.WriteString("3. Do not push, and do not open pull requests: the runner handles that after the session ends.\n")
-	b.WriteString("4. When you are done, report the outcome with set_node_status and say so; " +
-		"the session ends when the person quits it.\n\n")
+	if job.Coordinated {
+		b.WriteString("4. When you are done, finish with a short summary and say so; " +
+			"the person updates the board, and the session ends when the person quits it.\n\n")
+	} else {
+		b.WriteString("4. When you are done, report the outcome with set_node_status and say so; " +
+			"the session ends when the person quits it.\n\n")
+	}
 	b.WriteString("The task:\n\n")
 	b.WriteString(job.Prompt)
 	b.WriteString("\n")
@@ -81,21 +90,32 @@ func initialPrompt(binary, prompt, tempDir string) (arg string, inFile bool, err
 
 // InteractiveCommand starts Claude Code's TUI:
 //
-//	claude <prompt> --permission-mode <mode> --mcp-config <file> --strict-mcp-config
-//	       [--model <id>] [--add-dir <temp dir>] --allowedTools <tool>...
+//	claude [--resume <id> | --session-id <uuid>] <prompt> --permission-mode <mode>
+//	       --mcp-config <file> --strict-mcp-config [--model <id>]
+//	       [--add-dir <temp dir>] --allowedTools <tool>...
 //
 // `claude [prompt]` starts an interactive session with an initial prompt
 // (Claude Code 2.1.299's --help: "starts an interactive session by default").
-// The prompt goes first because --allowedTools is variadic.
+// The prompt goes before --allowedTools because --allowedTools is variadic.
 func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("claude: binary, workdir and temp dir are required")
+	}
+	if err := validateSessionID("claude", "resume session id", env.Resume); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID("claude", "session id", env.SessionID); err != nil {
+		return nil, err
 	}
 	mcpPath, err := writeMCPConfig(env)
 	if err != nil {
 		return nil, err
 	}
-	prompt, inFile, err := initialPrompt(env.Binary, InteractivePrompt(job, env.Branch), env.TempDir)
+	rawPrompt := InteractivePrompt(job, env.Branch)
+	if env.Resume != "" {
+		rawPrompt = ResumePrompt(job, env.Branch)
+	}
+	prompt, inFile, err := initialPrompt(env.Binary, rawPrompt, env.TempDir)
 	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}
@@ -103,12 +123,19 @@ func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	if mode == "" {
 		mode = DefaultClaudePermissionMode
 	}
-	args := []string{
+	var args []string
+	switch {
+	case env.Resume != "":
+		args = append(args, "--resume", env.Resume)
+	case env.SessionID != "":
+		args = append(args, "--session-id", env.SessionID)
+	}
+	args = append(args,
 		prompt,
 		"--permission-mode", mode,
 		"--mcp-config", mcpPath,
 		"--strict-mcp-config",
-	}
+	)
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "--model", job.Model)
 	}
@@ -262,11 +289,18 @@ func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, e
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
 	}
+	if err := validateSessionID("opencode", "resume session id", env.Resume); err != nil {
+		return nil, err
+	}
 	config, err := openCodeConfig(env, true, ReadOnly(job))
 	if err != nil {
 		return nil, err
 	}
-	prompt, _, err := initialPrompt(env.Binary, InteractivePrompt(job, env.Branch), env.TempDir)
+	rawPrompt := InteractivePrompt(job, env.Branch)
+	if env.Resume != "" {
+		rawPrompt = ResumePrompt(job, env.Branch)
+	}
+	prompt, _, err := initialPrompt(env.Binary, rawPrompt, env.TempDir)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: %w", err)
 	}
@@ -282,6 +316,9 @@ func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, e
 		}
 	case model:
 		args = append(args, "-m", job.Model)
+	}
+	if env.Resume != "" {
+		args = append(args, "--session", env.Resume)
 	}
 	args = append(args, "--prompt", prompt)
 	cmd := exec.Command(env.Binary, args...)
@@ -306,6 +343,9 @@ func (Antigravity) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
 	}
+	if err := validateSessionID("antigravity", "resume session id", env.Resume); err != nil {
+		return nil, err
+	}
 	// Someone is at the terminal to answer agy's prompts: no gate.
 	root, _, err := writeAntigravityRoot(env, false, false, false)
 	if err != nil {
@@ -315,13 +355,20 @@ func (Antigravity) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd
 	if err != nil {
 		return nil, err
 	}
-	prompt, inFile, err := initialPrompt(env.Binary, InteractivePrompt(job, env.Branch), env.TempDir)
+	rawPrompt := InteractivePrompt(job, env.Branch)
+	if env.Resume != "" {
+		rawPrompt = ResumePrompt(job, env.Branch)
+	}
+	prompt, inFile, err := initialPrompt(env.Binary, rawPrompt, env.TempDir)
 	if err != nil {
 		return nil, fmt.Errorf("antigravity: %w", err)
 	}
 	args := append([]string{"-i=" + prompt}, modeArgs...)
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "--model="+job.Model)
+	}
+	if env.Resume != "" {
+		args = append(args, "--conversation="+env.Resume)
 	}
 	args = append(args, "--add-dir="+root)
 	if inFile {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Run, type RunChanges, type RunEvent } from "../api";
-import { foldLatest, mergeEvents, selectRunById, useRuns } from "./runStore";
+import { foldLatest, mergeEvents, selectRunById, selectRunChain, useRuns } from "./runStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -333,5 +333,33 @@ describe("global runs", () => {
     useRuns.getState().reset();
     expect(useRuns.getState().globalById.g1).toBeTruthy();
     expect(useRuns.getState().runsByNode).toEqual({});
+  });
+
+  it("evicts eventsByRun on the last unwatch, while keeping them while another watcher remains", async () => {
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [ev(1), ev(2)], more: false });
+    vi.spyOn(api, "getRunAsks").mockResolvedValue({ asks: [] });
+
+    const unwatch1 = useRuns.getState().watchRun("run-evict");
+    const unwatch2 = useRuns.getState().watchRun("run-evict");
+    await vi.waitFor(() => expect(useRuns.getState().eventsByRun["run-evict"]).toHaveLength(2));
+
+    unwatch1();
+    expect(useRuns.getState().watched["run-evict"]).toBe(1);
+    expect(useRuns.getState().eventsByRun["run-evict"]).toHaveLength(2);
+
+    unwatch2();
+    expect(useRuns.getState().watched["run-evict"]).toBeUndefined();
+    expect(useRuns.getState().eventsByRun["run-evict"]).toBeUndefined();
+  });
+
+  it("loads and selects a global run turn chain oldest-first", async () => {
+    const t1 = globalRun({ id: "g1", createdAt: "2026-11-20T08:00:00Z", continuedBy: "g2" });
+    const t2 = globalRun({ id: "g2", continueOf: "g1", workRoot: "g1", createdAt: "2026-11-20T08:05:00Z" });
+    vi.spyOn(api, "getGlobalRunThread").mockResolvedValue({ runs: [t1, t2] });
+
+    const chain = await useRuns.getState().loadThread("g2");
+    expect(chain.map((r) => r.id)).toEqual(["g1", "g2"]);
+    expect(selectRunChain(useRuns.getState(), "g2").map((r) => r.id)).toEqual(["g1", "g2"]);
+    expect(selectRunChain(useRuns.getState(), "g1").map((r) => r.id)).toEqual(["g1", "g2"]);
   });
 });

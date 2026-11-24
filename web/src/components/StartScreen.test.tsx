@@ -17,7 +17,13 @@ const box = vi.hoisted(() => ({ onStarted: undefined as ((run: Run) => void) | u
 vi.mock("../station/SimpleAgentBox", () => ({
   SimpleAgentBox: ({ onStarted }: { onStarted?: (run: Run) => void }) => {
     box.onStarted = onStarted;
-    return <div data-testid="describe-box" />;
+    return (
+      <div data-testid="describe-box">
+        <section className="run-dialog">
+          <textarea aria-label="composer" />
+        </section>
+      </div>
+    );
   },
 }));
 
@@ -165,6 +171,23 @@ describe("StartScreen", () => {
     expect(useApp.getState().preferences.startScreenDismissed).toBe(true);
     expect(useApp.getState().preferences.projectMode).toBe("station");
     expect(useStation.getState().tab).toBe("global");
+  });
+
+  // Escape in the describe box's run dialog (its composer or an agent's
+  // screen) is that dialog's; outside it, Escape still closes this screen.
+  it("leaves Escape inside the describe box's run dialog to that dialog", async () => {
+    seedFreshWorkspace();
+    useApp.getState().updateUIPreference("agentWorkstation", true);
+    const user = userEvent.setup();
+    render(single(<StartScreen />));
+
+    await user.click(screen.getByLabelText("composer"));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Welcome to Nodevas" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("heading", { name: "Or tell an agent what you want" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("has no describe box for a plan-only board", () => {

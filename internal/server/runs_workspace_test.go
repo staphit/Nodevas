@@ -263,6 +263,8 @@ func TestRunWorkspaceRefusals(t *testing.T) {
 		failure.Code != "FAILED_PRECONDITION" || failure.Blocked != runnerwire.WorkspaceGateRunning {
 		t.Fatalf("running = %d %+v", code, failure)
 	}
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: running.ID, Result: &runnerwire.RunResult{Status: runnerwire.RunCancelled}})
+	f.waitStatus(t, running.ID, runnerwire.RunCancelled)
 	// An open PR merges there.
 	green := f.finishedGreenRun(t, conn)
 	if code, _, failure := f.workspacePost(t, &f.bea, green.ID, "merge", mergeBody(testHeadSHA)); code != http.StatusConflict ||
@@ -701,6 +703,8 @@ func TestWorkspacePreviewRoute(t *testing.T) {
 		answer.Blocked != runnerwire.WorkspaceGateRunning {
 		t.Fatalf("running = %d %s", response.Code, response.Body)
 	}
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: running.ID, Result: &runnerwire.RunResult{Status: runnerwire.RunCancelled}})
+	f.waitStatus(t, running.ID, runnerwire.RunCancelled)
 
 	// A team runner (not this hub's built-in one), even claiming the
 	// capability: off, and nothing sent.

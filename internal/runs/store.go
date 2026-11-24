@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -85,19 +86,22 @@ type Record struct {
 	SteppedUpAt string
 	// Handoff (handoff.go): the handoff branch and note this run is offered
 	// to continue from (the API shows the branch as Run.ContinuesFrom), and
-	// how many usage-limit waits its lineage has had. ResetAt is what the
-	// runner's finish said about the limit's reset; it is not stored.
+	// how many usage-limit waits its lineage has had. ResetAt is persisted on
+	// runnerwire.Run.ResetAt.
 	JobHandoffBranch string
 	JobHandoffNote   string
 	LimitWaits       int
-	ResetAt          string
 	// GuardAck is what a review's finish said about the Tester's files
-	// ("TESTS: approve-changes"); like ResetAt it is not stored: the staged
-	// pipeline records it on its guard at once.
+	// ("TESTS: approve-changes"); it is not stored: the staged pipeline
+	// records it on its guard at once.
 	GuardAck bool
 	// BranchSlug names a global run's branch (agent/<slug>-<run8>; see
 	// global.go); "" for a node's run. Global and NoPR are on the API's Run.
 	BranchSlug string
+	// RepoKey is the normalised repository hash (runnerwire.RepoKey), hub-only.
+	RepoKey string
+	// ContestOf is the contest's entry_count when ContestID is set.
+	ContestOf int
 	// Agent roles: what the run's job is offered besides its prompt (the
 	// role's tools, the Tester's files an Executor must not change, the
 	// acceptance items and, for a verify or goal judge, what to verify).
@@ -138,7 +142,7 @@ func decodeJobRoles(raw string) JobRoles {
 
 // Job is the offer for this run.
 func (r Record) Job() runnerwire.Job {
-	return runnerwire.Job{
+	job := runnerwire.Job{
 		RunID: r.ID, Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
 		Prompt: r.JobPrompt, Agent: r.Agent, Model: r.Model, RepoID: r.RepoID,
 		Base: r.Base, RequestedBy: r.CreatedByName,
@@ -148,7 +152,12 @@ func (r Record) Job() runnerwire.Job {
 		Role: r.Role, Tools: r.Tools, TestFiles: r.TestFiles, Acceptance: r.Acceptance, Verify: r.VerifySpec,
 		Global: r.Global, Slug: r.BranchSlug, NoPR: r.NoPR,
 		Origin: r.Origin, Draft: r.Draft,
+		ContinueOf: r.ContinueOf, WorkRoot: r.WorkRoot,
 	}
+	if r.ContestID != "" {
+		job.Contest = &runnerwire.JobContest{ID: r.ContestID, Label: r.ContestLabel, Of: r.ContestOf}
+	}
+	return job
 }
 
 // Store keeps runs and their events in the workspace database.
@@ -269,6 +278,75 @@ type New struct {
 	// Draft (P6): a plain plan run whose create_subgraph is held as a draft
 	// for the person (run_plan_drafts) instead of written.
 	Draft bool
+	// Continue and multi-repo groups (§6.3, §10.2): global-only.
+	ContinueOf string
+	WorkRoot   string
+	GroupID    string
+	// Coordination (§C.5): queue link, busy choice, repository key, contest identity.
+	AfterRun     string
+	BusyChoice   string
+	RepoKey      string
+	ContestID    string
+	ContestLabel string
+}
+
+// querier is satisfied by *db.DB, *sql.DB and *sql.Tx so transactional callers
+// (busy, groups, contests) can insert and read back on the single writer.
+type querier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// notWithdrawnSQL matches continuations that hold the one-follow-up-per-run
+// slot: anything except a run cancelled or declined before it ever started.
+const notWithdrawnSQL = "NOT (status IN ('cancelled', 'declined') AND started_at = '')"
+
+// IsWithdrawn reports whether r is a follow-up that never started (taken back
+// or declined by the runner) and therefore does not hold the continuation slot.
+func IsWithdrawn(r Record) bool {
+	return (r.Status == runnerwire.RunCancelled || r.Status == runnerwire.RunDeclined) && r.StartedAt == ""
+}
+
+// CleanEndReason keeps a known interactive end reason and drops anything else.
+func CleanEndReason(reason string) string {
+	switch reason {
+	case "", runnerwire.EndReasonEnded, runnerwire.EndReasonQuiet, runnerwire.EndReasonQuietWaiting:
+		return reason
+	}
+	return ""
+}
+
+func isLowerHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// lockBusy acquires PostgreSQL transaction-scoped advisory locks for keys in
+// sorted, deduplicated order (§C.2.3). Empty keys are ignored.
+func lockBusy(ctx context.Context, tx *sql.Tx, keys ...string) error {
+	filtered := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != "" {
+			filtered = append(filtered, k)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	slices.Sort(filtered)
+	filtered = slices.Compact(filtered)
+	for _, k := range filtered {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, "busy:"+k); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validOrigins are the origins a run may be recorded with.
@@ -279,19 +357,33 @@ var validOrigins = map[string]bool{
 
 // Create records a queued run.
 func (s *Store) Create(ctx context.Context, in New) (Record, error) {
+	return s.createWith(ctx, s.db, in)
+}
+
+// createWith records a queued run through q (*db.DB or *sql.Tx) and reads the
+// inserted row back through q without touching the reader pool.
+func (s *Store) createWith(ctx context.Context, q querier, in New) (Record, error) {
 	required := []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
 	if in.Global {
-		// No project, node, pipeline, fallback lineage, kind or role: a
-		// global run is an implement run of its own (the database holds it
-		// to that too, runs_global_shape).
-		if in.Project != "" || in.NodeID != "" || in.PipelineID != "" || in.RetryOf != "" || in.Kind != "" ||
+		// No project, node, pipeline, fallback lineage or role; kind must be
+		// implement ("") or a contest compare reviewer (runs_global_shape).
+		kindOK := in.Kind == "" || (in.Kind == runnerwire.JobCompare && in.ContestID != "")
+		if in.Project != "" || in.NodeID != "" || in.PipelineID != "" || in.RetryOf != "" || !kindOK ||
 			in.Role != "" || in.JobHandoffBranch != "" || len(in.Fallbacks) > 0 || !in.JobRoles.empty() ||
 			!runnerwire.ValidSlug(in.BranchSlug) {
 			return Record{}, locale.Errorf("%w: not a global run's shape", "%w：不符合全域執行的格式", ErrInvalid)
 		}
 		required = []string{in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
-	} else if in.BranchSlug != "" || in.NoPR {
-		return Record{}, locale.Errorf("%w: branch slug on a node's run", "%w：節點的執行不能指定分支代稱", ErrInvalid)
+	} else {
+		if in.BranchSlug != "" {
+			return Record{}, locale.Errorf("%w: branch slug on a node's run", "%w：節點的執行不能指定分支代稱", ErrInvalid)
+		}
+		if in.NoPR && in.ContestID == "" {
+			return Record{}, locale.Errorf("%w: noPR is only allowed on global or contest runs", "%w：只有全域或比稿執行可以關閉 PR", ErrInvalid)
+		}
+		if in.ContinueOf != "" || in.WorkRoot != "" || in.GroupID != "" {
+			return Record{}, locale.Errorf("%w: continue and group fields are global-only", "%w：接續與群組欄位僅供全域執行使用", ErrInvalid)
+		}
 	}
 	// A verify run is the runner's test command: no agent runs it.
 	if in.Kind != runnerwire.JobVerify {
@@ -327,6 +419,39 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if in.Draft && (in.Kind != runnerwire.JobPlan || in.Review != "" || in.Global) {
 		return Record{}, locale.Errorf("%w: only a plain plan run may be a draft", "%w：只有一般計畫執行可以是草稿", ErrInvalid)
 	}
+	if in.Kind == runnerwire.JobCompare && (in.ContestID == "" || in.ContestLabel != "J") {
+		return Record{}, locale.Errorf("%w: compare job requires contest reviewer label J", "%w：比較工作必須是比稿的審查者", ErrInvalid)
+	}
+	if in.ContestID != "" {
+		if len(in.Fallbacks) > 0 {
+			return Record{}, locale.Errorf("%w: contest runs cannot have fallbacks", "%w：比稿執行不能設定備援", ErrInvalid)
+		}
+		if in.Mode != runnerwire.ModeHeadless || in.PipelineID != "" || in.RetryOf != "" {
+			return Record{}, locale.Errorf("%w: invalid contest run shape", "%w：比稿執行格式無效", ErrInvalid)
+		}
+		switch in.ContestLabel {
+		case "A", "B", "C":
+			if in.Kind != runnerwire.JobImplement {
+				return Record{}, locale.Errorf("%w: contest entry must be an implement run", "%w：比稿參賽者必須是實作執行", ErrInvalid)
+			}
+		case "J":
+			if in.Kind != runnerwire.JobCompare {
+				return Record{}, locale.Errorf("%w: contest label J must be a compare run", "%w：比稿標籤 J 必須是比較執行", ErrInvalid)
+			}
+		default:
+			return Record{}, locale.Errorf("%w: contest label %q", "%w：比稿標籤「%s」", ErrInvalid, in.ContestLabel)
+		}
+	} else if in.ContestLabel != "" {
+		return Record{}, locale.Errorf("%w: contest label without contest id", "%w：未指定比稿卻有比稿標籤", ErrInvalid)
+	}
+	switch in.BusyChoice {
+	case "", runnerwire.OnBusyQueue, runnerwire.OnBusyTakeOver, runnerwire.OnBusyBoth:
+	default:
+		return Record{}, locale.Errorf("%w: busy choice %q", "%w：忙碌選擇「%s」", ErrInvalid, in.BusyChoice)
+	}
+	if in.RepoKey != "" && (len(in.RepoKey) != 32 || !isLowerHex(in.RepoKey)) {
+		return Record{}, locale.Errorf("%w: invalid repo key", "%w：無效的儲存庫鍵值", ErrInvalid)
+	}
 	fallbacks, err := encodeChain(in.Fallbacks)
 	if err != nil {
 		return Record{}, err
@@ -355,22 +480,23 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if nodeType == "" && acceptanceCount == 0 && !in.Global {
 		// Follow-up runs (fallbacks, pipeline steps, handoffs) carry the
 		// node's shape from the run before them.
-		err := s.db.QueryRowContext(ctx, `
+		err := q.QueryRowContext(ctx, `
 SELECT node_type, acceptance_count FROM runs WHERE project = ? AND node_id = ?
  ORDER BY created_at DESC LIMIT 1`, in.Project, in.NodeID).Scan(&nodeType, &acceptanceCount)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return Record{}, err
 		}
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = q.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
                   stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
                   role, override, job_roles, node_type, acceptance_count,
-                  is_global, branch_slug, no_pr, origin, draft)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  is_global, branch_slug, no_pr, origin, draft,
+                  continue_of, work_root, group_id, after_run, busy_choice, repo_key, contest_id, contest_label)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
@@ -379,13 +505,23 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
 		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
 		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)),
-		in.Global, in.BranchSlug, in.NoPR, in.Origin, in.Draft)
+		in.Global, in.BranchSlug, in.NoPR, in.Origin, in.Draft,
+		in.ContinueOf, in.WorkRoot, in.GroupID, in.AfterRun, in.BusyChoice, in.RepoKey, in.ContestID, in.ContestLabel)
 	if err != nil {
 		return Record{}, err
 	}
-	return s.Get(ctx, id)
+	return scanRun(q.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 }
 
+// runColumns is every column scanRun reads, plus three derived ones. The
+// first, continuedBy, looks up a row's non-withdrawn follow-up for every run
+// read. Its WHERE repeats the partial unique index runs_one_continuation's
+// predicate word for word (continue_of is not empty, and the not-withdrawn
+// test):
+// "c.continue_of = runs.id" alone compares with the outer row, which the
+// planner cannot prove non-empty, so it could not use the index and scanned
+// runs once per row listed. TestContinuedBySubqueryUsesPartialIndex holds the
+// plan to the index.
 const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agent, model,
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
@@ -395,12 +531,17 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
        retry_at, limit_waits, role, verify, checks, override, job_roles,
        cost_usd, cost_estimated, node_type, acceptance_count, workspace, workspace_commit,
-       is_global, branch_slug, no_pr, origin, decline_code, draft, failure_code`
+       is_global, branch_slug, no_pr, origin, decline_code, draft, failure_code,
+       continue_of, work_root, view_only, reset_at, end_reason, push_refused, group_id,
+       after_run, busy_choice, repo_key, contest_id, contest_label,
+       COALESCE((SELECT c.id FROM runs c WHERE c.continue_of = runs.id AND c.continue_of <> '' AND NOT (c.status IN ('cancelled', 'declined') AND c.started_at = '') LIMIT 1), ''),
+       (SELECT COUNT(*) FROM run_overlaps o WHERE (o.run_a = runs.id OR o.run_b = runs.id) AND o.strong_count > 0),
+       CASE WHEN contest_id = '' THEN 0 ELSE COALESCE((SELECT rc.entry_count FROM run_contests rc WHERE rc.id = runs.contest_id), 0) END`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var usage, fallbacks, verify, checks, jobRoles string
-	var exit, files, additions, deletions, prNumber, limitWaits, acceptanceCount int64
+	var exit, files, additions, deletions, prNumber, limitWaits, acceptanceCount, overlapCount, contestOf int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
@@ -411,9 +552,14 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
 		&r.Role, &verify, &checks, &r.Override, &jobRoles,
 		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount, &r.Workspace, &r.WorkspaceCommit,
-		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode, &r.Draft, &r.FailureCode); err != nil {
+		&r.Global, &r.BranchSlug, &r.NoPR, &r.Origin, &r.DeclineCode, &r.Draft, &r.FailureCode,
+		&r.ContinueOf, &r.WorkRoot, &r.ViewOnly, &r.ResetAt, &r.EndReason, &r.PushRefused, &r.GroupID,
+		&r.AfterRun, &r.BusyChoice, &r.RepoKey, &r.ContestID, &r.ContestLabel,
+		&r.ContinuedBy, &overlapCount, &contestOf); err != nil {
 		return Record{}, err
 	}
+	r.OverlapCount = int(overlapCount)
+	r.ContestOf = int(contestOf)
 	r.AcceptanceCount = int(acceptanceCount)
 	r.ExitCode = int(exit)
 	r.LimitWaits = int(limitWaits)
@@ -686,6 +832,10 @@ type Change struct {
 	Checks []runnerwire.CheckResult
 	// DeclineCode is a decline's code (runnerwire.Decline*).
 	DeclineCode string
+	// Continue / interactive end fields (§6.2, §6.7, §7).
+	ResetAt     string
+	EndReason   string
+	PushRefused bool
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -733,6 +883,17 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.DeclineCode != "" {
 		set("decline_code", Truncate(change.DeclineCode, maxShortField))
+	}
+	if change.ResetAt != "" {
+		set("reset_at", Truncate(change.ResetAt, 64))
+	}
+	if change.EndReason != "" {
+		if clean := CleanEndReason(change.EndReason); clean != "" {
+			set("end_reason", clean)
+		}
+	}
+	if change.PushRefused {
+		set("push_refused", true)
 	}
 	if change.HandoffBranch != "" {
 		set("handoff_branch", change.HandoffBranch)
@@ -824,21 +985,161 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 			handoffBranch, handoffNote = "", ""
 		}
 	}
+	resetAt := ""
+	if result.Status == runnerwire.RunFailed {
+		resetAt = Truncate(result.ResetAt, 64)
+	}
+	endReason := CleanEndReason(result.EndReason)
+	pushRefused := result.Status == runnerwire.RunSucceeded && result.PushRefused
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
 		FailureKind: failureKind, FailureCode: failureCode, Verdict: verdict,
 		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
 		Verify: result.Verify, Checks: result.Checks,
+		ResetAt: resetAt, EndReason: endReason, PushRefused: pushRefused,
 	})
-	if err == nil && result.Status == runnerwire.RunFailed {
-		r.ResetAt = Truncate(result.ResetAt, 64)
-	}
 	if err == nil {
 		r.GuardAck = result.GuardAck
 		s.synthesizeVerdict(ctx, r)
 	}
 	return r, err
+}
+
+// Successor returns the non-withdrawn follow-up run that continues runID, if
+// one exists. Withdrawn follow-ups (cancelled or declined before starting) are
+// ignored, matching the runs_one_continuation unique index.
+func (s *Store) Successor(ctx context.Context, runID string) (Record, bool, error) {
+	return s.successorWith(ctx, s.db, runID)
+}
+
+func (s *Store) successorWith(ctx context.Context, q querier, runID string) (Record, bool, error) {
+	if runID == "" {
+		return Record{}, false, nil
+	}
+	// "continue_of <> ''" restates the index predicate so the planner can use
+	// runs_one_continuation even for a generic plan (see runColumns).
+	r, err := scanRun(q.QueryRowContext(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE continue_of = ? AND continue_of <> '' AND `+notWithdrawnSQL+` LIMIT 1`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Record{}, false, nil
+	}
+	if err != nil {
+		return Record{}, false, err
+	}
+	return r, true, nil
+}
+
+// ActiveInWork reports whether any unfinished run (queued, offered, running)
+// belongs to workRoot (either as the root itself or with work_root = workRoot),
+// optionally excluding excludeRunID.
+func (s *Store) ActiveInWork(ctx context.Context, workRoot, excludeRunID string) (bool, error) {
+	return s.activeInWorkWith(ctx, s.db, workRoot, excludeRunID)
+}
+
+func (s *Store) activeInWorkWith(ctx context.Context, q querier, workRoot, excludeRunID string) (bool, error) {
+	if workRoot == "" {
+		return false, nil
+	}
+	var n int
+	err := q.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM runs
+WHERE (id = ? OR work_root = ?) AND status IN (?, ?, ?) AND (? = '' OR id <> ?)`,
+		workRoot, workRoot, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning,
+		excludeRunID, excludeRunID).Scan(&n)
+	return n > 0, err
+}
+
+// mergePendingInWork reports, through q, whether a merge approval is waiting
+// on any turn of workRoot.
+func (s *Store) mergePendingInWork(ctx context.Context, q querier, workRoot string) (bool, error) {
+	if workRoot == "" {
+		return false, nil
+	}
+	var n int
+	err := q.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM run_merges m JOIN runs r ON r.id = m.run_id
+WHERE (r.id = ? OR r.work_root = ?) AND m.status = ?`,
+		workRoot, workRoot, runnerwire.MergePending).Scan(&n)
+	return n > 0, err
+}
+
+// lockWork takes the transaction-scoped advisory lock "work:<root>" that a
+// follow-up and a merge approval on one global work both take (§6.3), so
+// each sees the other's row before it decides.
+func lockWork(ctx context.Context, tx *sql.Tx, workRoot string) error {
+	return lockBusy(ctx, tx, "work:"+workRoot)
+}
+
+// PriorFinal reports whether continueOf has reached a final status. An empty
+// continueOf or a missing prior row counts as final so Pump never stalls.
+func (s *Store) PriorFinal(ctx context.Context, continueOf string) (bool, error) {
+	if continueOf == "" {
+		return true, nil
+	}
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE id = ?`, continueOf).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return runnerwire.RunFinal(status), nil
+}
+
+// GroupHeld reports whether groupID currently has a usage-limit hold in the
+// future relative to now.
+func (s *Store) GroupHeld(ctx context.Context, groupID string, now time.Time) (bool, error) {
+	if groupID == "" {
+		return false, nil
+	}
+	var heldUntil string
+	err := s.db.QueryRowContext(ctx, `SELECT held_until FROM run_groups WHERE id = ?`, groupID).Scan(&heldUntil)
+	if errors.Is(err, sql.ErrNoRows) || heldUntil == "" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if at, err := time.Parse(time.RFC3339Nano, heldUntil); err == nil {
+		return at.After(now), nil
+	}
+	return heldUntil > formatStamp(now), nil
+}
+
+// UserFirst records the person's message as event seq 0 (type EventUser) on a
+// global run, before the runner sends seq 1+. Refused on non-global runs so it
+// can never collide with a stage-override NoteFirst at seq 0 (§6.3).
+func (s *Store) UserFirst(ctx context.Context, runID, text string) error {
+	r, err := s.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !r.Global {
+		return locale.Errorf("%w: user seq-0 event is for global runs only", "%w：使用者事件僅供全域執行使用", ErrInvalid)
+	}
+	event := cleanEvent(runnerwire.RunEvent{Seq: 0, Type: runnerwire.EventUser, At: s.stamp(), Text: text})
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO run_events (run_id, seq, type, at, payload) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		runID, event.Seq, event.Type, event.At, string(payload))
+	return err
+}
+
+// SetViewOnly records whether an interactive run is view-only on its runner.
+func (s *Store) SetViewOnly(ctx context.Context, runID string, viewOnly bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE runs SET view_only = ? WHERE id = ?`, viewOnly, runID)
+	return err
+}
+
+// SetGroupHold sets or clears a multi-repo group's usage-limit hold timestamp.
+func (s *Store) SetGroupHold(ctx context.Context, groupID, heldUntil string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE run_groups SET held_until = ? WHERE id = ?`, Truncate(heldUntil, 64), groupID)
+	return err
 }
 
 // cleanEvent clamps an event to the limits before it is stored.

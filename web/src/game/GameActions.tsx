@@ -325,19 +325,31 @@ export function GameDialog({
   const { t } = useI18n();
   const panel = useRef<HTMLDivElement | null>(null);
   const titleId = useRef(`game-dialog-${Math.random().toString(36).slice(2)}`).current;
+  // The latest onClose, read when Escape is pressed: a caller that passes a
+  // new arrow on every render must not re-run the effects below, or the
+  // initial focus would be taken back from whatever the person is typing in.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const initialFocusRef = useRef(initialFocus);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Let Escape reach an embedded xterm TUI (e.g. "Open large" RunDialog)
+      // instead of closing the modal underneath it.
+      if (event.target instanceof Element && event.target.closest(".xterm")) return;
       event.stopPropagation();
-      onClose();
+      onCloseRef.current();
     };
     window.addEventListener("keydown", onKey, true);
-    const first = [...(initialFocus ?? []), "button:not(:disabled), textarea, input, [href]"]
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+  // Initial focus: once, when the dialog opens.
+  useEffect(() => {
+    const first = [...(initialFocusRef.current ?? []), "button:not(:disabled), textarea, input, [href]"]
       .map((selector) => panel.current?.querySelector<HTMLElement>(selector))
       .find(Boolean);
     first?.focus();
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, []);
   return createPortal(
     <div className="confirm-backdrop game-dialog-backdrop" onClick={onClose}>
       <div

@@ -34,12 +34,18 @@ var OpenCodeProtocols = []string{"run", "acp"}
 
 func (OpenCodeACP) Kind() string { return "opencode" }
 
+func (OpenCodeACP) SupportsResume(interactive bool) bool { return true }
+
 // NewParser is for a stream read without talking back, which an ACP agent
 // never gives; the runner uses NewConversation.
 func (OpenCodeACP) NewParser() Parser { return newACPSession("opencode", "", "", nil) }
 
 func (OpenCodeACP) NewConversation(job runnerwire.Job, env RunEnv) Conversation {
 	s := newACPSession("opencode", env.Workdir, Prompt(job, env.Branch), nil)
+	if env.Resume != "" && runnerwire.ValidSessionID(env.Resume) {
+		s.resume = env.Resume
+		s.resumePrompt = ResumePrompt(job, env.Branch)
+	}
 	if openCodeACPRelay(job, env) {
 		s.asker = env.Permissions
 		if s.asker == nil {
@@ -70,6 +76,9 @@ func (OpenCodeACP) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd
 func (OpenCodeACP) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
+	}
+	if err := validateSessionID("opencode", "resume session id", env.Resume); err != nil {
+		return nil, err
 	}
 	config, err := openCodeConfig(env, false, ReadOnly(job))
 	if err != nil {

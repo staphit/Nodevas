@@ -264,6 +264,19 @@ export function loungeVisitors(remote: BuildingResponse | null, activeProject: s
   return spots;
 }
 
+/** Extra run metadata carried onto an actor for the story room's group view,
+ * contest pairs and overlap badge. */
+function runActorExtras(run: Run | undefined): Partial<Actor> {
+  if (!run) return {};
+  const extras: Partial<Actor> = {};
+  if (run.repoName) extras.repoName = run.repoName;
+  if (run.groupId) extras.groupId = run.groupId;
+  if (run.contestId) extras.contestId = run.contestId;
+  if (run.contestLabel) extras.contestLabel = run.contestLabel;
+  if (run.overlapCount) extras.overlapCount = run.overlapCount;
+  return extras;
+}
+
 /** A global agent's character: a click opens its workspace; its menu adds
  * Station's Global agents tab, its diff and its PR. Never a node, the run
  * view in a node's drawer or another project: it has none of them. */
@@ -276,6 +289,7 @@ export function globalActor(actor: Actor, run: Run | undefined): Actor {
   }
   return {
     ...actor,
+    ...runActorExtras(run),
     global: true,
     // Headless and still going: no board, so nobody it could ask.
     cannotAsk: Boolean(run && !runInteractive(run) && !runFinal(run.status)),
@@ -372,6 +386,13 @@ export function buildBuilding(inputs: BuildingInputs): Building {
     ...loungeVisitors(remote, activeProject, now),
   ];
 
+  const currentRunsById = new Map(dedupeRuns(inputs.runs).map((run) => [run.id, run]));
+  const currentActors = (current?.actors ?? []).map((actor) => {
+    if (actor.kind !== "run" || !actor.runId) return actor;
+    const extras = runActorExtras(currentRunsById.get(actor.runId));
+    return Object.keys(extras).length > 0 ? { ...actor, ...extras } : actor;
+  });
+
   return {
     current: current?.office ?? null,
     global: global?.office ?? null,
@@ -380,7 +401,7 @@ export function buildBuilding(inputs: BuildingInputs): Building {
     lounge: lounge.slice(0, MAX_LOUNGE),
     loungeMore: Math.max(0, lounge.length - MAX_LOUNGE),
     racks,
-    actors: [...(current?.actors ?? []), ...(global?.actors ?? [])],
+    actors: [...currentActors, ...(global?.actors ?? [])],
     energy,
     truncated: Boolean(remote?.truncated),
     total: Math.max(remote?.total ?? 0, compact.length + (activeProject ? 1 : 0)),

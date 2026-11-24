@@ -127,6 +127,7 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 		"0033_permission_prompt_action_details", "0034_agent_message_hub_notice", "0035_run_changes_patch_pruned",
 		"0036_run_workspace", "0036_theme_packs", "0037_global_runs", "0038_run_origin", "0039_account_preferences",
 		"0040_copilot_entry_data", "0041_plan_run_drafts", "0042_run_failure_code",
+		"0043_run_continue", "0044_run_groups", "0045_run_coordination",
 	}
 	if n := len(names); n < len(want) || !slices.Equal(names[n-len(want):], want) {
 		t.Fatalf("chain ends %v, want ... %v", names[max(0, n-len(want)-1):], want)
@@ -553,5 +554,160 @@ func TestTxRollsBackOnErrorAndPanic(t *testing.T) {
 	// The single writer is usable afterwards.
 	if err := database.SetSetting(ctx, "after", "ok"); err != nil {
 		t.Fatalf("writer after a panic: %v", err)
+	}
+}
+
+func TestMigrationsAddContinueAndGroups(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	insertRun := func(id, status, startedAt, continueOf, workRoot, endReason string) error {
+		_, err := database.ExecContext(ctx, `INSERT INTO runs
+			(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at,
+			 started_at, is_global, branch_slug, continue_of, work_root, view_only, reset_at, end_reason, push_refused, group_id)
+			VALUES (?, '', '', 'rn', 'o', 'claude', 'repo', ?, 'o', '2026-11-18T00:00:00.000000Z',
+			 ?, TRUE, 'fix-it', ?, ?, TRUE, '2026-11-18T01:00:00Z', ?, TRUE, 'g1')`,
+			id, status, startedAt, continueOf, workRoot, endReason)
+		return err
+	}
+	if err := insertRun("root1", "succeeded", "2026-11-18T00:00:01Z", "", "", "ended"); err != nil {
+		t.Fatalf("insert root: %v", err)
+	}
+	var resetAt, endReason, groupID string
+	var viewOnly, pushRefused bool
+	if err := database.QueryRowContext(ctx,
+		`SELECT view_only, reset_at, end_reason, push_refused, group_id FROM runs WHERE id = 'root1'`).
+		Scan(&viewOnly, &resetAt, &endReason, &pushRefused, &groupID); err != nil ||
+		!viewOnly || resetAt != "2026-11-18T01:00:00Z" || endReason != "ended" || !pushRefused || groupID != "g1" {
+		t.Fatalf("read back = %v %q %q %v %q, %v", viewOnly, resetAt, endReason, pushRefused, groupID, err)
+	}
+	// Invalid end_reason rejected.
+	if err := insertRun("bad-end", "succeeded", "", "", "", "timeout"); err == nil {
+		t.Fatal("invalid end_reason accepted")
+	}
+	// Valid quiet / quiet_waiting accepted.
+	if err := insertRun("q1", "succeeded", "", "", "", "quiet"); err != nil {
+		t.Fatalf("quiet: %v", err)
+	}
+	if err := insertRun("q2", "succeeded", "", "", "", "quiet_waiting"); err != nil {
+		t.Fatalf("quiet_waiting: %v", err)
+	}
+	// One live continuation per prior; withdrawn (cancelled or declined with started_at='') frees the slot.
+	if err := insertRun("f-withdrawn-cancel", "cancelled", "", "root1", "root1", ""); err != nil {
+		t.Fatalf("withdrawn cancel: %v", err)
+	}
+	if err := insertRun("f-withdrawn-decline", "declined", "", "root1", "root1", ""); err != nil {
+		t.Fatalf("withdrawn decline: %v", err)
+	}
+	if err := insertRun("f-live", "queued", "", "root1", "root1", ""); err != nil {
+		t.Fatalf("live follow-up: %v", err)
+	}
+	if err := insertRun("f-second", "queued", "", "root1", "root1", ""); !db.IsUniqueViolation(err, "runs_one_continuation") {
+		t.Fatalf("second live continuation err = %v, want runs_one_continuation", err)
+	}
+	// run_groups table works.
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_groups
+		(id, owner_id, runner_id, created_by, created_by_name, title, agent, model, no_pr, repo_count, held_until, created_at)
+		VALUES ('g1', 'o', 'rn', 'o', 'ann', 'Upgrade deps', 'claude', 'opus', FALSE, 3, '2026-11-18T02:00:00Z', '2026-11-18T00:00:00Z')`); err != nil {
+		t.Fatalf("insert run_groups: %v", err)
+	}
+}
+
+func TestMigrationsAddCoordination(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	hexKey := "0123456789abcdef0123456789abcdef"
+
+	// Layer 1 columns + checks.
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, after_run, busy_choice, repo_key)
+		VALUES ('r1', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:00Z', 'r0', 'queue', ?)`, hexKey); err != nil {
+		t.Fatalf("insert layer 1 run: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE runs SET busy_choice = 'skip' WHERE id = 'r1'`); err == nil {
+		t.Fatal("invalid busy_choice 'skip' accepted on runs")
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE runs SET repo_key = 'not-hex' WHERE id = 'r1'`); err == nil {
+		t.Fatal("invalid repo_key accepted")
+	}
+
+	// Layer 2 tables.
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at)
+		VALUES ('r2', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'running', 'o', '2026-11-18T00:00:01Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_touched_files (run_id, path, add_only, at) VALUES ('r1', 'src/a.go', TRUE, '2026-11-18T00:00:02Z')`); err != nil {
+		t.Fatalf("insert run_touched_files: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_overlaps (run_a, run_b, paths, path_count, strong_count, first_at, updated_at)
+		VALUES ('r1', 'r2', '["src/a.go"]', 1, 1, '2026-11-18T00:00:02Z', '2026-11-18T00:00:02Z')`); err != nil {
+		t.Fatalf("insert run_overlaps: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_overlaps (run_a, run_b, first_at, updated_at)
+		VALUES ('r2', 'r1', '2026-11-18T00:00:02Z', '2026-11-18T00:00:02Z')`); err == nil {
+		t.Fatal("run_overlaps accepted run_a >= run_b")
+	}
+
+	// Layer 3: run_contests + runs_contest_shape + runs_global_shape.
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_contests
+		(id, owner_id, created_by, project, node_id, is_global, title, entry_count, state, created_at)
+		VALUES ('c1', 'o', 'o', 'p', 'n1', FALSE, 'Compare', 2, 'running', '2026-11-18T00:00:00Z')`); err != nil {
+		t.Fatalf("insert node contest: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_contests
+		(id, owner_id, created_by, project, node_id, is_global, title, entry_count, state, created_at)
+		VALUES ('c-bad', 'o', 'o', 'p', 'n1', TRUE, 'Bad', 2, 'running', '2026-11-18T00:00:00Z')`); err == nil {
+		t.Fatal("global contest with project/node accepted")
+	}
+	// Headless entry row (mode='') inserts; interactive entry refused; retry_of refused.
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, mode, kind, contest_id, contest_label)
+		VALUES ('ca', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:03Z', '', '', 'c1', 'A')`); err != nil {
+		t.Fatalf("contest entry mode='': %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, mode, kind, contest_id, contest_label)
+		VALUES ('cb-int', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:04Z', 'interactive', '', 'c1', 'B')`); err == nil {
+		t.Fatal("interactive contest entry accepted")
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, mode, kind, retry_of, contest_id, contest_label)
+		VALUES ('cb-retry', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:04Z', '', '', 'ca', 'c1', 'B')`); err == nil {
+		t.Fatal("contest entry with retry_of accepted")
+	}
+	// Reviewer row of kind 'compare' with label 'J' inserts (node and global).
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, mode, kind, contest_id, contest_label)
+		VALUES ('cj', 'p', 'n1', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:05Z', '', 'compare', 'c1', 'J')`); err != nil {
+		t.Fatalf("node compare reviewer: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, is_global, branch_slug, mode, kind, contest_id, contest_label)
+		VALUES ('gcj', '', '', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:06Z', TRUE, 'cmp', '', 'compare', 'c2', 'J')`); err != nil {
+		t.Fatalf("global compare reviewer with contest: %v", err)
+	}
+	// Global compare without contest_id refused by runs_global_shape.
+	if _, err := database.ExecContext(ctx, `INSERT INTO runs
+		(id, project, node_id, runner_id, owner_id, agent, repo_id, status, created_by, created_at, is_global, branch_slug, mode, kind)
+		VALUES ('gc-bad', '', '', 'rn', 'o', 'claude', 'repo', 'queued', 'o', '2026-11-18T00:00:07Z', TRUE, 'cmp', '', 'compare')`); err == nil {
+		t.Fatal("global compare without contest accepted")
+	}
+
+	// open_pr in run_workspace_actions action CHECK (and verify real constraint replaced 0036's inline check).
+	var constraintCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_constraint
+		WHERE conrelid = 'run_workspace_actions'::regclass AND contype = 'c'
+		  AND conname = 'run_workspace_actions_action_check'`).Scan(&constraintCount); err != nil || constraintCount != 1 {
+		t.Fatalf("run_workspace_actions_action_check count = %d, %v", constraintCount, err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_workspace_actions
+		(id, run_id, action, status, requested_by, created_at)
+		VALUES ('wa-pr', 'ca', 'open_pr', 'pending', 'o', '2026-11-18T00:00:08Z')`); err != nil {
+		t.Fatalf("insert open_pr workspace action: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO run_workspace_actions
+		(id, run_id, action, status, requested_by, created_at)
+		VALUES ('wa-bad', 'ca', 'force_push', 'done', 'o', '2026-11-18T00:00:09Z')`); err == nil {
+		t.Fatal("invalid workspace action accepted")
 	}
 }

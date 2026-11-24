@@ -234,6 +234,19 @@ func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 			j.mu.Unlock()
 			return
 		}
+		if j.workRootActiveLocked(w.RunID, "") {
+			changed := prChanged(current.PR, info)
+			current.PR = info
+			if changed {
+				j.queuePRLocked(w.RunID, info)
+				j.savePRsLocked()
+			}
+			j.mu.Unlock()
+			if changed {
+				j.wake()
+			}
+			return
+		}
 		current.closing = true
 		j.mu.Unlock()
 		if w.Worktree != "" {

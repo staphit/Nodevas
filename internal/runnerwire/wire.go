@@ -63,6 +63,9 @@ const (
 	// revoked, replaced by a newer connection). Reason says which; a runner
 	// whose token was revoked stops instead of reconnecting.
 	TypeBye = "bye"
+	// Hub → runner: end an interactive run gracefully and keep its work
+	// (Envelope.RunID, optional Envelope.NoPR).
+	TypeEnd = "end"
 )
 
 // PingIntervalSeconds is how often a runner pings; the hub treats a runner silent
@@ -138,6 +141,10 @@ type Envelope struct {
 	// Repo admin (single-user); see repoadmin.go.
 	RepoAdmin     *RepoAdminRequest `json:"repoAdmin,omitempty"`
 	RepoAdminDone *RepoAdminDone    `json:"repoAdminDone,omitempty"`
+
+	// Interactive End (terminal.go) and coordination touched files (coordination.go).
+	NoPR    bool     `json:"noPR,omitempty"`
+	Touched *Touched `json:"touched,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -212,6 +219,12 @@ type Agent struct {
 	// Installed (usable) until someone signs in on the runner's machine.
 	// Only set where the CLI can say so without a run (detect.go).
 	SignedOut bool `json:"signedOut,omitempty"`
+	// Interactive reports whether this agent supports interactive PTY runs.
+	Interactive bool `json:"interactive,omitempty"`
+	// Untrusted reports whether this agent would show a folder-trust screen
+	// for a fresh worktree under the runner's dataDir, so interactive defaults
+	// fall back to background (§8.2).
+	Untrusted bool `json:"untrusted,omitempty"`
 }
 
 // Model is one model a run can ask an agent for.

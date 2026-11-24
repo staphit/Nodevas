@@ -111,11 +111,16 @@ const openCodeToolTimeoutMs = 900_000
 
 func (OpenCode) Kind() string { return "opencode" }
 
+func (OpenCode) SupportsResume(interactive bool) bool { return true }
+
 func (OpenCode) NewParser() Parser { return &openCodeParser{} }
 
 func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
+	}
+	if err := validateSessionID("opencode", "resume session id", env.Resume); err != nil {
+		return nil, err
 	}
 	config, err := openCodeConfig(env, false, ReadOnly(job))
 	if err != nil {
@@ -125,12 +130,19 @@ func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if openCode2(env) {
 		args = []string{"run", "--standalone", "--format", "json"}
 	}
+	if env.Resume != "" {
+		args = append(args, "--session", env.Resume)
+	}
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)
 	}
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
+	prompt := Prompt(job, env.Branch)
+	if env.Resume != "" {
+		prompt = ResumePrompt(job, env.Branch)
+	}
+	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Env = jobEnv(job, openCodeEnv(job, env, config)...)
 	// npm installs opencode on Windows as a .cmd shim; nothing here needs
 	// quoting (the config is in the environment, the prompt on stdin).
@@ -254,6 +266,8 @@ func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 type openCodeParser struct {
 	outcome Outcome
 	started bool
+	// session is the validated sessionID reported in the stream.
+	session string
 	// lastText is the latest assistant text: the run's summary.
 	lastText string
 	// lastError is the latest error line; a later finished turn clears it.
@@ -261,6 +275,8 @@ type openCodeParser struct {
 	usage     runnerwire.Usage
 	sawUsage  bool
 }
+
+func (p *openCodeParser) Session() string { return p.session }
 
 type openCodeLine struct {
 	Type      string          `json:"type"`
@@ -326,6 +342,9 @@ func (p *openCodeParser) Parse(line []byte) []runnerwire.RunEvent {
 	var events []runnerwire.RunEvent
 	if !p.started && msg.SessionID != "" {
 		p.started = true
+		if id := strings.TrimSpace(msg.SessionID); runnerwire.ValidSessionID(id) {
+			p.session = id
+		}
 		events = append(events, runnerwire.RunEvent{Type: runnerwire.EventLog,
 			Text: "opencode session started " + msg.SessionID})
 	}

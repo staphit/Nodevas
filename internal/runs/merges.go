@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -200,6 +201,19 @@ func (s *Store) ExpireMerges(ctx context.Context) ([]string, error) {
 // CreateMerge records an approval to merge a run's PR at headSHA. At most one
 // approval waits per run; a second is refused with MsgMergePending.
 func (s *Store) CreateMerge(ctx context.Context, runID, headSHA, byID, byName string) (runnerwire.MergeRequest, error) {
+	return s.createMergeInWork(ctx, "", runID, headSHA, byID, byName)
+}
+
+// errTurnRunning is createMergeInWork's refusal when a turn of the work is
+// unfinished; Merge turns it into its TURN_RUNNING refusal.
+var errTurnRunning = locale.Errorf(MsgTurnRunning, "這份工作還有一輪在執行，結束後再合併")
+
+// createMergeInWork is CreateMerge for a turn of a global work (workRoot not
+// ""): under the work's lock, in the transaction that inserts the approval,
+// it refuses with errTurnRunning while any turn of the work is unfinished. A
+// follow-up checks for a pending approval under the same lock (FollowUp), so
+// the two cannot both pass (§6.3).
+func (s *Store) createMergeInWork(ctx context.Context, workRoot, runID, headSHA, byID, byName string) (runnerwire.MergeRequest, error) {
 	if runID == "" || headSHA == "" || byID == "" {
 		return runnerwire.MergeRequest{}, locale.Errorf("%w: missing field", "%w：缺少欄位", ErrInvalid)
 	}
@@ -211,20 +225,36 @@ func (s *Store) CreateMerge(ctx context.Context, runID, headSHA, byID, byName st
 	if err != nil {
 		return runnerwire.MergeRequest{}, err
 	}
-	// The partial unique index on pending rows makes the check and the
-	// insert one step, on both engines.
-	result, err := s.db.ExecContext(ctx, `
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
+		if workRoot != "" {
+			if err := lockWork(ctx, tx, workRoot); err != nil {
+				return err
+			}
+			if active, err := s.activeInWorkWith(ctx, tx, workRoot, ""); err != nil {
+				return err
+			} else if active {
+				return errTurnRunning
+			}
+		}
+		// The partial unique index on pending rows makes the check and the
+		// insert one step, on both engines.
+		result, err := tx.ExecContext(ctx, `
 INSERT INTO run_merges (id, run_id, head_sha, status, requested_by, requested_by_name, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT DO NOTHING`,
-		id, runID, headSHA, runnerwire.MergePending, byID, Truncate(byName, maxShortField), s.stamp())
+			id, runID, headSHA, runnerwire.MergePending, byID, Truncate(byName, maxShortField), s.stamp())
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return Precondition(MsgMergePending)
+		}
+		return nil
+	})
 	if err != nil {
 		return runnerwire.MergeRequest{}, err
-	}
-	if n, err := result.RowsAffected(); err != nil {
-		return runnerwire.MergeRequest{}, err
-	} else if n == 0 {
-		return runnerwire.MergeRequest{}, Precondition(MsgMergePending)
 	}
 	return s.merge(ctx, id)
 }

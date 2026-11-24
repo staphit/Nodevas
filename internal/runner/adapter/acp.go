@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -73,10 +74,12 @@ type acpEnvVar struct {
 // acpSession is one run's conversation: initialize, session/new, one
 // session/prompt, then stdin is closed.
 type acpSession struct {
-	agent  string
-	cwd    string
-	prompt string
-	mcp    []acpMCPServer
+	agent        string
+	cwd          string
+	prompt       string
+	resume       string
+	resumePrompt string
+	mcp          []acpMCPServer
 
 	mu      sync.Mutex
 	out     chan []byte
@@ -84,6 +87,9 @@ type acpSession struct {
 	nextID  int
 	pending map[int]string // request id → method
 	session string
+	// loading is true while session/load is in flight: replayed history
+	// session/update notifications are suppressed until the load completes.
+	loading bool
 
 	outcome   Outcome
 	lastText  string
@@ -244,7 +250,7 @@ func (s *acpSession) Parse(line []byte) []runnerwire.RunEvent {
 	case msg.Method != "" && len(msg.ID) > 0:
 		return append(events, s.agentRequest(msg)...)
 	case msg.Method != "":
-		if msg.Method == "session/update" {
+		if msg.Method == "session/update" && !s.loading {
 			return append(events, s.update(msg.Params)...)
 		}
 	case len(msg.ID) > 0:
@@ -265,6 +271,7 @@ func (s *acpSession) response(msg rpcMessage) []runnerwire.RunEvent {
 	}
 	delete(s.pending, id)
 	if msg.Error != nil {
+		s.loading = false
 		events := s.flushChunk()
 		reason := msg.Error.text()
 		if reason == "" {
@@ -278,8 +285,11 @@ func (s *acpSession) response(msg rpcMessage) []runnerwire.RunEvent {
 	switch method {
 	case "initialize":
 		var r struct {
-			ProtocolVersion int `json:"protocolVersion"`
-			AgentInfo       struct {
+			ProtocolVersion   int `json:"protocolVersion"`
+			AgentCapabilities struct {
+				LoadSession bool `json:"loadSession"`
+			} `json:"agentCapabilities"`
+			AgentInfo struct {
 				Name    string `json:"name"`
 				Version string `json:"version"`
 			} `json:"agentInfo"`
@@ -290,12 +300,28 @@ func (s *acpSession) response(msg rpcMessage) []runnerwire.RunEvent {
 			s.finish()
 			return []runnerwire.RunEvent{{Type: runnerwire.EventError, Text: s.lastError}}
 		}
-		s.request("session/new", map[string]any{"cwd": s.cwd, "mcpServers": s.mcp})
+		if s.resume != "" && r.AgentCapabilities.LoadSession {
+			s.loading = true
+			s.request("session/load", map[string]any{"sessionId": s.resume, "cwd": s.cwd, "mcpServers": s.mcp})
+		} else {
+			s.request("session/new", map[string]any{"cwd": s.cwd, "mcpServers": s.mcp})
+		}
 		text := "ACP: " + s.agent
 		if r.AgentInfo.Version != "" {
 			text += " " + r.AgentInfo.Version
 		}
 		return []runnerwire.RunEvent{{Type: runnerwire.EventLog, Text: text + ", protocol version " + strconv.Itoa(r.ProtocolVersion)}}
+	case "session/load":
+		s.loading = false
+		var r struct {
+			SessionID string `json:"sessionId"`
+		}
+		_ = json.Unmarshal(msg.Result, &r)
+		s.session = cmp.Or(strings.TrimSpace(r.SessionID), s.resume)
+		prompt := cmp.Or(s.resumePrompt, s.prompt)
+		s.request("session/prompt", map[string]any{"sessionId": s.session,
+			"prompt": []map[string]string{{"type": "text", "text": prompt}}})
+		return []runnerwire.RunEvent{{Type: runnerwire.EventLog, Text: s.agent + " session resumed " + s.session}}
 	case "session/new":
 		var r struct {
 			SessionID string `json:"sessionId"`
@@ -646,6 +672,16 @@ func acpToolName(title string) string {
 func hasJSON(raw json.RawMessage) bool {
 	v := string(bytes.TrimSpace(raw))
 	return v != "" && v != "null" && v != "{}"
+}
+
+// Session returns the validated ACP session ID once opened or loaded.
+func (s *acpSession) Session() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !runnerwire.ValidSessionID(s.session) {
+		return ""
+	}
+	return s.session
 }
 
 func (s *acpSession) Outcome() Outcome {

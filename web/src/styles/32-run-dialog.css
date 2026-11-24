@@ -1,0 +1,517 @@
+/* Themed terminal dialog: transcript, tool lines, composer, Simple frame (W1). */
+
+.run-dialog {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  container-type: inline-size;
+}
+
+.run-dlg-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.run-dlg-header-slot {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.run-dlg-expand {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.run-dlg-expand:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.run-dlg-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ---------- Story theme styling (uses --story-* tokens, no manifest change) ---------- */
+
+.run-dialog-story,
+.run-dialog-portal-theme {
+  color: var(--story-ink, var(--text));
+}
+
+.run-dialog-portal-theme {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--story-night, var(--surface));
+}
+
+.run-dialog-story .run-dlg-expand {
+  border-color: var(--story-line, var(--border));
+  background: var(--story-panel, var(--surface-2));
+  color: var(--story-soft, var(--text-2));
+}
+.run-dialog-story .run-dlg-expand:hover {
+  color: var(--story-ink, var(--text));
+}
+
+.run-dialog-story .run-term-scroll {
+  border-color: var(--story-line, var(--border));
+  background: var(--story-night, #150e08);
+}
+
+.run-dialog-story .run-dlg-log-list {
+  border-color: var(--story-line, var(--border));
+  background: var(--story-panel, rgba(21, 14, 8, 0.86));
+}
+
+.run-dialog-story .run-dlg-user {
+  color: var(--story-accent, var(--accent));
+}
+
+.run-dialog-story .run-dlg-textarea {
+  border-color: var(--story-line, var(--border));
+  background: var(--story-night, var(--surface-2));
+  color: var(--story-ink, var(--text));
+}
+
+/* ---------- Compact sizing inside the story stage (§3.4) ---------- */
+
+.px-story-talk.has-run .run-dialog:not(.is-expanded) .run-term-host {
+  height: clamp(180px, 34vh, 320px);
+}
+
+.px-story-talk.has-run .run-dialog:not(.is-expanded) .run-dlg-log-list {
+  max-height: min(40vh, 360px);
+}
+
+.run-dialog.is-expanded .run-term-host {
+  height: clamp(320px, 60vh, 620px);
+}
+
+.run-dialog.is-expanded .run-dlg-log-list {
+  max-height: 60vh;
+}
+
+/* ---------- Simple frame & tabs ---------- */
+
+.run-dlg-simple-frame {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(12.5px * var(--font-scale, 1));
+  line-height: 1.45;
+}
+
+.run-dlg-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-dlg-tabs [role="tab"] {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+.run-dlg-tabs [role="tab"].active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.run-dlg-shown-above {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+}
+
+.run-dlg-expired {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-dlg-screen-gone {
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+.run-dlg-summary-lines {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Transcript (no animation, §3.4 & §3.6) ---------- */
+
+.run-dlg-transcript {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-dlg-transcript-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.run-dlg-notes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+
+.run-dlg-log-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.run-dlg-log-list {
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(52vh, 480px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.5;
+}
+
+.run-dlg-earlier {
+  display: flex;
+  justify-content: center;
+}
+
+.run-dlg-earlier-btn {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+
+.run-dlg-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-dlg-empty {
+  color: var(--text-2);
+}
+
+.run-dlg-turn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.run-dlg-turn::before,
+.run-dlg-turn::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border);
+}
+
+.run-dlg-user {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.run-dlg-user.is-pending {
+  opacity: 0.85;
+}
+.run-dlg-withdraw {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+
+.run-dlg-prose {
+  white-space: pre-wrap;
+}
+
+.run-dlg-code {
+  margin: 4px 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.45;
+}
+
+.run-dlg-cut {
+  color: var(--text-2);
+  font-style: italic;
+}
+
+.run-dlg-tool > summary,
+.run-dlg-thinking > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-dlg-tool-state.is-failed {
+  color: var(--st-failed-fg, #e05252);
+  font-weight: 700;
+}
+.run-dlg-tool-state.is-running {
+  color: var(--accent);
+}
+
+.run-dlg-tool-detail {
+  margin-top: 4px;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-dlg-tool-input,
+.run-dlg-tool-output {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-dlg-thinking-body {
+  margin-top: 4px;
+  padding-left: 14px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: pre-wrap;
+}
+
+.run-dlg-error {
+  padding: 6px 8px;
+  border-left: 3px solid var(--st-failed-fg, #e05252);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--st-failed-fg, #e05252) 10%, transparent);
+  color: var(--story-alert, var(--st-failed-fg, #e05252));
+  white-space: pre-wrap;
+}
+
+.run-dlg-log {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  opacity: 0.85;
+}
+.run-dlg-log.is-hub {
+  font-family: inherit;
+  opacity: 1;
+}
+
+.run-dlg-notice {
+  margin: 2px 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+/* ---------- Composer (sticky, IME-safe, copilot FAB clearance, §3.1) ---------- */
+
+.run-dlg-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  background: inherit;
+}
+
+.run-dlg-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.run-dlg-key {
+  min-width: 34px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.run-dlg-key:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.run-dlg-composer-error {
+  margin: 0;
+  color: var(--story-alert, var(--st-failed-fg, #e05252));
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+.run-dlg-composer-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.run-dlg-textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.4;
+  resize: vertical;
+}
+.run-dlg-textarea:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.run-dlg-composer-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Keep Send and End clear of the floating voice copilot FAB (§3.1), only
+   where a dialog can reach the bottom-right corner it floats over: the
+   station's lists and the story room. A dialog in a centred modal (the
+   start screen's describe box, "Open large") never sits under it. */
+.app:has(> .copilot-fab) .station .run-dlg-composer-actions,
+.app:has(> .copilot-fab) .px-story-talk .run-dlg-composer-actions {
+  padding-right: var(--copilot-fab-clearance, 0px);
+}
+
+/* Stack composer controls cleanly at narrow container widths (§3.4). */
+@container (max-width: 860px) {
+  .run-dlg-composer-row {
+    flex-wrap: wrap;
+  }
+}
+
+@container (max-width: 760px) {
+  .run-dlg-composer-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .run-dlg-composer-actions {
+    justify-content: flex-end;
+  }
+}
+
+@container (max-width: 520px) {
+  .run-dlg-keys {
+    gap: 3px;
+  }
+  .run-dlg-composer-actions {
+    justify-content: stretch;
+  }
+  .run-dlg-composer-actions > button {
+    flex: 1 1 auto;
+  }
+}
+
+/* 16px textarea font on phones prevents iOS Safari auto-zoom (§3.1). */
+@media (max-width: 640px) {
+  .run-dlg-textarea {
+    font-size: calc(16px * var(--font-scale, 1));
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

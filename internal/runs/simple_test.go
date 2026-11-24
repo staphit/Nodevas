@@ -62,7 +62,7 @@ func TestStartSimpleAppendsInstruction(t *testing.T) {
 		t.Fatalf("offered prompt = %q", job.Prompt)
 	}
 	// With no prompt of its own the instruction stands alone.
-	r, err = f.roleStart(t, nil, nil, func(req *StartRequest) { req.Body.Simple = true })
+	r, err = f.roleStart(t, nil, nil, func(req *StartRequest) { req.Body.NodeID, req.Body.Simple = "node-2", true })
 	if err != nil || r.JobPrompt != BuildPrompt("Title", "Do the thing.", "", SimpleInstruction) {
 		t.Fatalf("job prompt = %q, %v", r.JobPrompt, err)
 	}
@@ -128,7 +128,9 @@ func TestStartSimpleLiftsNoGate(t *testing.T) {
 }
 
 func TestStartGlobalSimple(t *testing.T) {
-	f, log := newGlobalFixture(t, globalHello())
+	info := globalHello()
+	info.Repos = append(info.Repos, runnerwire.Repo{ID: "repo-2", Name: "app-2", Path: "/app-2"})
+	f, log := newGlobalFixture(t, info)
 	ctx := context.Background()
 	req := f.globalRequest("Make a birthday page\nFor my sister, with balloons.")
 	req.Body.Simple = true
@@ -139,7 +141,9 @@ func TestStartGlobalSimple(t *testing.T) {
 	if want := BuildPrompt("Make a birthday page", "For my sister, with balloons.", "", SimpleInstruction); r.JobPrompt != want {
 		t.Fatalf("job prompt = %q", r.JobPrompt)
 	}
-	plain, err := f.d.StartGlobal(ctx, f.globalRequest("Make a birthday page"))
+	plainReq := f.globalRequest("Make a birthday page")
+	plainReq.Body.RepoID = "repo-2"
+	plain, err := f.d.StartGlobal(ctx, plainReq)
 	if err != nil || plain.JobPrompt != BuildPrompt("Make a birthday page", "", "", "") {
 		t.Fatalf("plain job prompt = %q, %v", plain.JobPrompt, err)
 	}

@@ -1,15 +1,17 @@
 package runnerwire
 
 // Interactive runs (W2.5). The agent CLI runs as its normal TUI inside a
-// pseudo-terminal on the runner (ConPTY on Windows), and the bytes travel over
-// the runner's connect socket to the hub, which relays them to browsers
-// attached to the run's terminal socket. Same worktree, branch, PR pipeline
-// and run record as a headless run; only how the agent starts and where its
-// status comes from differ (hooks, plus OSC 7501 parsed from the output).
+// hidden pseudo-terminal on the runner (ConPTY on Windows; no window is opened
+// on the runner's desktop), and the bytes travel over the runner's connect
+// socket to the hub, which relays them to browsers attached to the run's
+// terminal socket. Same worktree, branch, PR pipeline and run record as a
+// headless run; only how the agent starts and where its status comes from
+// differ (hooks, plus OSC 7501 parsed from the output).
 //
 //	runner → hub      term_out    {runId, term:{seq, data}}
 //	hub    → runner   term_in     {runId, term:{data}}           keystrokes
 //	hub    → runner   term_resize {runId, term:{cols, rows}}
+//	hub    → runner   end         {runId, noPR?}                 graceful end, keeping work
 //	runner → hub      events      as headless, from hooks / OSC 7501
 //
 // The browser side is GET /api/runs/:id/terminal (WebSocket): binary frames

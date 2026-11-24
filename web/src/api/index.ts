@@ -8,6 +8,7 @@ import { agentsApi } from "./agents";
 import { auditApi } from "./audit";
 import { autopilotApi, planApi } from "./autopilot";
 import { authApi } from "./auth";
+import { contestsApi } from "./contests";
 import { controlApi } from "./control";
 import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
@@ -177,32 +178,48 @@ export type {
 } from "./runners";
 export {
   CAP_APP_ACCEPT,
+  CAP_CONTINUE,
+  CAP_COORD,
   CAP_GLOBAL_RUNS,
   CAP_GLOBAL_RUNS_ON,
   CAP_REMOTE_SETTINGS,
   CAP_REPO_ADMIN,
+  CAP_TOUCHED,
   RunnerRequestError,
 } from "./runners";
 export {
   DEFAULT_GLOBAL_SLUG,
   globalTitle,
   GlobalRunError,
+  MAX_FOLLOW_UP_BYTES,
   MAX_GLOBAL_TASK_BYTES,
   MAX_GLOBAL_TITLE_CHARS,
+  MAX_GROUP_REPOS,
   MAX_SLUG_BYTES,
   slugFrom,
   validSlug,
 } from "./globalRuns";
 export type {
   CancelAllResponse,
+  CreateGlobalGroupRequest,
   CreateGlobalRunRequest,
+  FollowUpRequest,
+  GlobalGroupResponse,
   GlobalRunsBlock,
   GlobalRunsResponse,
+  GroupFollowUpRequest,
+  GroupFollowUpResponse,
+  GroupFollowUpSkipped,
+  ResumeGlobalGroupResponse,
+  RunGroup,
   RunnerLoad,
   RunnerToday,
+  RunThreadResponse,
   SettableBlock,
 } from "./globalRuns";
 export {
+  BusyError,
+  MAX_HOLDER_IDS,
   MAX_SESSION_FILES,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
@@ -222,9 +239,20 @@ export {
 } from "./runs";
 export type {
   AskReason,
+  BusyChoice,
+  BusyContinue,
+  BusyOption,
+  BusyRepo,
+  BusyResponse,
+  GlobalBusyResponse,
   OfferAnswer,
   OfferAsk,
+  OnBusy,
+  RunEndReason,
+  RunHolder,
   RunOrigin,
+  RunOverlap,
+  RunOverlapsResponse,
   CIStatus,
   CreateRunRequest,
   FileChange,
@@ -353,6 +381,29 @@ export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
 export { RUN_MODE_INTERACTIVE, runInteractive } from "./runs";
 export type { RunMode } from "./runs";
+export { MAX_CONTEST_ENTRIES } from "./contests";
+export type {
+  Contest,
+  ContestApply,
+  ContestCompare,
+  ContestCompareEntry,
+  ContestDetailResponse,
+  ContestEntrySpec,
+  ContestLabel,
+  ContestResponse,
+  ContestReviewer,
+  ContestScore,
+  ContestScores,
+  ContestState,
+  CreateContestRequest,
+  CreateGlobalContestRequest,
+  GlobalContestEntrySpec,
+  JudgeContestRequest,
+  JudgeContestResponse,
+  PickActionResult,
+  PickContestRequest,
+  PickContestResponse,
+} from "./contests";
 export {
   connectTerminal,
   MAX_TERM_CHUNK,
@@ -360,7 +411,7 @@ export {
   MAX_TERM_ROWS,
   terminalSocketURL,
 } from "./terminal";
-export type { TerminalConnection, TerminalHandlers, TerminalState } from "./terminal";
+export type { TerminalConnection, TerminalHandlers, TerminalOptions, TerminalState } from "./terminal";
 
 export const api = {
   ...graphApi,
@@ -378,6 +429,7 @@ export const api = {
   ...runnersApi,
   ...runsApi,
   ...globalRunsApi,
+  ...contestsApi,
   ...usageApi,
   ...membersApi,
   ...accountsApi,

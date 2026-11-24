@@ -48,6 +48,9 @@ var projectScopedPathExempt = []string{
 	// Global agents belong to no project: a person keeps their own whichever
 	// board is open (internal/httpapi/runs/global.go).
 	"/api/global-runs",
+	// Contests cover both global and node contests: global contests work with
+	// no active project, while node contests enforce project scope directly.
+	"/api/contests",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

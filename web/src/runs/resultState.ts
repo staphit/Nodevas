@@ -10,9 +10,27 @@ import { api, WorkspaceActionError, type Run } from "../api";
 import { useWorkspace, workspaceRefusal } from "./workspaceStore";
 
 /** What a run's result offers: nothing (not this computer's, not finished
- * well, or it goes through a PR), Look and Apply, an apply under way, or
- * already in the folder. */
-export type ResultState = "none" | "ready" | "applying" | "applied";
+ * well, or it goes through an open PR), Look and Apply, an apply under way,
+ * already in the folder, superseded by a later turn, ended via PR, or locked
+ * until its contest is decided. */
+export type ResultState =
+  | "none"
+  | "ready"
+  | "applying"
+  | "applied"
+  | "continued"
+  | "pr_ended"
+  | "contest_locked";
+
+/** Minimal contest shape needed to decide whether a contest entry is unlocked. */
+export interface ResultContestLike {
+  state: string;
+  winnerRunId?: string;
+}
+
+export interface ResultStateOptions {
+  contest?: ResultContestLike | null;
+}
 
 /** How long a result waits in Station's "Waiting on you": a week, so
  * yesterday's result is still there. */
@@ -20,23 +38,50 @@ export const APPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 type ResultRun = Pick<
   Run,
-  "status" | "commit" | "workspace" | "prUrl" | "prState" | "runnerId" | "kind" | "workspaceAction" | "merge"
->;
+  | "status"
+  | "commit"
+  | "workspace"
+  | "prUrl"
+  | "prState"
+  | "runnerId"
+  | "kind"
+  | "workspaceAction"
+  | "merge"
+  | "continuedBy"
+  | "declineCode"
+  | "contestId"
+> & { id?: string };
 
 /**
  * Where a run's result stands. Only a run on this computer's built-in runner
  * (`builtInRunnerId`, undefined on a team hub) has one: an implement or test
- * run that succeeded with a commit and has no PR, whose workspace is as the
- * run left it and that no discard or PR merge is under way on.
+ * run that succeeded with a commit and has no open PR, whose workspace is as
+ * the run left it and that no discard or PR merge is under way on. Earlier
+ * turns of a follow-up chain report `"continued"`, merged/closed PR runs
+ * report `"pr_ended"`, and undecided contest entries report `"contest_locked"`.
  */
-export function resultState(run: ResultRun, builtInRunnerId: string | undefined): ResultState {
+export function resultState(
+  run: ResultRun,
+  builtInRunnerId: string | undefined,
+  options?: ResultStateOptions,
+): ResultState {
   if (!builtInRunnerId || run.runnerId !== builtInRunnerId) return "none";
+  if (run.continuedBy) return "continued";
+  if (run.workspace === "discarded") return "none";
+  const prEnded =
+    (Boolean(run.prUrl) && (run.prState === "merged" || run.prState === "closed")) ||
+    (run.status === "declined" && run.declineCode === "pr_ended");
+  if (prEnded) return "pr_ended";
   if (run.workspace === "merged_local") return "applied";
   if (run.workspace || run.status !== "succeeded" || !run.commit) return "none";
   if (run.kind && run.kind !== "test") return "none";
-  // A closed PR leaves the branch to merge here; any other PR is the way.
-  if (run.prUrl && run.prState !== "closed") return "none";
+  if (run.prUrl) return "none";
   if (run.merge?.status === "pending") return "none";
+  if (run.contestId) {
+    const contest = options?.contest;
+    if (!contest || contest.state !== "decided") return "contest_locked";
+    if (!contest.winnerRunId || contest.winnerRunId !== run.id) return "none";
+  }
   const action = run.workspaceAction;
   if (action?.status === "pending") return action.action === "merge_local" ? "applying" : "none";
   return "ready";
@@ -56,6 +101,7 @@ export function applyRuns(
   now: number,
   builtInRunnerId: string | undefined,
   windowMs = APPLY_WINDOW_MS,
+  contests?: Record<string, ResultContestLike | undefined>,
 ): Run[] {
   if (!builtInRunnerId) return [];
   const seen = new Set<string>();
@@ -63,7 +109,8 @@ export function applyRuns(
   for (const run of runs) {
     if (!run?.id || seen.has(run.id)) continue;
     seen.add(run.id);
-    const state = resultState(run, builtInRunnerId);
+    const contest = run.contestId ? contests?.[run.contestId] : undefined;
+    const state = resultState(run, builtInRunnerId, { contest });
     if (state !== "ready" && state !== "applying") continue;
     const finished = millis(run.finishedAt);
     if (!Number.isFinite(finished) || now - finished > windowMs) continue;
@@ -73,17 +120,18 @@ export function applyRuns(
 }
 
 const PLAIN_REFUSALS = new Set(["dirty_base", "conflict", "base_elsewhere", "head_moved"]);
-const BUSY = new Set(["running", "pending", "in_use", "files_busy"]);
+const BUSY = new Set(["running", "pending", "in_use", "files_busy", "turn_running"]);
 const STARTING = new Set(["offline", "outdated", "expired"]);
-const GONE = new Set(["discarded", "merged_local", "pr_merged", "no_commit", "no_branch"]);
+const GONE = new Set(["discarded", "merged_local", "pr_merged", "no_commit", "no_branch", "continued"]);
 
 /** The plain sentence (a result.refuse.* key) for a workspace code; anything
  * without one of its own is "other", which carries the details. */
 export function applyRefusalKey(code: string): string {
-  if (PLAIN_REFUSALS.has(code)) return `result.refuse.${code}`;
-  if (BUSY.has(code)) return "result.refuse.busy";
-  if (STARTING.has(code)) return "result.refuse.offline";
-  if (GONE.has(code)) return "result.refuse.gone";
+  const norm = code.toLowerCase();
+  if (PLAIN_REFUSALS.has(norm)) return `result.refuse.${norm}`;
+  if (BUSY.has(norm)) return "result.refuse.busy";
+  if (STARTING.has(norm)) return "result.refuse.offline";
+  if (GONE.has(norm)) return "result.refuse.gone";
   return "result.refuse.other";
 }
 

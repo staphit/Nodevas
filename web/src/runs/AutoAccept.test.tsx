@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
@@ -147,12 +147,16 @@ const withinBudget: RunBudgetStatus = {
   exceeded: "",
 };
 
+function pickCard(groupName: string, label: string | RegExp) {
+  fireEvent.click(within(screen.getByRole("radiogroup", { name: groupName })).getByRole("radio", { name: label }));
+}
+
 async function openDialog(runner: Runner, stepUp: StepUpStatus | Error) {
   vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [runner] });
   if (stepUp instanceof Error) vi.spyOn(api, "getStepUp").mockRejectedValue(stepUp);
   else vi.spyOn(api, "getStepUp").mockResolvedValue(stepUp);
   render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
-  await screen.findByRole("combobox", { name: "Runner" });
+  await screen.findByRole("radiogroup", { name: "Which computer" });
   const note = await screen.findByTestId("dispatch-auto-accept");
   await waitFor(() => expect(note.dataset.outcome).not.toBe("pending"));
   return note;
@@ -167,6 +171,7 @@ describe("DispatchDialog auto-accept explanation", () => {
     useBudget.getState().reset();
     useStepUp.getState().reset();
     vi.spyOn(api, "getRunBudget").mockResolvedValue(withinBudget);
+    vi.spyOn(api, "getRunBusy").mockResolvedValue({ holders: [], others: 0, choices: [] });
   });
 
   afterEach(() => {
@@ -201,14 +206,14 @@ describe("DispatchDialog auto-accept explanation", () => {
     expect(note.dataset.outcome).toBe("auto");
     expect(note).toHaveTextContent("which doesn't ask you to verify");
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Repository" }), { target: { value: "repo2" } });
+    pickCard("Which folders", /site/);
     expect(screen.getByTestId("dispatch-auto-accept").dataset.outcome).toBe("manual");
     expect(screen.getByTestId("dispatch-auto-accept")).toHaveTextContent(
       "site isn't on desktop's auto-accept list.",
     );
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Repository" }), { target: { value: "repo1" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), { target: { value: "codex" } });
+    pickCard("Which folders", /nodevas/);
+    pickCard("Who works", /Codex/);
     expect(screen.getByTestId("dispatch-auto-accept")).toHaveTextContent(
       "codex isn't on desktop's auto-accept list.",
     );

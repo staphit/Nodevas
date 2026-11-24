@@ -98,6 +98,54 @@ describe("NodeRuns", () => {
     expect(await screen.findByText(reason)).toBeInTheDocument();
   });
 
+  // A node contest is started from the dispatch dialog and its entries'
+  // Apply stays locked until a winner is picked: the node's run view is where
+  // the person compares the entries and picks one.
+  it("lets a node contest be compared and decided from an entry's run", async () => {
+    const entryA = makeRun({ id: "run-a", status: "succeeded", contestId: "ct1", contestLabel: "A", finishedAt: at });
+    const entryB = makeRun({ id: "run-b", status: "succeeded", agent: "codex", model: "gpt-5", contestId: "ct1", contestLabel: "B", finishedAt: at });
+    vi.spyOn(api, "listRuns").mockResolvedValue({ runs: [entryA, entryB] });
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    vi.spyOn(api, "getSessionChanges").mockResolvedValue({ changes: [] });
+    const contest = {
+      id: "ct1",
+      title: "Add dark mode",
+      global: false,
+      state: "ready",
+      entryCount: 2,
+      createdBy: "u1",
+      createdAt: "2026-10-24T08:00:00Z",
+    };
+    const entry = (label: string, runId: string, agent: string) => ({
+      label,
+      runId,
+      agent,
+      model: "",
+      status: "succeeded",
+      files: [{ path: "src/theme.ts", status: "modified", additions: 3, deletions: 1 }],
+      additions: 3,
+      deletions: 1,
+      summary: `Summary of ${label}`,
+    });
+    vi.spyOn(api, "getContest").mockResolvedValue({
+      contest,
+      runs: [entryA, entryB],
+      compare: { entries: [entry("A", "run-a", "claude"), entry("B", "run-b", "codex")], scores: null },
+    });
+    const pick = vi
+      .spyOn(api, "pickContest")
+      .mockResolvedValue({ contest: { ...contest, state: "decided", winnerRunId: "run-b" }, actions: [] });
+
+    render(<NodeRuns id="alpha" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Compare and pick" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Summary of B");
+    fireEvent.click(within(within(dialog).getByTestId("contest-col-B")).getByRole("button", { name: "Use this one" }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Throw away the others" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep for now" }));
+    await waitFor(() => expect(pick).toHaveBeenCalledWith("ct1", { runId: "run-b", apply: "keep", discardOthers: false }));
+  });
+
   it("shows an empty state and opens the dispatch dialog", async () => {
     vi.spyOn(api, "listRuns").mockResolvedValue({ runs: null });
     render(<NodeRuns id="alpha" />);

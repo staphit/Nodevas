@@ -227,7 +227,7 @@ func TestGlobalRunsAreAPersonsOwn(t *testing.T) {
 	f := newRunsFixture(t)
 	conn := f.connect(t, globalRunsHello())
 	run, _ := f.startedGlobal(t, conn, nil)
-	nodeRun := f.dispatch(t, f.bea, f.runBody(""))
+	nodeRun := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	expectOffer(t, conn, nodeRun.ID)
 
 	// An agent acting for bea gets nothing on any global route.
@@ -294,8 +294,8 @@ func TestGlobalRunsAreAPersonsOwn(t *testing.T) {
 	expectCancel(t, conn, run.ID)
 	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: run.ID, Result: &runnerwire.RunResult{Status: runnerwire.RunCancelled}})
 	f.waitGlobal(t, run.ID, "cancelled", func(r runnerwire.Run) bool { return r.Status == runnerwire.RunCancelled })
-	second := f.startGlobal(t, &f.bea, f.globalBody(func(r *runnerwire.CreateGlobalRunRequest) { r.Slug = "second" }))
-	third := f.startGlobal(t, &f.bea, f.globalBody(func(r *runnerwire.CreateGlobalRunRequest) { r.Slug = "third" }))
+	second := f.startGlobal(t, &f.bea, f.globalBody(func(r *runnerwire.CreateGlobalRunRequest) { r.Slug = "second"; r.OnBusy = runnerwire.OnBusyBoth }))
+	third := f.startGlobal(t, &f.bea, f.globalBody(func(r *runnerwire.CreateGlobalRunRequest) { r.Slug = "third"; r.OnBusy = runnerwire.OnBusyBoth }))
 	response := f.do(t, &f.bea, http.MethodPost, "/api/global-runs/cancel-all", "{}", nil)
 	var all runnerwire.CancelAllResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &all); err != nil || response.Code != http.StatusOK || all.Cancelled != 2 {

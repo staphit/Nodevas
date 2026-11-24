@@ -89,6 +89,25 @@ type Client struct {
 	// time.NewTimer. Tests fire it themselves once the run is where they
 	// want it to time out, instead of racing a short timeout.
 	runTimer func(time.Duration) (expired <-chan time.Time, stop func() bool)
+	// interactiveQuietTimeout, endQuitGap and endGrace override interactive
+	// session quiet timeout and graceful-End timings in tests; zero uses the
+	// defaults in interactive.go.
+	interactiveQuietTimeout time.Duration
+	endQuitGap              time.Duration
+	endGrace                time.Duration
+	// interactiveWaiting, if set, is called once an interactive run's
+	// terminal is up, right before the runner starts waiting on it: tests
+	// line up an exit and an End there to see which one wins.
+	interactiveWaiting func(runID string)
+	// interactiveExited, if set, is called once an interactive run's CLI
+	// exit is ready for the wait to take; interactiveEnd, once the wait has
+	// taken an End and before it looks for that exit. Tests line up an exit
+	// that is there by the time an End is handled.
+	interactiveExited func(runID string)
+	interactiveEnd    func(runID string)
+	// touchedPoll overrides how often a run's touched-files watcher polls
+	// git status; zero uses touchedPollInterval. Tests shorten it.
+	touchedPoll time.Duration
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
@@ -402,6 +421,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.offer(msg.Job)
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			case runnerwire.TypeEnd:
+				c.jobs.endRun(msg.RunID, msg.NoPR)
 			case runnerwire.TypeMerge:
 				c.jobs.merge(msg.RunID, msg.Merge)
 			case runnerwire.TypeWorkspaceAction:
@@ -718,4 +739,35 @@ func (c *Client) backoffMax() time.Duration {
 		return c.BackoffMax
 	}
 	return defaultBackoffMax
+}
+
+func (c *Client) quietTimeout() time.Duration {
+	if c != nil && c.interactiveQuietTimeout > 0 {
+		return c.interactiveQuietTimeout
+	}
+	return interactiveQuiet
+}
+
+func (c *Client) quitGap() time.Duration {
+	if c != nil && c.endQuitGap > 0 {
+		return c.endQuitGap
+	}
+	return endQuitGap
+}
+
+func (c *Client) quitGrace() time.Duration {
+	if c != nil && c.endGrace > 0 {
+		return c.endGrace
+	}
+	return endGrace
+}
+
+// touchedOptions is a run's touched-files watcher settings; zero fields take
+// the defaults in touched.go.
+func (c *Client) touchedOptions(interactive bool) touchedOptions {
+	opts := touchedOptions{interactive: interactive}
+	if c != nil {
+		opts.pollInterval = c.touchedPoll
+	}
+	return opts
 }

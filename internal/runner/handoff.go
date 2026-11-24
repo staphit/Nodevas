@@ -186,7 +186,9 @@ func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, no
 func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 	job := &r.job
 	if job.HandoffBranch == "" {
+		j.mu.Lock()
 		job.HandoffNote = ""
+		j.mu.Unlock()
 		return ""
 	}
 	if (job.Kind != runnerwire.JobImplement && job.Kind != runnerwire.JobTest) || job.Mode == runnerwire.ModeInteractive {
@@ -200,11 +202,16 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 	if err != nil {
 		return err.Error()
 	}
-	// The note this runner wrote, not the hub's copy of it.
+	// The note this runner wrote, not the hub's copy of it. Written under
+	// j.mu: other goroutines read the run's job under it.
+	note := job.HandoffNote
 	if entry.Note != "" {
-		job.HandoffNote = entry.Note
+		note = entry.Note
 	}
-	job.HandoffNote = adapter.Truncate(redact.String(job.HandoffNote), runnerwire.MaxHandoffNoteBytes)
+	note = adapter.Truncate(redact.String(note), runnerwire.MaxHandoffNoteBytes)
+	j.mu.Lock()
+	job.HandoffNote = note
+	j.mu.Unlock()
 	return ""
 }
 

@@ -249,7 +249,7 @@ func Snapshot(ctx context.Context, cwd string) (runnerwire.RunChanges, bool) {
 func withoutSecretFiles(list string) string {
 	var kept []string
 	for _, path := range strings.Split(list, "\x00") {
-		if path != "" && !secretFile(path) {
+		if path != "" && !SecretPath(path) {
 			kept = append(kept, path)
 		}
 	}
@@ -259,24 +259,9 @@ func withoutSecretFiles(list string) string {
 	return strings.Join(kept, "\x00") + "\x00"
 }
 
-// secretFile reports whether path's name is one secrets are kept under.
-func secretFile(path string) bool {
-	name := strings.ToLower(filepath.Base(filepath.FromSlash(path)))
-	switch name {
-	case ".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials":
-		return true
-	}
-	for _, prefix := range []string{".env", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials"} {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	for _, ext := range []string{".pem", ".key", ".p12", ".pfx"} {
-		if strings.HasSuffix(name, ext) {
-			return true
-		}
-	}
-	return strings.Contains(name, "kubeconfig")
+// SecretPath reports whether path's name is one secrets are kept under.
+func SecretPath(path string) bool {
+	return redact.SecretPath(path)
 }
 
 // scratchIndex copies the repository's index to a temporary file and marks

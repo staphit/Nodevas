@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, GlobalRunError, type Run, type RunnerLoad } from "../api";
+import { api, GlobalRunError, type Run, type RunGroup, type RunnerLoad } from "../api";
 import { readPreferences } from "../preferences";
 import { useRunners } from "../runners/runnerStore";
+import { useCoordStore } from "../runs/coord/coordStore";
 import { selectRunById, useRuns } from "../runs/runStore";
 import { useApp } from "../store";
 import {
   activeGlobalRuns,
   capacityErrorText,
+  collapseGlobalChains,
   GLOBAL_COALESCE_MS,
   orderGlobalRuns,
   useGlobalAgents,
@@ -60,6 +62,7 @@ beforeEach(() => {
   useRuns.getState().reset();
   useRuns.setState({ globalById: {}, stopRequested: {}, cancelErrors: {} });
   useRunners.setState({ loaded: false, runners: [] });
+  useCoordStore.getState().reset();
 });
 
 afterEach(() => {
@@ -274,5 +277,103 @@ describe("useGlobalAgents", () => {
     const b = globalRun({ id: "b", status: "running", createdAt: "2026-11-14T08:00:00Z" });
     const c = globalRun({ id: "c", status: "failed", createdAt: "2026-11-14T09:00:00Z" });
     expect(orderGlobalRuns([a, c, b, a]).map((run) => run.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("collapses follow-up chains to the latest non-withdrawn turn", () => {
+    const t1 = globalRun({ id: "g1", workRoot: "g1", continuedBy: "g2", status: "succeeded", createdAt: "2026-11-14T08:00:00Z", startedAt: "2026-11-14T08:00:05Z" });
+    const t2 = globalRun({ id: "g2", continueOf: "g1", workRoot: "g1", status: "running", createdAt: "2026-11-14T08:10:00Z", startedAt: "2026-11-14T08:10:05Z" });
+    const withdrawn = globalRun({ id: "g3", continueOf: "g2", workRoot: "g1", status: "cancelled", createdAt: "2026-11-14T08:15:00Z", startedAt: "" });
+    const standalone = globalRun({ id: "g9", status: "succeeded", createdAt: "2026-11-14T07:00:00Z" });
+
+    const { latest, turnCountById } = collapseGlobalChains([t1, t2, withdrawn, standalone]);
+    expect(latest.map((r) => r.id)).toEqual(["g2", "g9"]);
+    expect(turnCountById.g2).toBe(2);
+    expect(turnCountById.g9).toBe(1);
+  });
+
+  it("loads, cancels, resumes, and follows up a group", async () => {
+    const grp: RunGroup = {
+      id: "grp1",
+      runnerId: "r1",
+      createdBy: "u1",
+      title: "Upgrade deps",
+      agent: "claude",
+      model: "opus",
+      noPR: true,
+      repoCount: 2,
+      heldUntil: "2026-11-14T10:00:00Z",
+      createdAt: "2026-11-14T08:00:00Z",
+    };
+    const m1 = globalRun({ id: "m1", groupId: "grp1", repoId: "repo1", repoName: "api", status: "failed" });
+    const m2 = globalRun({ id: "m2", groupId: "grp1", repoId: "repo2", repoName: "web", status: "queued" });
+
+    vi.spyOn(api, "getGlobalGroup").mockResolvedValue({ group: grp, runs: [m1, m2] });
+    await useGlobalAgents.getState().loadGroup("grp1");
+    expect(useGlobalAgents.getState().groups.grp1).toEqual(grp);
+    expect(useGlobalAgents.getState().groupRuns.grp1.map((r) => r.id)).toEqual(["m1", "m2"]);
+
+    vi.spyOn(api, "resumeGlobalGroup").mockResolvedValue({ group: { ...grp, heldUntil: "" } });
+    await useGlobalAgents.getState().resumeGroup("grp1");
+    expect(useGlobalAgents.getState().groups.grp1.heldUntil).toBe("");
+
+    const m1Turn2 = globalRun({ id: "m1b", groupId: "grp1", continueOf: "m1", workRoot: "m1", repoId: "repo1", repoName: "api", status: "queued" });
+    const fu = vi.spyOn(api, "followUpGlobalGroup").mockResolvedValue({ started: [m1Turn2], skipped: [] });
+    const fuRes = await useGlobalAgents.getState().followUpGroup("grp1", { message: "Fix tests", only: "failed" });
+    expect(fu).toHaveBeenCalledWith("grp1", { message: "Fix tests", only: "failed" });
+    expect(fuRes?.started?.map((r) => r.id)).toEqual(["m1b"]);
+    expect(useRuns.getState().globalById.m1b).toEqual(m1Turn2);
+
+    const cancel = vi.spyOn(api, "cancelGlobalGroup").mockResolvedValue({ cancelled: 1, runs: [{ ...m2, status: "cancelled" }] });
+    expect(await useGlobalAgents.getState().cancelGroup("grp1")).toBe(1);
+    expect(cancel).toHaveBeenCalledWith("grp1");
+    expect(useRuns.getState().globalById.m2.status).toBe("cancelled");
+  });
+
+  it("refetches loaded groups and loaded contests on global-runs-changed without a new realtime event", async () => {
+    vi.useFakeTimers();
+    const grp: RunGroup = {
+      id: "grp1",
+      runnerId: "r1",
+      createdBy: "u1",
+      title: "Bump CI",
+      agent: "claude",
+      model: "opus",
+      noPR: false,
+      repoCount: 2,
+      createdAt: "2026-11-14T08:00:00Z",
+    };
+    const m1 = globalRun({ id: "m1", groupId: "grp1", status: "running" });
+    const c1Run = globalRun({ id: "c1a", contestId: "c1", contestLabel: "A", status: "running" });
+
+    const list = vi.spyOn(api, "listGlobalRuns").mockResolvedValue({ runs: [m1, c1Run], more: false, runners: [] });
+    const getGroup = vi.spyOn(api, "getGlobalGroup").mockResolvedValue({ group: grp, runs: [m1] });
+    const getContest = vi.spyOn(api, "getContest").mockResolvedValue({
+      contest: {
+        id: "c1",
+        title: "Compare",
+        global: true,
+        state: "running",
+        entryCount: 2,
+        createdBy: "u1",
+        createdAt: "2026-11-14T08:00:00Z",
+      },
+      runs: [c1Run],
+      compare: { entries: [], scores: null },
+    });
+
+    await useGlobalAgents.getState().loadGroup("grp1");
+    await useCoordStore.getState().loadContest("c1");
+    useGlobalAgents.getState().setWatching(true);
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    getGroup.mockClear();
+    getContest.mockClear();
+    list.mockClear();
+
+    useGlobalAgents.getState().onChanged("m1");
+    vi.advanceTimersByTime(GLOBAL_COALESCE_MS);
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(getGroup).toHaveBeenCalledWith("grp1"));
+    await vi.waitFor(() => expect(getContest).toHaveBeenCalledWith("c1"));
   });
 });

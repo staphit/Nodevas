@@ -94,8 +94,8 @@ func TestRunnerSettingsOwnerRaisesMaxConcurrent(t *testing.T) {
 
 	first := f.dispatch(t, f.bea, f.runBody(""))
 	expectOffer(t, conn, first.ID)
-	second := f.dispatch(t, f.bea, f.runBody(""))
-	third := f.dispatch(t, f.bea, f.runBody(""))
+	second := f.dispatch(t, f.bea, f.runBodyBoth(""))
+	third := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	if second.Status != runnerwire.RunQueued || third.Status != runnerwire.RunQueued {
 		t.Fatalf("with one slot: %s, %s", second.Status, third.Status)
 	}

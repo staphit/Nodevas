@@ -169,7 +169,7 @@ func TestInteractiveRunNeedsTheCapability(t *testing.T) {
 	}
 
 	// A headless run has no terminal.
-	headless := f.dispatch(t, f.bea, f.runBody(""))
+	headless := f.dispatch(t, f.bea, f.runBodyBoth(""))
 	expectOffer(t, conn, headless.ID)
 	if code := f.do(t, &f.bea, http.MethodGet, "/api/runs/"+headless.ID+"/terminal", "", nil).Code; code != http.StatusConflict {
 		t.Fatalf("terminal of a headless run: %d", code)

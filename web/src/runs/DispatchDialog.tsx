@@ -1,26 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  api,
   AuthError,
+  BusyError,
+  CAP_COORD,
+  CAP_REPO_ADMIN,
   ConflictError,
+  MAX_CONTEST_ENTRIES,
+  MAX_PIPELINE_ROUNDS,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
-  MAX_PIPELINE_ROUNDS,
   RequestError,
   ROUTE_AUTO,
   type Actor,
   type AgentModel,
+  type BusyResponse,
+  type OnBusy,
   type RouteSuggestion,
   type Run,
   type Runner,
   type RunnerAgent,
   type RunnerRepo,
-  CAP_REPO_ADMIN,
 } from "../api";
 import { useViewer } from "../components/SignIn";
 import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
-import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
-import { useApp } from "../store";
+import { runnerDisplayName } from "../runners/runnerName";
+import { useApp, usePreference } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import { builtInRunner, localState, useEdition } from "../runners/edition";
 import { AddRepoDialog, repoAddCommand } from "../local/AddRepoDialog";
@@ -32,6 +38,7 @@ import {
   agentCatalog,
   agentModelProblem,
   agentModelText,
+  catalogDefaultModel,
   defaultPipeline,
   FallbackChainEditor,
   PipelineFields,
@@ -46,7 +53,20 @@ import { useRuns } from "./runStore";
 import { AutoAcceptNote } from "./AutoAcceptNote";
 import { StepUpDialog } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
-import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "./RunModePicker";
+import {
+  defaultDispatchMode,
+  isInteractiveDisabled,
+  resolveDispatchMode,
+  RunModePicker,
+  type DispatchMode,
+} from "./RunModePicker";
+import { BusyChoice } from "./coord/BusyChoice";
+import { ContestForm, type ContestDraft } from "./coord/ContestForm";
+import { nodeBusyKey, useCoordStore } from "./coord/coordStore";
+import { AgentCards } from "../station/pickers/AgentCards";
+import { ModelCards } from "../station/pickers/ModelCards";
+import { RunnerCards } from "../station/pickers/PictureCards";
+import { RepoCards } from "../station/pickers/RepoCards";
 import { openNodeDetail } from "../components/drawer/openNodeDetail";
 import { requiresAcceptance, workflowForNode } from "../domain/graph/stages";
 import { FOCUS_ACCEPTANCE_EVENT } from "../roles/AcceptanceCriteria";
@@ -83,7 +103,7 @@ function utf8Length(text: string): number {
 }
 
 export function installedAgents(runner: Runner | undefined): RunnerAgent[] {
-  return (runner?.info?.agents ?? []).filter((agent) => agent.installed);
+  return (runner?.info?.agents ?? []).filter((agent) => agent.installed && !agent.signedOut);
 }
 
 export function defaultModel(agent: RunnerAgent | undefined): string {
@@ -96,6 +116,64 @@ export function defaultModel(agent: RunnerAgent | undefined): string {
  * own PC. */
 export function addsReposInApp(runner: Runner | undefined): boolean {
   return Boolean(runner?.builtIn && runner.info?.capabilities?.includes(CAP_REPO_ADMIN));
+}
+
+function minutesSince(iso: string | undefined): number {
+  if (!iso) return 1;
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms <= 0) return 1;
+  return Math.max(1, Math.round(ms / 60_000));
+}
+
+function buildInitialContestDraft(runners: readonly Runner[]): ContestDraft {
+  const defaultRunnerId = runners[0]?.id ?? "";
+  const catalog = agentCatalog([...runners]);
+  const options: { runnerId: string; agent: string; model: string }[] = [];
+  for (const item of catalog) {
+    const def = catalogDefaultModel(item);
+    if (def) options.push({ runnerId: defaultRunnerId, agent: item.kind, model: def });
+  }
+  for (const item of catalog) {
+    for (const model of item.models) {
+      if (!options.some((o) => o.agent === item.kind && o.model === model.id)) {
+        options.push({ runnerId: defaultRunnerId, agent: item.kind, model: model.id });
+      }
+    }
+  }
+  if (options.length === 0) {
+    return {
+      entries: [
+        { runnerId: defaultRunnerId, agent: "claude", model: "default" },
+        { runnerId: defaultRunnerId, agent: "codex", model: "default" },
+      ],
+      reviewer: null,
+    };
+  }
+  return {
+    entries: [options[0], options[1] ?? { ...options[0] }],
+    reviewer: null,
+  };
+}
+
+function contestDraftValid(draft: ContestDraft | null, runners: readonly Runner[]): boolean {
+  if (!draft) return false;
+  if (draft.entries.length < 2 || draft.entries.length > MAX_CONTEST_ENTRIES) return false;
+  const seen = new Set<string>();
+  const defaultRunnerId = runners[0]?.id ?? "";
+  for (const entry of draft.entries) {
+    if (!entry.agent.trim() || !entry.model.trim()) return false;
+    const key = `${entry.agent.trim().toLowerCase()}::${entry.model.trim().toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const r = runners.find((item) => item.id === (entry.runnerId || defaultRunnerId)) ?? runners[0];
+    if (!r?.info?.capabilities?.includes(CAP_COORD)) return false;
+  }
+  if (draft.reviewer) {
+    if (!draft.reviewer.agent.trim() || !draft.reviewer.model.trim()) return false;
+    const r = runners.find((item) => item.id === (draft.reviewer?.runnerId || defaultRunnerId)) ?? runners[0];
+    if (!r?.info?.capabilities?.includes(CAP_COORD)) return false;
+  }
+  return true;
 }
 
 /**
@@ -165,6 +243,7 @@ export function DispatchDialog({
   const { t } = useI18n();
   const { kindLabel } = useRouteKinds();
   const viewer = useViewer();
+  const edition = useEdition();
   const nodeTitle = useApp(
     (s) => s.graph?.nodes?.find((node) => node.id === nodeId)?.title || nodeId,
   );
@@ -183,33 +262,30 @@ export function DispatchDialog({
   const refreshRunners = useRunners((s) => s.refresh);
   const createRun = useRuns((s) => s.createRun);
 
-  const single = useEdition() === "single";
+  const single = edition === "single";
   const simple = useSimpleMode();
+  const modePref = usePreference("runMode");
   const mine = useMemo(() => ownRunners(runners, viewer), [runners, viewer]);
-  // Single-user: this computer's built-in runner, and no choice. Without
-  // one (it did not start) a runner someone connected by hand still works
-  // the classic way.
   const localRunner = single ? builtInRunner(mine) : undefined;
   const choices = useMemo(() => (localRunner ? [localRunner] : mine), [localRunner, mine]);
   const eligible = useMemo(
     () => choices.filter((runner) => runnerUnavailableReason(runner) === ""),
     [choices],
   );
-  // Single-user with nothing that can take a run: this computer is not
-  // ready, said in its own words. Never a list of runners to manage; the
-  // classic path above is only for a runner that can take the run now.
   const localDown = single && eligible.length === 0;
   const [addedNote, setAddedNote] = useState("");
 
   const [runnerId, setRunnerId] = useState("");
   const [agentKind, setAgentKind] = useState("");
-  // What the user picked; each falls back to a valid value below when the
-  // pick is not (or no longer) offered.
   const [modelChoice, setModel] = useState("");
   const [repoChoice, setRepoId] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [modeChoice, setMode] = useState<DispatchMode>("headless");
+  const [modeChoice, setModeChoice] = useState<DispatchMode | null>(null);
+  const [contestOn, setContestOn] = useState(false);
+  const [contestDraft, setContestDraft] = useState<ContestDraft | null>(null);
+  const [pendingBusy, setPendingBusy] = useState<BusyResponse | null>(null);
+  const [busyChanged, setBusyChanged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // W5: the fallback chain and the implement → review pipeline.
@@ -249,8 +325,6 @@ export function DispatchDialog({
     };
   }, [nodeId]);
 
-  // The suggestion names its rule, not the rule's tag or kind: when the hub
-  // does not send the value, it is looked up in the viewer's rules.
   const routingRules = useRouting((s) => s.rules);
   const needsRuleValue =
     suggestion !== null && suggestion.value === undefined && matchTakesValue(suggestion.match);
@@ -262,15 +336,12 @@ export function DispatchDialog({
     void refreshRunners();
   }, [refreshRunners]);
 
-  // W6: whether the dispatcher is stepped up decides if a runner that asks
-  // for it auto-accepts; asked afresh on every open.
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const closeStepUp = useCallback(() => setStepUpOpen(false), []);
   useEffect(() => {
     void useStepUp.getState().load();
   }, []);
 
-  // Today's budget, so the dialog can say up front that the hub would refuse.
   const budgetStatus = useBudget((s) => s.status);
   const loadBudget = useBudget((s) => s.load);
   useEffect(() => {
@@ -286,11 +357,6 @@ export function DispatchDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Keep each choice valid as the one above it changes (or a runners-changed
-  // push replaces the list): an unavailable runner, an agent it no longer has,
-  // a model or repo that went away all fall back to the first sensible value.
-  // Derived on every render rather than corrected in effects, so the form
-  // never shows a frame with a stale choice.
   const runner = eligible.find((item) => item.id === runnerId) ?? eligible[0];
   const agents = installedAgents(runner);
   const agent = agents.find((item) => item.kind === agentKind) ?? agents[0];
@@ -301,7 +367,18 @@ export function DispatchDialog({
   const catalog = useMemo(() => agentCatalog(runner ? [runner] : []), [runner]);
   const repos = runner?.info?.repos ?? [];
   const repoId = repos.some((repo) => repo.id === repoChoice) ? repoChoice : (repos[0]?.id ?? "");
-  const mode = effectiveDispatchMode(modeChoice, runner);
+
+  // Preflight node busy status whenever the target runner or repo changes.
+  useEffect(() => {
+    if (!runner?.id || !repoId) return;
+    void useCoordStore.getState().loadNodeBusy({ runnerId: runner.id, repoId, nodeId });
+  }, [runner?.id, repoId, nodeId]);
+
+  const busyKey = runner?.id && repoId ? nodeBusyKey({ runnerId: runner.id, repoId, nodeId }) : "";
+  const preflightBusy = useCoordStore((s) => (busyKey ? s.nodeBusy[busyKey] : undefined));
+  const hasPreflightBusy = Boolean(
+    preflightBusy && ((preflightBusy.holders?.length ?? 0) > 0 || preflightBusy.others > 0),
+  );
 
   // The hub's own checks, so a bad value is caught while typing rather than
   // as a 400 after the click.
@@ -316,22 +393,15 @@ export function DispatchDialog({
 
   const fallbackInvalid = fallbacks.some((item) => agentModelProblem(item) !== "");
   const repo = repos.find((item) => item.id === repoId);
-  // Simple mode: a check the stages want but the task lacks (criteria, a
-  // test command) does not stop the start. The run skips the stages through
-  // the person's own override, with a fixed reason the hub records; with
-  // nothing that would block, the stages run as usual.
   const blocked =
     workflow !== null &&
     !overrideOn &&
     ((requiresAcceptance(workflow) && !hasCriteria) ||
       (stagedNeedsTests(workflow) && Boolean(repo) && !repo?.verify));
   const simpleSkip = simple && blocked;
-  // A staged project picks the pipeline from its stages; a person may skip
-  // them for one run, with a reason the hub records.
   const staged = workflow !== null && !overrideOn && !simpleSkip;
   const stagedPipeline = staged && Boolean(workflow?.stages.tester || workflow?.stages.reviewer);
   const reviewOn = staged ? Boolean(workflow?.stages.reviewer) : workflow === null && pipelineOn;
-  // Staged review starts on another vendor where one exists, until changed.
   const shownReview =
     reviewOn && agent && agentModelProblem(review) !== ""
       ? defaultPipeline({ agent: agent.kind, model }, catalog).review
@@ -346,31 +416,62 @@ export function DispatchDialog({
   const overrideValue = overrideReason.trim();
   const overrideInvalid = overrideOn && (!overrideValue || overrideValue.length > MAX_OVERRIDE_CHARS);
 
-  const ready =
-    Boolean(runner && agent && model && repoId) &&
-    !baseError &&
-    !promptError &&
-    !fallbackInvalid &&
-    !reviewInvalid &&
-    !missingCriteria &&
-    !missingTestCommand &&
-    !oldRunner &&
-    !overrideInvalid &&
-    !submitting;
+  const activeContest = !simple && contestOn;
+  const contestShapeError = activeContest && (staged || pipelineOn || fallbacks.length > 0);
+  const activeDraft = useMemo(
+    () => (activeContest ? (contestDraft ?? buildInitialContestDraft(eligible)) : null),
+    [activeContest, contestDraft, eligible],
+  );
+
+  const modeCtx = useMemo(
+    () => ({
+      runner,
+      agent,
+      viewer,
+      edition,
+      staged,
+      pipeline: stagedPipeline || (workflow === null && pipelineOn),
+      fallbacks: fallbacks.length > 0,
+      contest: activeContest,
+    }),
+    [runner, agent, viewer, edition, staged, stagedPipeline, workflow, pipelineOn, fallbacks.length, activeContest],
+  );
+  const defaultModeResult = defaultDispatchMode(modeCtx);
+  const mode = resolveDispatchMode(modeChoice, modePref, defaultModeResult, modeCtx);
+
+  const ready = activeContest
+    ? Boolean(runner && repoId) &&
+      !baseError &&
+      !promptError &&
+      !missingCriteria &&
+      !missingTestCommand &&
+      !oldRunner &&
+      !overrideInvalid &&
+      !contestShapeError &&
+      contestDraftValid(activeDraft, eligible) &&
+      !submitting
+    : Boolean(runner && agent && model && repoId) &&
+      !baseError &&
+      !promptError &&
+      !fallbackInvalid &&
+      !reviewInvalid &&
+      !missingCriteria &&
+      !missingTestCommand &&
+      !oldRunner &&
+      !overrideInvalid &&
+      !submitting;
 
   // "From rule: tag = review", and what of it this runner could not honour.
   const ruleValue =
     suggestion?.value ??
     routingRules?.find((rule) => rule.id === suggestion?.ruleId)?.value ??
     "";
-  // An auto-routing pick (analytics): no rule of the viewer's chose it.
   const autoPick = suggestion?.match === ROUTE_AUTO;
   const ruleNote = suggestion
     ? autoPick
       ? t("runs.route.auto")
       : t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
     : "";
-  // The pick is linked to the run only when the run follows it.
   const routePick =
     autoPick &&
     suggestion?.ruleId.startsWith(`${ROUTE_AUTO}:`) &&
@@ -399,15 +500,49 @@ export function DispatchDialog({
     }
   }
 
-  const submit = async () => {
-    if (!ready || !runner || !agent) return;
+  const submit = async (onBusy?: OnBusy, holderIds?: string[]) => {
+    if (!ready || !runner) return;
+    if (!activeContest && !agent) return;
     setSubmitting(true);
     setError(null);
     try {
+      if (activeContest && activeDraft) {
+        const defaultRunnerId = runner.id;
+        const res = await api.createContest({
+          nodeId,
+          repoId,
+          ...(baseValue ? { base: baseValue } : {}),
+          ...(promptValue ? { prompt: promptValue } : {}),
+          entries: activeDraft.entries.map((entry) => ({
+            runnerId: entry.runnerId || defaultRunnerId,
+            agent: entry.agent,
+            model: entry.model,
+          })),
+          ...(activeDraft.reviewer
+            ? {
+                reviewer: {
+                  runnerId: activeDraft.reviewer.runnerId || defaultRunnerId,
+                  agent: activeDraft.reviewer.agent,
+                  model: activeDraft.reviewer.model,
+                },
+              }
+            : {}),
+          ...(onBusy ? { onBusy } : {}),
+          ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
+        });
+        const runs = res.runs ?? [];
+        useRuns.getState().putRuns(runs);
+        setPendingBusy(null);
+        setBusyChanged(false);
+        if (runs[0]) onCreated(runs[0]);
+        else onClose();
+        return;
+      }
+
       const run = await createRun({
         nodeId,
         runnerId: runner.id,
-        agent: agent.kind,
+        agent: agent!.kind,
         model,
         repoId,
         ...(baseValue ? { base: baseValue } : {}),
@@ -415,19 +550,17 @@ export function DispatchDialog({
         ...(fallbacks.length > 0 ? { fallbacks: fallbacks.map(trimAgentModel) } : {}),
         ...(stagedPipeline
           ? {
-              // The hub runs the frozen stages: the Tester and Executor here
-              // are who it starts with; roles' own routes pick the rest.
               pipeline: {
-                ...(workflow?.stages.tester ? { tester: { agent: agent.kind, model } } : {}),
-                implement: { agent: agent.kind, model },
-                review: workflow?.stages.reviewer ? trimAgentModel(shownReview) : { agent: agent.kind, model },
+                ...(workflow?.stages.tester ? { tester: { agent: agent!.kind, model } } : {}),
+                implement: { agent: agent!.kind, model },
+                review: workflow?.stages.reviewer ? trimAgentModel(shownReview) : { agent: agent!.kind, model },
                 maxRounds: rounds,
               },
             }
           : workflow === null && pipelineOn
             ? {
                 pipeline: {
-                  implement: { agent: agent.kind, model },
+                  implement: { agent: agent!.kind, model },
                   review: trimAgentModel(review),
                   maxRounds: rounds,
                 },
@@ -437,9 +570,18 @@ export function DispatchDialog({
         ...(mode === "interactive" ? { mode } : {}),
         ...(routePick ? { routePick } : {}),
         ...(simple ? { simple: true } : {}),
+        ...(onBusy ? { onBusy } : {}),
+        ...(holderIds && holderIds.length > 0 ? { holderIds } : {}),
       });
+      setPendingBusy(null);
+      setBusyChanged(false);
       onCreated(run);
     } catch (caught) {
+      if (caught instanceof BusyError) {
+        setPendingBusy(caught.busy);
+        setBusyChanged(Boolean(onBusy));
+        return;
+      }
       const text = caught instanceof Error ? caught.message : String(caught);
       const overBudget = caught instanceof RequestError && caught.status === 429;
       const typeRefusal = nodeTypeErrorMessage(caught, nodeId);
@@ -447,19 +589,14 @@ export function DispatchDialog({
         typeRefusal
           ? typeRefusal
           : caught instanceof AuthError && caught.status === 403
-          ? t("runs.permissionDenied", { message: text })
-          : // A 409 is a failed precondition: an old runner, but also a repo
-            // with no test command for the Tester stage. The hub's reason says
-            // which, in the reader's language; the generic line is for a reply
-            // without one.
-            caught instanceof ConflictError
-            ? caught.serverMessage ||
-              t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
-            : overBudget
-              ? t("runs.overBudget", { message: text })
-              : text,
+            ? t("runs.permissionDenied", { message: text })
+            : caught instanceof ConflictError
+              ? caught.serverMessage ||
+                t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
+              : overBudget
+                ? t("runs.overBudget", { message: text })
+                : text,
       );
-      // The refusal names the limit; the warning line catches up with it.
       if (overBudget) void useBudget.getState().load();
     } finally {
       setSubmitting(false);
@@ -469,7 +606,6 @@ export function DispatchDialog({
   const writeCriteria = () => {
     onClose();
     openNodeDetail(nodeId, "content");
-    // The panel mounts its criteria a moment later.
     window.setTimeout(
       () => window.dispatchEvent(new CustomEvent(FOCUS_ACCEPTANCE_EVENT, { detail: nodeId })),
       50,
@@ -486,19 +622,23 @@ export function DispatchDialog({
     openSettings("runners");
   };
 
-  const runnerLabel = (item: Runner) => {
-    const reason = runnerUnavailableReason(item);
+  const runnerCardName = (item: Runner) => {
     const host = item.info?.hostname && item.info.hostname !== item.name ? ` (${item.info.hostname})` : "";
-    const name = runnerDisplayName(t, item.name);
-    return reason
-      ? `${name}${host} — ${t(reason === "offline" ? "runs.runnerOffline" : "runs.runnerNoHeadless")}`
-      : `${name}${host}`;
+    return `${runnerDisplayName(t, item.name)}${host}`;
+  };
+
+  const runnerDisabledReason = (item: Runner) => {
+    const reason = runnerUnavailableReason(item);
+    return reason ? t(reason === "offline" ? "runs.runnerOffline" : "runs.runnerNoHeadless") : "";
   };
 
   const loadingRunners = !runnersLoaded || (runnersLoading && runners.length === 0);
-  // The agent may run any command on this computer: said beside Start.
   const fullAccess = Boolean(
-    localRunner && agent && runner?.id === localRunner.id && permissionOf(runner, agent.kind) === "full",
+    !activeContest &&
+      localRunner &&
+      agent &&
+      runner?.id === localRunner.id &&
+      permissionOf(runner, agent.kind) === "full",
   );
 
   return (
@@ -559,6 +699,14 @@ export function DispatchDialog({
               >
                 {t("budget.adjust")}
               </button>
+            </p>
+          )}
+
+          {hasPreflightBusy && !pendingBusy && (
+            <p className="run-stage-warning" role="status" data-testid="dispatch-busy-preflight">
+              {simple
+                ? t("busy.simple.title", { minutes: minutesSince(preflightBusy?.holders?.[0]?.since) })
+                : t("busy.title")}
             </p>
           )}
 
@@ -646,29 +794,17 @@ export function DispatchDialog({
                 </p>
               )}
               {!localRunner && (
-              <label className="run-field">
-                <span>{t("runs.runner")}</span>
-
-                <select
+                <RunnerCards
+                  runners={mine}
                   value={runner?.id ?? ""}
-                  onChange={(event) => {
+                  onChange={(id) => {
                     touched.current.runner = true;
-                    setRunnerId(event.target.value);
+                    setRunnerId(id);
                   }}
                   disabled={eligible.length === 0}
-                >
-                  {eligible.length === 0 && <option value="">{t("runs.noEligibleOption")}</option>}
-                  {mine.map((item) => (
-                    <option
-                      key={item.id}
-                      value={item.id}
-                      disabled={runnerUnavailableReason(item) !== ""}
-                    >
-                      {runnerLabel(item)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  displayName={runnerCardName}
+                  disabledReason={runnerDisabledReason}
+                />
               )}
 
               {eligible.length === 0 ? (
@@ -680,106 +816,124 @@ export function DispatchDialog({
                 </div>
               ) : (
                 <>
-                  <div className="run-field-row">
-                    <label className="run-field">
-                      <span>{t("runs.agent")}</span>
-                      <select
+                  {!simple && (
+                    <label className="route-toggle">
+                      <input
+                        type="checkbox"
+                        checked={contestOn}
+                        onChange={(event) => {
+                          const on = event.target.checked;
+                          setContestOn(on);
+                          if (on && !contestDraft) {
+                            setContestDraft(buildInitialContestDraft(eligible));
+                          }
+                        }}
+                      />
+                      <span>{t("contest.toggle")}</span>
+                    </label>
+                  )}
+
+                  {activeContest ? (
+                    <ContestForm
+                      runners={eligible}
+                      value={activeDraft ?? undefined}
+                      shapeError={contestShapeError}
+                      disabled={submitting}
+                      onChange={setContestDraft}
+                    />
+                  ) : (
+                    <>
+                      <AgentCards
+                        agents={runner?.info?.agents ?? []}
                         value={agent?.kind ?? ""}
-                        onChange={(event) => {
+                        onChange={(kind) => {
                           touched.current.agent = true;
-                          setAgentKind(event.target.value);
+                          setAgentKind(kind);
                         }}
-                        disabled={agents.length === 0}
-                      >
-                        {agents.length === 0 && <option value="">{t("runs.noAgentsOption")}</option>}
-                        {agents.map((item) => (
-                          <option key={item.kind} value={item.kind}>
-                            {item.version ? `${item.kind} · ${item.version}` : item.kind}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="run-field">
-                      <span>{t("runs.model")}</span>
-                      <select
-                        value={model}
-                        onChange={(event) => {
-                          touched.current.agent = true;
-                          setModel(event.target.value);
-                        }}
-                        disabled={models.length === 0}
-                      >
-                        {models.length === 0 && <option value="">{t("runs.noModelsOption")}</option>}
-                        {models.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {runnerModelLabel(t, item) + (item.default ? t("runs.defaultSuffix") : "")}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  {agents.length === 0 && !localRunner && <p className="run-hint">{t("runs.noAgents")}</p>}
-                  {agents.length === 0 && localRunner && (
-                    <p className="run-hint">
-                      {t("runs.noAgentsLocal")}{" "}
-                      <button type="button" className="run-inline-link" onClick={openThisComputer}>
-                        {t("offerAsk.fixLocal")}
-                      </button>
-                    </p>
-                  )}
-
-                  <details className="run-advanced" data-testid="dispatch-fallbacks">
-                    <summary>{t("routing.fallbacks", { count: fallbacks.length })}</summary>
-                    <FallbackChainEditor
-                      value={fallbacks}
-                      catalog={catalog}
-                      onChange={(next) => {
-                        touched.current.fallbacks = true;
-                        setFallbacks(next);
-                      }}
-                    />
-                  </details>
-
-                  {workflow === null && (
-                  <label className="route-toggle">
-                    <input
-                      type="checkbox"
-                      checked={pipelineOn}
-                      onChange={(event) => {
-                        touched.current.pipeline = true;
-                        const on = event.target.checked;
-                        setPipelineOn(on);
-                        if (on && agentModelProblem(review)) {
-                          setReview(
-                            defaultPipeline({ agent: agent?.kind ?? "", model }, catalog).review,
-                          );
+                        simple={simple}
+                        empty={
+                          !localRunner ? (
+                            <p className="run-hint">{t("runs.noAgents")}</p>
+                          ) : (
+                            <p className="run-hint">
+                              {t("runs.noAgentsLocal")}{" "}
+                              <button type="button" className="run-inline-link" onClick={openThisComputer}>
+                                {t("offerAsk.fixLocal")}
+                              </button>
+                            </p>
+                          )
                         }
-                      }}
-                    />
-                    <span>{t("routing.pipelineToggle")}</span>
-                  </label>
-                  )}
-                  {reviewOn && agent && (
-                    <PipelineFields
-                      value={{ implement: { agent: agent.kind, model }, review: shownReview, maxRounds: rounds }}
-                      catalog={catalog}
-                      implementNote={t("dispatch.implementIsAbove", {
-                        value: agentModelText({ agent: agent.kind, model }),
-                      })}
-                      onChange={(next) => {
-                        touched.current.pipeline = true;
-                        setReview(next.review);
-                        setRounds(next.maxRounds);
-                      }}
-                    />
+                      />
+
+                      {models.length > 0 && (
+                        <ModelCards
+                          agent={agent?.kind ?? ""}
+                          models={models}
+                          value={model}
+                          onChange={(id) => {
+                            touched.current.agent = true;
+                            setModel(id);
+                          }}
+                          simple={simple}
+                        />
+                      )}
+
+                      <details className="run-advanced" data-testid="dispatch-fallbacks">
+                        <summary>{t("routing.fallbacks", { count: fallbacks.length })}</summary>
+                        <FallbackChainEditor
+                          value={fallbacks}
+                          catalog={catalog}
+                          onChange={(next) => {
+                            touched.current.fallbacks = true;
+                            setFallbacks(next);
+                          }}
+                        />
+                      </details>
+
+                      {workflow === null && (
+                        <label className="route-toggle">
+                          <input
+                            type="checkbox"
+                            checked={pipelineOn}
+                            onChange={(event) => {
+                              touched.current.pipeline = true;
+                              const on = event.target.checked;
+                              setPipelineOn(on);
+                              if (on && agentModelProblem(review)) {
+                                setReview(
+                                  defaultPipeline({ agent: agent?.kind ?? "", model }, catalog).review,
+                                );
+                              }
+                            }}
+                          />
+                          <span>{t("routing.pipelineToggle")}</span>
+                        </label>
+                      )}
+                      {reviewOn && agent && (
+                        <PipelineFields
+                          value={{ implement: { agent: agent.kind, model }, review: shownReview, maxRounds: rounds }}
+                          catalog={catalog}
+                          implementNote={t("dispatch.implementIsAbove", {
+                            value: agentModelText({ agent: agent.kind, model }),
+                          })}
+                          onChange={(next) => {
+                            touched.current.pipeline = true;
+                            setReview(next.review);
+                            setRounds(next.maxRounds);
+                          }}
+                        />
+                      )}
+                    </>
                   )}
 
-                  <div className="run-field">
-                    <span className="run-field-label-row">
-                      <label className="run-field-label" htmlFor="run-dispatch-repo">
-                        {t("runs.repo")}
-                      </label>
-                      {runner && repos.length > 0 && (
+                  <RepoCards
+                    mode="one"
+                    repos={repos}
+                    value={repoId}
+                    onChange={setRepoId}
+                    simple={simple}
+                    headerAction={
+                      runner && repos.length > 0 ? (
                         <AddRepoButton
                           runner={runner}
                           onAdded={(added) => {
@@ -787,39 +941,28 @@ export function DispatchDialog({
                             setAddedNote(t("repoAdd.added", { name: added.name }));
                           }}
                         />
-                      )}
-                    </span>
-                    <select
-                      id="run-dispatch-repo"
-                      value={repoId}
-                      onChange={(event) => setRepoId(event.target.value)}
-                      disabled={repos.length === 0}
-                    >
-                      {repos.length === 0 && <option value="">{t("runs.noReposOption")}</option>}
-                      {repos.map((repo) => (
-                        <option key={repo.id} value={repo.id}>
-                          {repo.path ? `${repo.name} — ${repo.path}` : repo.name}
-                        </option>
-                      ))}
-                    </select>
-                    {addedNote && (
-                      <small className="run-hint run-repo-added" role="status">
-                        {addedNote}
-                      </small>
-                    )}
-                  </div>
-                  {repos.length === 0 && runner && (
-                    <div className="run-empty run-empty-left">
-                      <p>{t(localRunner ? "runs.noReposLocal" : "runs.noRepos")}</p>
-                      {!localRunner && <code>nodevas runner repo add &lt;path&gt;</code>}
-                      <AddRepoButton
-                        runner={runner}
-                        onAdded={(added) => {
-                          setRepoId(added.id);
-                          setAddedNote(t("repoAdd.added", { name: added.name }));
-                        }}
-                      />
-                    </div>
+                      ) : undefined
+                    }
+                    empty={
+                      runner ? (
+                        <div className="run-empty run-empty-left">
+                          <p>{t(localRunner ? "runs.noReposLocal" : "runs.noRepos")}</p>
+                          {!localRunner && <code>nodevas runner repo add &lt;path&gt;</code>}
+                          <AddRepoButton
+                            runner={runner}
+                            onAdded={(added) => {
+                              setRepoId(added.id);
+                              setAddedNote(t("repoAdd.added", { name: added.name }));
+                            }}
+                          />
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                  {addedNote && (
+                    <small className="run-hint run-repo-added" role="status">
+                      {addedNote}
+                    </small>
                   )}
 
                   <label className="run-field">
@@ -868,19 +1011,55 @@ export function DispatchDialog({
                     )}
                   </label>
 
-                  <RunModePicker runner={runner} value={mode} onChange={setMode} />
+                  {!activeContest && (
+                    <>
+                      <RunModePicker
+                        runner={runner}
+                        agent={agent}
+                        model={model}
+                        value={mode}
+                        onChange={setModeChoice}
+                        fallbackReason={defaultModeResult.reason}
+                        interactiveDisabled={isInteractiveDisabled(modeCtx)}
+                        simple={simple}
+                      />
 
-                  {runner && (
-                    <AutoAcceptNote
-                      runner={runner}
-                      repoId={repoId}
-                      agent={agent?.kind ?? ""}
-                      mode={mode === "interactive" ? "interactive" : ""}
-                      onVerify={() => setStepUpOpen(true)}
-                    />
+                      {runner && (
+                        <AutoAcceptNote
+                          runner={runner}
+                          repoId={repoId}
+                          agent={agent?.kind ?? ""}
+                          mode={mode === "interactive" ? "interactive" : ""}
+                          onVerify={() => setStepUpOpen(true)}
+                        />
+                      )}
+                    </>
                   )}
                 </>
               )}
+            </>
+          )}
+
+          {pendingBusy && (
+            <>
+              {busyChanged && (
+                <p className="notify-message error" role="status">
+                  {t("busy.changed")}
+                </p>
+              )}
+              <BusyChoice
+                busy={pendingBusy}
+                simple={simple}
+                maxConcurrent={runner?.info?.maxConcurrent}
+                onChoose={(choice) => {
+                  const holderIds = (pendingBusy.holders ?? []).map((h) => h.runId);
+                  void submit(choice as OnBusy, holderIds);
+                }}
+                onCancel={() => {
+                  setPendingBusy(null);
+                  setBusyChanged(false);
+                }}
+              />
             </>
           )}
 

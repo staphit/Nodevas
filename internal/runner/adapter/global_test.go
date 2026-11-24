@@ -54,7 +54,7 @@ func TestGlobalPrompts(t *testing.T) {
 		t.Fatal("Prompt does not use the global preamble for a global job")
 	}
 	wantAll(t, "headless", headless, "global agent (no board, no project)", "agent/tidy-the-readme-run-g1",
-		"Nobody can answer questions", "Do not push", "keeps your branch for its owner to review",
+		"Nobody can answer during this run: decide sensibly.", "Do not push", "keeps your branch for its owner to review",
 		"short summary", "The task:\n\n# Tidy the README\n\nfix typos\n")
 	interactive := InteractivePrompt(job, "agent/tidy-the-readme-run-g1")
 	if interactive != GlobalInteractivePrompt(job, "agent/tidy-the-readme-run-g1") {

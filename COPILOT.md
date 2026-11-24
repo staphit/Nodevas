@@ -87,6 +87,10 @@ You need not ask how it went. When the plan run ends, the copilot writes the out
 
 Tell the copilot how the requirement changes. Once you confirm, it pauses the goal's autopilot (running tasks carry on; only whoever started that autopilot can revise the goal), records the change on the goal under a dated **Revisions** heading, and starts a replan run; the pill reads **Revising…**. Done tasks stay, pending ones may be changed or skipped (a skipped task keeps its history), ones in progress are only flagged, and new ones are added. When it ends, the copilot tells you what was kept, changed, skipped and added and asks whether to resume; nothing resumes until you say yes or press **Resume with revised tasks** in the goal's Autopilot panel.
 
+### When the target is busy
+
+Before `start_breakdown` creates a goal node or starts its plan run, and before `revise_goal` pauses the autopilot, the copilot asks the hub whether another run is already at work on that repository or goal. If one is, nothing is created, paused or started. The tool answers that the target is busy and lists what is running as Station shows it: each run's title, agent and state, who started it and since when, and another member's run only as a count. The copilot tells you, and you start the work from the board, where you choose to wait in line, take over or run both (see [Busy choices](./docs/workstation.md#busy-choices)). The copilot's tools never make that choice for you, so a model that reads board text cannot stop anyone's run. The autopilot `start_autopilot` starts is an automatic start: it waits in line behind a busy node on its own.
+
 ## The autopilot's advisor model
 
 With **Choose per task** in the goal's Autopilot panel, **Chosen by** picks each task's implementer: **Routing rules**, **A fast model on your runner** or **System One (Laya / Jev)**. An autopilot the copilot starts without named implementers uses what your runner offers, System One first. An advisor picks only among the agents and models your runners report; on an error, an offline runner or no answer within 5 seconds (10 for System One), the routing rules decide. The fast model, on the runner:
