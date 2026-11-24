@@ -126,6 +126,19 @@ func (a *API) Register(api *gin.RouterGroup) {
 	a.registerGlobal(api)
 }
 
+// errNoRuns is what a run route says on a hub built without a dispatcher.
+var errNoRuns = locale.Errorf("this hub takes no runs", "這個 hub 不接受執行")
+
+// takesRuns reports whether the hub has a dispatcher. Without one, the route
+// answers 503 UNAVAILABLE, as other features a server is built without do.
+func (a *API) takesRuns(c *gin.Context) bool {
+	if a.d != nil {
+		return true
+	}
+	httpx.Coded(c, http.StatusServiceUnavailable, "UNAVAILABLE", errNoRuns, nil)
+	return false
+}
+
 // missing is what notFound says is not there, in both languages.
 var missing = map[string]*locale.Message{
 	"run":      locale.Say("run not found", "找不到執行"),

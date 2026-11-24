@@ -3,7 +3,6 @@ package runs
 import (
 	"context"
 	"database/sql"
-	"reflect"
 	"slices"
 	"strings"
 	"unicode"
@@ -445,7 +444,6 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		RepoKey: repoKey,
 	}
 
-	customCreate := d.createRun != nil && reflect.ValueOf(d.createRun).Pointer() != reflect.ValueOf(d.store.Create).Pointer()
 	checkBusy := isWritingKind(first.kind, true)
 
 	var record Record
@@ -467,6 +465,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 				OnBusy:     body.OnBusy,
 				HolderIDs:  body.HolderIDs,
 				RunnerCaps: runner.Info.Capabilities,
+				Automatic:  req.Origin == runnerwire.OriginAutopilot,
 			})
 			if err != nil {
 				return err
@@ -485,13 +484,8 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 			pipelineID = p.ID
 			in.PipelineID = pipelineID
 		}
-		if customCreate {
-			var err error
-			record, err = d.createRun(ctx, in)
-			return err
-		}
 		var err error
-		record, err = d.store.createWith(ctx, tx, in)
+		record, err = d.createRun(ctx, tx, in)
 		return err
 	})
 	if err != nil {

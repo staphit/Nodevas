@@ -114,10 +114,6 @@ func (d *Dispatcher) validateGlobal(ctx context.Context, task, slug, base, mode,
 	if !runnerwire.ValidHolderIDs(holderIDs) {
 		return globalValidated{}, invalidField("holderIds", "holderIds is not valid", "holderIds 無效")
 	}
-	if group {
-		// Group repoIds checked before runner lookup so malformed requests fail fast.
-	}
-
 	// The runner must be the caller's own, administrators included, as for
 	// a node's run: it executes on the owner's machine with their logins.
 	runner, err := d.reg.Get(ctx, runnerID)

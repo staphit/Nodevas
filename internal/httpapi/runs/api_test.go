@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -74,11 +76,12 @@ func TestStartErrorCarriesBusy(t *testing.T) {
 		t.Fatalf("group body = %+v, %v", groupGot, err)
 	}
 
-	// All newly registered routes coexist cleanly on Gin and return 501 stubs.
+	// The terminal dialog's routes coexist on Gin with the rest, and on a hub
+	// built without a dispatcher each says plainly that it takes no runs.
 	router := gin.New()
 	api := New(nil, nil, nil)
 	api.Register(router.Group("/api"))
-	stubs := [][2]string{
+	routes := [][2]string{
 		{http.MethodPost, "/api/global-runs/r1/follow-up"},
 		{http.MethodGet, "/api/global-runs/r1/thread"},
 		{http.MethodPost, "/api/global-runs/r1/end"},
@@ -99,12 +102,42 @@ func TestStartErrorCarriesBusy(t *testing.T) {
 		{http.MethodPost, "/api/contests/c1/pick"},
 		{http.MethodPost, "/api/contests/c1/cancel"},
 	}
-	for _, tc := range stubs {
+	for _, tc := range routes {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(tc[0], tc[1], nil)
 		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotImplemented {
-			t.Errorf("%s %s = %d, want 501", tc[0], tc[1], rec.Code)
+		var body struct {
+			Code string `json:"code"`
 		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if rec.Code != http.StatusServiceUnavailable || body.Code != "UNAVAILABLE" {
+			t.Errorf("%s %s = %d %q, want 503 UNAVAILABLE", tc[0], tc[1], rec.Code, body.Code)
+		}
+	}
+}
+
+// A follow-up, alone or for a group, takes simple like POST /api/global-runs:
+// the strict decoder accepts it beside the wire fields and keeps both.
+func TestFollowUpBodiesTakeSimple(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	decode := func(raw string, dst any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(raw))
+		c.Request.Header.Set("Content-Type", "application/json")
+		if !httpx.DecodeJSONLimit(c, dst, maxGlobalBody) {
+			t.Fatalf("decode %s refused: %d %s", raw, w.Code, w.Body.String())
+		}
+	}
+	var one followUpBody
+	decode(`{"message":"Make it bigger","mode":"interactive","simple":true}`, &one)
+	if one.Message != "Make it bigger" || one.Mode != runnerwire.ModeInteractive || !one.Simple {
+		t.Fatalf("follow-up body = %+v", one)
+	}
+	var group groupFollowUpBody
+	decode(`{"message":"Again","only":"failed","simple":true}`, &group)
+	if group.Message != "Again" || group.Only != "failed" || !group.Simple {
+		t.Fatalf("group follow-up body = %+v", group)
 	}
 }

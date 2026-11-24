@@ -33,8 +33,7 @@ func (a *API) visibleGroup(c *gin.Context) (runs.GroupRecord, bool) {
 }
 
 func (a *API) createGlobalGroup(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
@@ -86,8 +85,7 @@ func (a *API) createGlobalGroup(c *gin.Context) {
 }
 
 func (a *API) getGlobalGroup(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	g, ok := a.visibleGroup(c)
@@ -111,8 +109,7 @@ func (a *API) getGlobalGroup(c *gin.Context) {
 }
 
 func (a *API) cancelGlobalGroup(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	g, ok := a.visibleGroup(c)
@@ -141,8 +138,7 @@ func (a *API) cancelGlobalGroup(c *gin.Context) {
 }
 
 func (a *API) resumeGlobalGroup(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	g, ok := a.visibleGroup(c)
@@ -159,15 +155,14 @@ func (a *API) resumeGlobalGroup(c *gin.Context) {
 }
 
 func (a *API) followUpGlobalGroup(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	g, ok := a.visibleGroup(c)
 	if !ok {
 		return
 	}
-	var body runnerwire.GroupFollowUpRequest
+	var body groupFollowUpBody
 	if !httpx.DecodeJSONLimit(c, &body, maxGlobalBody) {
 		return
 	}
@@ -180,12 +175,13 @@ func (a *API) followUpGlobalGroup(c *gin.Context) {
 	}
 	res, err := a.d.FollowUpGroup(c.Request.Context(), runs.GroupFollowUpRequest{
 		GroupID:     g.ID,
-		Body:        body,
+		Body:        body.GroupFollowUpRequest,
 		Actor:       actor,
 		ActorID:     actor.ID,
 		ActorName:   actor.Name,
 		IsAgent:     actor.IsAgent(),
 		SteppedUpAt: steppedUpAt,
+		Simple:      body.Simple,
 	})
 	if err != nil {
 		var refused *runs.StartError

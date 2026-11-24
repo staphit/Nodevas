@@ -322,6 +322,26 @@ func (s *Store) activeOtherLineageOnNode(ctx context.Context, r Record) (bool, e
 	return false, nil
 }
 
+// takenOver reports whether node run r, now ending, was stopped by a
+// take-over (§C.2.5), from the stored runs alone so a hub restarted between
+// the take-over and r's end still knows. A take-over stops every visible
+// unfinished holder on its node (a hidden one refuses it), so r was one of
+// them exactly when a take-over run on r's node was created after r and
+// before r ended; r is ending now, so "after r" is enough. after_run names
+// only the newest holder, which is why it is not the test. The take-over run
+// counts whatever became of it: one withdrawn before r finished still
+// stopped r.
+func (s *Store) takenOver(ctx context.Context, r Record) (bool, error) {
+	if r.Global || r.NodeID == "" {
+		return false, nil
+	}
+	var found bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs
+ WHERE NOT is_global AND project = ? AND node_id = ? AND busy_choice = ? AND created_at > ? AND id <> ?)`,
+		r.Project, r.NodeID, runnerwire.OnBusyTakeOver, r.CreatedAt, r.ID).Scan(&found)
+	return found, err
+}
+
 // waitingRunnersFor finds distinct runner IDs that have queued busy runs or
 // queued writing pipeline/handoff runs waiting on r's node or repository, and
 // reports whether any queued busy run waits specifically on r's node.

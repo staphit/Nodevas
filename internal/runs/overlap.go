@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"unicode"
 
 	"nodevas/internal/agents"
@@ -18,11 +17,6 @@ import (
 // prompt (§C.3.3).
 const maxOverlapNoteBytes = 1024
 
-// coordinationMailHooks holds optional agent-mail callbacks registered via
-// SetCoordinationMail (§C.3.3). Stored outside Dispatcher struct so coordhooks.go
-// and dispatcher.go remain untouched.
-var coordinationMailHooks sync.Map // *Dispatcher -> func(ctx context.Context, project, runID, body string) error
-
 // SetCoordinationMail registers the callback that delivers Layer 2 overlap
 // coordination notices to a node run's own MCP session (§C.3.3). Call it before
 // serving.
@@ -30,26 +24,14 @@ func (d *Dispatcher) SetCoordinationMail(fn func(ctx context.Context, project, r
 	if d == nil {
 		return
 	}
-	if fn == nil {
-		coordinationMailHooks.Delete(d)
-		return
-	}
-	coordinationMailHooks.Store(d, fn)
+	d.coord.coordinationMail = fn
 }
 
 func (d *Dispatcher) sendCoordinationMail(ctx context.Context, project, runID, body string) error {
-	if d == nil {
+	if d == nil || d.coord.coordinationMail == nil {
 		return agents.ErrNoSession
 	}
-	raw, ok := coordinationMailHooks.Load(d)
-	if !ok {
-		return agents.ErrNoSession
-	}
-	fn, _ := raw.(func(ctx context.Context, project, runID, body string) error)
-	if fn == nil {
-		return agents.ErrNoSession
-	}
-	return fn(ctx, project, runID, body)
+	return d.coord.coordinationMail(ctx, project, runID, body)
 }
 
 // Touched records newly touched repo-relative paths reported by a runner for

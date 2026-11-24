@@ -6,11 +6,17 @@ import (
 	"nodevas/internal/runnerwire"
 )
 
-// coordHooks holds coordination callbacks wired by the server and optional
-// test seams used by F1 unit tests (nil in production). This file belongs to
-// F1 alone so later waves replacing the stub files keep every hook intact.
+// coordHooks holds the coordination callbacks the server wires in before
+// serving (§C.2.5, §C.3.3), and test seams that are nil in production. They
+// are the dispatcher's own fields, set once at start-up and only read after.
 type coordHooks struct {
 	releaseRunClaim func(ctx context.Context, project, nodeID, runID string)
+	// nodeDoneOrClaimed reports whether a board node is done or has a live
+	// claim at offer time (SetNodeCoordCheck).
+	nodeDoneOrClaimed func(ctx context.Context, project, nodeID string) bool
+	// coordinationMail delivers a Layer 2 overlap notice to a node run's own
+	// MCP session (SetCoordinationMail).
+	coordinationMail func(ctx context.Context, project, runID, body string) error
 
 	// Test seams (nil outside tests).
 	onWaitsBehind       func(ctx context.Context, r Record) bool

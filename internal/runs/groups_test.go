@@ -288,7 +288,13 @@ func TestStartGlobalGroupPromptListsSiblings(t *testing.T) {
 	}
 }
 
-func TestTwoConcurrentGroupsCannotOvershootBudget(t *testing.T) {
+// Two groups started at once never take more runs than the budget has room
+// for. Today this holds because the hub has one writer connection
+// (db.OpenPostgres), which runs the two start transactions one after the
+// other; the budget:<owner> advisory lock StartGlobalGroup takes is what
+// would keep it true with more writers, and this test cannot tell the two
+// apart.
+func TestTwoConcurrentGroupsStayWithinBudget(t *testing.T) {
 	f, _ := newGlobalFixture(t, groupHello(1, "api", "web", "worker", "cli", "docs", "infra"))
 	ctx := context.Background()
 

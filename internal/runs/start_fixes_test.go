@@ -14,7 +14,7 @@ import (
 func TestCriteriaLockedOnlyAfterTheRunIsRecorded(t *testing.T) {
 	f := newRoleFixture(t, true)
 	locked := 0
-	f.d.createRun = func(context.Context, New) (Record, error) { return Record{}, errors.New("disk full") }
+	f.d.createRun = func(context.Context, querier, New) (Record, error) { return Record{}, errors.New("disk full") }
 	_, err := f.roleStart(t, lightStages(), criteria("GET /x returns 200"), func(req *StartRequest) {
 		req.LockAcceptance = func() error { locked++; return nil }
 	})

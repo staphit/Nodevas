@@ -513,6 +513,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 	return scanRun(q.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 }
 
+// runColumns is every column scanRun reads, plus three derived ones. The
+// first, continuedBy, looks up a row's non-withdrawn follow-up for every run
+// read. Its WHERE repeats the partial unique index runs_one_continuation's
+// predicate word for word (continue_of is not empty, and the not-withdrawn
+// test):
+// "c.continue_of = runs.id" alone compares with the outer row, which the
+// planner cannot prove non-empty, so it could not use the index and scanned
+// runs once per row listed. TestContinuedBySubqueryUsesPartialIndex holds the
+// plan to the index.
 const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agent, model,
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
@@ -525,7 +534,7 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        is_global, branch_slug, no_pr, origin, decline_code, draft, failure_code,
        continue_of, work_root, view_only, reset_at, end_reason, push_refused, group_id,
        after_run, busy_choice, repo_key, contest_id, contest_label,
-       COALESCE((SELECT c.id FROM runs c WHERE c.continue_of = runs.id AND NOT (c.status IN ('cancelled', 'declined') AND c.started_at = '') LIMIT 1), ''),
+       COALESCE((SELECT c.id FROM runs c WHERE c.continue_of = runs.id AND c.continue_of <> '' AND NOT (c.status IN ('cancelled', 'declined') AND c.started_at = '') LIMIT 1), ''),
        (SELECT COUNT(*) FROM run_overlaps o WHERE (o.run_a = runs.id OR o.run_b = runs.id) AND o.strong_count > 0),
        CASE WHEN contest_id = '' THEN 0 ELSE COALESCE((SELECT rc.entry_count FROM run_contests rc WHERE rc.id = runs.contest_id), 0) END`
 
@@ -1001,11 +1010,17 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 // one exists. Withdrawn follow-ups (cancelled or declined before starting) are
 // ignored, matching the runs_one_continuation unique index.
 func (s *Store) Successor(ctx context.Context, runID string) (Record, bool, error) {
+	return s.successorWith(ctx, s.db, runID)
+}
+
+func (s *Store) successorWith(ctx context.Context, q querier, runID string) (Record, bool, error) {
 	if runID == "" {
 		return Record{}, false, nil
 	}
-	r, err := scanRun(s.db.QueryRowContext(ctx,
-		`SELECT `+runColumns+` FROM runs WHERE continue_of = ? AND `+notWithdrawnSQL+` LIMIT 1`, runID))
+	// "continue_of <> ''" restates the index predicate so the planner can use
+	// runs_one_continuation even for a generic plan (see runColumns).
+	r, err := scanRun(q.QueryRowContext(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE continue_of = ? AND continue_of <> '' AND `+notWithdrawnSQL+` LIMIT 1`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, false, nil
 	}
@@ -1019,16 +1034,41 @@ func (s *Store) Successor(ctx context.Context, runID string) (Record, bool, erro
 // belongs to workRoot (either as the root itself or with work_root = workRoot),
 // optionally excluding excludeRunID.
 func (s *Store) ActiveInWork(ctx context.Context, workRoot, excludeRunID string) (bool, error) {
+	return s.activeInWorkWith(ctx, s.db, workRoot, excludeRunID)
+}
+
+func (s *Store) activeInWorkWith(ctx context.Context, q querier, workRoot, excludeRunID string) (bool, error) {
 	if workRoot == "" {
 		return false, nil
 	}
 	var n int
-	err := s.db.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM runs
 WHERE (id = ? OR work_root = ?) AND status IN (?, ?, ?) AND (? = '' OR id <> ?)`,
 		workRoot, workRoot, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning,
 		excludeRunID, excludeRunID).Scan(&n)
 	return n > 0, err
+}
+
+// mergePendingInWork reports, through q, whether a merge approval is waiting
+// on any turn of workRoot.
+func (s *Store) mergePendingInWork(ctx context.Context, q querier, workRoot string) (bool, error) {
+	if workRoot == "" {
+		return false, nil
+	}
+	var n int
+	err := q.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM run_merges m JOIN runs r ON r.id = m.run_id
+WHERE (r.id = ? OR r.work_root = ?) AND m.status = ?`,
+		workRoot, workRoot, runnerwire.MergePending).Scan(&n)
+	return n > 0, err
+}
+
+// lockWork takes the transaction-scoped advisory lock "work:<root>" that a
+// follow-up and a merge approval on one global work both take (§6.3), so
+// each sees the other's row before it decides.
+func lockWork(ctx context.Context, tx *sql.Tx, workRoot string) error {
+	return lockBusy(ctx, tx, "work:"+workRoot)
 }
 
 // PriorFinal reports whether continueOf has reached a final status. An empty

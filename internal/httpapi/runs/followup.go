@@ -9,23 +9,36 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
-	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
 
+// followUpBody is POST /api/global-runs/:id/follow-up's body: the wire request
+// plus simple, the Simple-mode flag POST /api/global-runs also takes. With it
+// the hub adds its fixed plain-words instruction (runs.SimpleInstruction).
+type followUpBody struct {
+	runnerwire.FollowUpRequest
+	Simple bool `json:"simple,omitempty"`
+}
+
+// groupFollowUpBody is POST /api/global-runs/groups/:id/follow-up's body,
+// with simple as in followUpBody.
+type groupFollowUpBody struct {
+	runnerwire.GroupFollowUpRequest
+	Simple bool `json:"simple,omitempty"`
+}
+
 // POST /api/global-runs/:id/follow-up: continues a global run in the same
 // worktree folder and branch (or queues a reply while a background run works).
 func (a *API) followUp(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	r, ok := a.visible(c)
 	if !ok {
 		return
 	}
-	var body runnerwire.FollowUpRequest
+	var body followUpBody
 	if !httpx.DecodeJSONLimit(c, &body, maxGlobalBody) {
 		return
 	}
@@ -38,12 +51,13 @@ func (a *API) followUp(c *gin.Context) {
 	}
 	record, err := a.d.FollowUp(c.Request.Context(), runs.FollowUpRequest{
 		PriorID:     r.ID,
-		Body:        body,
+		Body:        body.FollowUpRequest,
 		Actor:       actor,
 		ActorID:     actor.ID,
 		ActorName:   actor.Name,
 		IsAgent:     actor.IsAgent(),
 		SteppedUpAt: steppedUpAt,
+		Simple:      body.Simple,
 	})
 	if err != nil {
 		followUpFailed(c, err)
@@ -72,8 +86,7 @@ func followUpFailed(c *gin.Context, err error) {
 // GET /api/global-runs/:id/thread: returns every non-withdrawn turn of a global
 // run's work chain, oldest first (at most 50).
 func (a *API) thread(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	r, ok := a.visible(c)
@@ -96,8 +109,7 @@ func (a *API) thread(c *gin.Context) {
 // POST /api/runs/:id/end and POST /api/global-runs/:id/end: asks the runner to
 // gracefully quit a running interactive session and publish/keep its work (§7.1).
 func (a *API) endRun(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	r, ok := a.visible(c)

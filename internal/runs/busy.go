@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"sync"
 
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
@@ -27,42 +26,22 @@ const maxAfterSummaryBytes = 2 << 10
 // prior belonged to another member (§C.2.3, §C.10).
 const hiddenAfterNotice = "Another run on this task finished before yours; check the base branch and open pull requests for its work."
 
-// takenOverRuns records run IDs stopped by a take-over so busyEnded releases
-// their board claim even if the queued take-over run was cancelled before the
-// holder finished (§C.2.5).
-var takenOverRuns sync.Map // runID -> struct{}
-
-// nodeCoordChecks holds optional callbacks registered via SetNodeCoordCheck to
-// report whether a board node is done or has a live claim at offer time (§C.2.5).
-var nodeCoordChecks sync.Map // *Dispatcher -> func(ctx context.Context, project, nodeID string) bool
-
 // SetNodeCoordCheck registers a callback that reports whether (project, nodeID)
 // is currently done or holds a live board claim, so coordJob marks queued and
-// take-over runs as Job.Coordinated at offer time (§C.2.5).
+// take-over runs as Job.Coordinated at offer time (§C.2.5). Call it before
+// serving.
 func (d *Dispatcher) SetNodeCoordCheck(fn func(ctx context.Context, project, nodeID string) bool) {
 	if d == nil {
 		return
 	}
-	if fn == nil {
-		nodeCoordChecks.Delete(d)
-		return
-	}
-	nodeCoordChecks.Store(d, fn)
+	d.coord.nodeDoneOrClaimed = fn
 }
 
 func (d *Dispatcher) nodeDoneOrClaimed(ctx context.Context, project, nodeID string) bool {
-	if d == nil || project == "" || nodeID == "" {
+	if d == nil || project == "" || nodeID == "" || d.coord.nodeDoneOrClaimed == nil {
 		return false
 	}
-	raw, ok := nodeCoordChecks.Load(d)
-	if !ok {
-		return false
-	}
-	fn, _ := raw.(func(ctx context.Context, project, nodeID string) bool)
-	if fn == nil {
-		return false
-	}
-	return fn(ctx, project, nodeID)
+	return d.coord.nodeDoneOrClaimed(ctx, project, nodeID)
 }
 
 // Lineage identifies runs that belong to the same lineage and never block each
@@ -101,6 +80,10 @@ type BusyRequest struct {
 	HolderIDs  []string
 	RunnerCaps []string
 	Group      bool
+	// Automatic is a start nobody clicked (the autopilot). Asked to queue on
+	// a node whose runner lacks CapCoord, it still waits behind the holder
+	// in Pump order rather than failing as a person's start does.
+	Automatic bool
 }
 
 // BusyOutcome is the result of applyBusy.
@@ -382,7 +365,12 @@ func (d *Dispatcher) applyBusy(ctx context.Context, tx *sql.Tx, br BusyRequest) 
 		}, nil
 
 	case runnerwire.OnBusyQueue:
-		if !slices.Contains(resp.Choices, runnerwire.OnBusyQueue) {
+		// The autopilot always asks to queue. On an older runner (no
+		// CapCoord) a person is offered only take-over, but an automatic
+		// start must not fail where it used to start: it waits behind the
+		// newest holder like any queued run. Waiting is the hub's alone; the
+		// runner sees an ordinary offer once the holder has ended.
+		if !slices.Contains(resp.Choices, runnerwire.OnBusyQueue) && !(br.Automatic && !br.Query.Global && !br.Group) {
 			return BusyOutcome{}, invalidField("onBusy",
 				"update nodevas on this computer to run both or wait in line",
 				"請更新這台電腦上的 nodevas，才能同時執行或排隊")
@@ -459,9 +447,6 @@ func (d *Dispatcher) afterBusy(ctx context.Context, actor identity.Actor, o Busy
 			project = cur.Project
 		}
 		stopped = append(stopped, cur.ID)
-		if !cur.Global && cur.NodeID != "" {
-			takenOverRuns.Store(cur.ID, struct{}{})
-		}
 
 		// Running interactive run the actor may End -> graceful End (with noPR on node runs).
 		if cur.Status == runnerwire.RunRunning && cur.Mode == runnerwire.ModeInteractive && MayEnd(actor, cur) {
@@ -719,18 +704,24 @@ func (d *Dispatcher) busyEnded(ctx context.Context, r Record) {
 	if d == nil || d.store == nil {
 		return
 	}
-	_, takenOver := takenOverRuns.LoadAndDelete(r.ID)
 	runnersToPump, waitingOnNode, err := d.store.waitingRunnersFor(ctx, r)
 	if err != nil {
 		slog.Warn("runs: busyEnded lookup", slog.String("run", r.ID), slog.Any("error", err))
 		return
 	}
+	takenOver := false
+	if !r.Global && r.NodeID != "" && !waitingOnNode {
+		if takenOver, err = d.store.takenOver(ctx, r); err != nil {
+			slog.Warn("runs: busyEnded take-over lookup", slog.String("run", r.ID), slog.Any("error", err))
+		}
+	}
 	if !r.Global && r.NodeID != "" && (takenOver || waitingOnNode) {
 		d.releaseClaim(ctx, r.Project, r.NodeID, r.ID)
 	}
 	for _, runnerID := range runnersToPump {
-		// The caller of afterEnd already pumps r.RunnerID (or is inside Pump
-		// holding d.lock(r.RunnerID) in cancelIfOverCostOrTokens).
+		// The caller of afterEnd pumps r.RunnerID itself (Finish, Cancel, or
+		// Pump after a budget cancel). No caller holds a runner lock here:
+		// Pump cancels only after releasing its own (dispatcher.go).
 		if runnerID == r.RunnerID {
 			continue
 		}

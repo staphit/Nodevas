@@ -19,8 +19,7 @@ import (
 // It reads on the reader pool and answers the preflight busy state for a node
 // start (or repo check alone when nodeId is omitted, e.g. copilot start_breakdown).
 func (a *API) runsBusy(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	_, projectName, ok := a.requestProject(c)
@@ -85,8 +84,7 @@ func (a *API) runsBusy(c *gin.Context) {
 // Person-only and own-runner-only (admins included); answers per-repo busy
 // status on the reader pool (§C.2.2, §C.6).
 func (a *API) globalBusy(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	runnerID := strings.TrimSpace(c.Query("runnerId"))
