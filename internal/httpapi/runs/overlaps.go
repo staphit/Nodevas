@@ -6,8 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/auth"
-	"nodevas/internal/httpapi/httpx"
-	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -15,8 +13,7 @@ import (
 // (§C.6). Both routes sit behind personOnly, and a.visible enforces canSee plus
 // project vs global route scoping.
 func (a *API) runOverlaps(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	r, ok := a.visible(c)

@@ -3,7 +3,6 @@ package agents
 import (
 	"context"
 	"strings"
-	"sync"
 )
 
 // ClaimStore is the narrow board-claim surface ReleaseRunClaim needs to check
@@ -18,30 +17,24 @@ type ClaimStore interface {
 // available.
 type ClaimStoreFunc func(project string) ClaimStore
 
-var hubClaimStores sync.Map // *Hub -> ClaimStoreFunc
-
 // SetClaimStore registers how h resolves a project's board claim store for
 // ReleaseRunClaim (§C.2.5). Call it before serving.
 func (h *Hub) SetClaimStore(fn ClaimStoreFunc) {
 	if h == nil {
 		return
 	}
-	if fn == nil {
-		hubClaimStores.Delete(h)
-		return
-	}
-	hubClaimStores.Store(h, fn)
+	h.mu.Lock()
+	h.claimStores = fn
+	h.mu.Unlock()
 }
 
 func (h *Hub) claimStoreFor(project string) ClaimStore {
 	if h == nil {
 		return nil
 	}
-	raw, ok := hubClaimStores.Load(h)
-	if !ok {
-		return nil
-	}
-	fn, _ := raw.(ClaimStoreFunc)
+	h.mu.Lock()
+	fn := h.claimStores
+	h.mu.Unlock()
 	if fn == nil {
 		return nil
 	}

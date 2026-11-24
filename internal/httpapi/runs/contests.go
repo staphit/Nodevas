@@ -107,8 +107,7 @@ type createGlobalContestPayload struct {
 }
 
 func (a *API) createContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
@@ -156,8 +155,7 @@ func (a *API) createContest(c *gin.Context) {
 }
 
 func (a *API) createGlobalContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
@@ -196,8 +194,7 @@ func (a *API) createGlobalContest(c *gin.Context) {
 }
 
 func (a *API) getContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	contest, ok := a.visibleContest(c)
@@ -223,8 +220,7 @@ func (a *API) getContest(c *gin.Context) {
 }
 
 func (a *API) judgeContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	contest, actor, ok := a.creatorOnlyContest(c)
@@ -262,8 +258,7 @@ func (a *API) judgeContest(c *gin.Context) {
 }
 
 func (a *API) pickContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	contest, actor, ok := a.creatorOnlyContest(c)
@@ -302,8 +297,7 @@ func (a *API) pickContest(c *gin.Context) {
 }
 
 func (a *API) cancelContest(c *gin.Context) {
-	if a.d == nil {
-		httpx.Coded(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", locale.Errorf("not implemented", "尚未實作"), nil)
+	if !a.takesRuns(c) {
 		return
 	}
 	contest, ok := a.visibleContest(c)

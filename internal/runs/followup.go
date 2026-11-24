@@ -2,7 +2,9 @@ package runs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
+	"nodevas/internal/redact"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
@@ -185,8 +188,7 @@ func (d *Dispatcher) FollowUp(ctx context.Context, req FollowUpRequest) (Record,
 	if active, err := d.store.ActiveInWork(ctx, workRoot, excludeID); err != nil {
 		return Record{}, err
 	} else if active {
-		return Record{}, stageRefusal(CodeInUse,
-			locale.Errorf("another turn of this work is still running", "這份工作還有一輪在執行"))
+		return Record{}, inUseRefusal()
 	}
 
 	// 7. The work is still open: workspace not merged_local or discarded,
@@ -261,11 +263,7 @@ func (d *Dispatcher) FollowUp(ctx context.Context, req FollowUpRequest) (Record,
 	extra := withSimple(d.overlapNote(ctx, prior), req.Simple)
 	jobPrompt := BuildPrompt(title, rest, "", extra)
 
-	createRun := d.createRun
-	if createRun == nil {
-		createRun = d.store.Create
-	}
-	record, err := createRun(ctx, New{
+	in := New{
 		Global:        true,
 		NodeTitle:     title,
 		BranchSlug:    slug,
@@ -289,9 +287,38 @@ func (d *Dispatcher) FollowUp(ctx context.Context, req FollowUpRequest) (Record,
 		WorkRoot:      workRoot,
 		GroupID:       prior.GroupID,
 		Origin:        runnerwire.OriginPerson,
+	}
+	// Checks 5-7 above read without a lock, so a refusal comes in its order.
+	// A merge approval (Merge) checks for an unfinished turn and inserts its
+	// row under the same work lock, so the decisive repeat of the checks a
+	// merge or another follow-up could race with is here, in the transaction
+	// that records the run.
+	var record Record
+	err = d.store.db.Tx(ctx, func(tx *sql.Tx) error {
+		if err := lockWork(ctx, tx, workRoot); err != nil {
+			return err
+		}
+		if _, ok, err := d.store.successorWith(ctx, tx, prior.ID); err != nil {
+			return err
+		} else if ok {
+			return errContinuedMeanwhile
+		}
+		if active, err := d.store.activeInWorkWith(ctx, tx, workRoot, excludeID); err != nil {
+			return err
+		} else if active {
+			return inUseRefusal()
+		}
+		if pending, err := d.store.mergePendingInWork(ctx, tx, workRoot); err != nil {
+			return err
+		} else if pending {
+			return mergePendingRefusal()
+		}
+		var err error
+		record, err = d.createRun(ctx, tx, in)
+		return err
 	})
 	if err != nil {
-		if db.IsUniqueViolation(err, "runs_one_continuation") {
+		if errors.Is(err, errContinuedMeanwhile) || db.IsUniqueViolation(err, "runs_one_continuation") {
 			if latestID, lErr := d.store.LatestTurnID(ctx, workRoot); lErr == nil && latestID != "" {
 				return Record{}, continuedRefusal(latestID)
 			}
@@ -313,6 +340,24 @@ func (d *Dispatcher) FollowUp(ctx context.Context, req FollowUpRequest) (Record,
 	return d.Submit(ctx, record), nil
 }
 
+// continueJob fills a follow-up's offer with what its prior turn was asked and
+// what it reported (§6.2): the runner's carry-over prompt when the agent's own
+// session cannot be resumed. The summary is an agent's output, so it is
+// redacted here like every other output the hub hands on, and cut to
+// MaxSummaryBytes (4 KiB). The runner redacts both again on its side.
+func (d *Dispatcher) continueJob(ctx context.Context, r Record, job *runnerwire.Job) {
+	if r.ContinueOf == "" || job == nil {
+		return
+	}
+	prior, err := d.store.Get(ctx, r.ContinueOf)
+	if err != nil {
+		slog.Warn("runs: read prior turn", slog.String("run", r.ID), slog.String("prior", r.ContinueOf), slog.Any("error", err))
+		return
+	}
+	job.ContinueTask = Truncate(redact.Output(prior.JobPrompt), runnerwire.MaxPromptBytes)
+	job.ContinueSummary = Truncate(redact.Output(strings.TrimSpace(prior.Summary)), runnerwire.MaxSummaryBytes)
+}
+
 func checkWorkOpen(turns []Record) error {
 	for _, t := range turns {
 		if t.Workspace == runnerwire.RunWorkspaceMergedLocal || t.Workspace == runnerwire.RunWorkspaceDiscarded {
@@ -325,11 +370,24 @@ func checkWorkOpen(turns []Record) error {
 					"它的 pull request 已合併或關閉，請開始新工作"))
 		}
 		if t.Merge != nil && t.Merge.Status == runnerwire.MergePending {
-			return stageRefusal(CodeMergePending,
-				locale.Errorf("a merge is pending; continue after it", "正在等待合併，完成後再接續"))
+			return mergePendingRefusal()
 		}
 	}
 	return nil
+}
+
+// errContinuedMeanwhile is FollowUp's in-transaction finding that another
+// follow-up continued the prior since the first check; it becomes CONTINUED.
+var errContinuedMeanwhile = locale.Errorf("this turn was already continued", "這一輪已有後續")
+
+func inUseRefusal() error {
+	return stageRefusal(CodeInUse,
+		locale.Errorf("another turn of this work is still running", "這份工作還有一輪在執行"))
+}
+
+func mergePendingRefusal() error {
+	return stageRefusal(CodeMergePending,
+		locale.Errorf("a merge is pending; continue after it", "正在等待合併，完成後再接續"))
 }
 
 func resetInFuture(resetAt string, now time.Time) bool {
