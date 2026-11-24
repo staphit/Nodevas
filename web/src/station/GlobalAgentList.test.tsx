@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { api, forgetGlobalRuns, WorkspaceActionError, type Run, type RunnerLoad } from "../api";
+import { api, forgetGlobalRuns, rememberGlobalRuns, WorkspaceActionError, type Run, type RunnerLoad } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { localRunner } from "../local/localFixtures";
 import { readPreferences } from "../preferences";
@@ -445,6 +445,44 @@ describe("GlobalAgentList", () => {
         commit: "c0ffee1234567",
         finishedAt: "2026-11-14T08:10:00Z",
       });
+
+    // "Start new work with this" on a merged PR opens the row and fills its
+    // composer with the whole task; nothing starts until the person sends.
+    it("opens the row's composer with the whole task for Start new work", async () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const merged = makeGlobalRun({
+        id: "g3",
+        title: "Bakery page",
+        runnerId: "local1",
+        runnerName: "this machine",
+        status: "succeeded",
+        noPR: false,
+        prUrl: "https://github.com/o/r/pull/9",
+        prState: "merged",
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      rememberGlobalRuns([merged]);
+      useRuns.getState().putRun(merged);
+      seed([merged]);
+      const task = "Bakery page\n\nWith a menu and opening hours.";
+      vi.mocked(api.getRunEvents).mockResolvedValue({
+        events: [{ seq: 0, type: "user", text: task, at: "2026-11-14T08:00:00Z" }],
+        more: false,
+      });
+      const create = vi.spyOn(api, "createGlobalRun");
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() =>
+        expect(document.querySelector(".global-agent-dialog-row textarea.run-dlg-textarea")).toHaveValue(task),
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
 
     it("shows Take a look and Apply to my folder in place of Merge locally", () => {
       viewer = null;

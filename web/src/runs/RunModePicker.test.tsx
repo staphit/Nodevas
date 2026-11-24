@@ -10,6 +10,9 @@ import { DispatchDialog } from "./DispatchDialog";
 import {
   defaultDispatchMode,
   effectiveDispatchMode,
+  followUpMode,
+  isInteractiveDisabled,
+  resolveDispatchMode,
   runnerSupportsInteractive,
   type DefaultDispatchModeContext,
 } from "./RunModePicker";
@@ -232,6 +235,65 @@ describe("defaultDispatchMode decision matrix", () => {
       mode: "headless",
       reason: "contest",
     });
+  });
+});
+
+// A saved "interactive" preference (or a card picked earlier) must never
+// start interactive where §8.1 says it cannot or must not.
+describe("hard reasons win over the saved preference and a pick", () => {
+  const base: DefaultDispatchModeContext = {
+    runner: desktop,
+    agent: interactiveAgent,
+    viewer: alice,
+    edition: "team",
+  };
+  const noTypingRunner: Runner = {
+    ...desktop,
+    info: {
+      ...desktop.info!,
+      autoAccept: { enabled: true, requireStepUp: false, modes: ["", "interactive"], allowRemoteTyping: false },
+    },
+  };
+  const hard: Array<[string, DefaultDispatchModeContext]> = [
+    ["untrusted", { ...base, agent: { ...interactiveAgent, untrusted: true } }],
+    ["teammate", { ...base, viewer: bob }],
+    ["noTyping", { ...base, runner: noTypingRunner }],
+    ["staged", { ...base, staged: true }],
+    ["pipeline", { ...base, pipeline: true }],
+    ["fallbacks", { ...base, fallbacks: true }],
+    ["group", { ...base, group: true }],
+    ["contest", { ...base, contest: true }],
+    ["capability", { ...base, runner: headlessOnly }],
+    ["agent", { ...base, agent: { ...interactiveAgent, interactive: false } }],
+  ];
+
+  it.each(hard)("%s disables the card and resolves to background whatever was saved or picked", (_name, ctx) => {
+    expect(isInteractiveDisabled(ctx)).toBe(true);
+    const def = defaultDispatchMode(ctx);
+    expect(resolveDispatchMode(null, "interactive", def, ctx)).toBe("headless");
+    expect(resolveDispatchMode("interactive", "interactive", def, ctx)).toBe("headless");
+    expect(followUpMode(ctx, "interactive")).toBe("");
+  });
+
+  it("lets a saved or picked interactive stand where auto-accept only covers background runs", () => {
+    const aaHeadless: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        autoAccept: { enabled: true, requireStepUp: false, modes: [""], allowRemoteTyping: true },
+      },
+    };
+    const ctx = { ...base, runner: aaHeadless };
+    expect(isInteractiveDisabled(ctx)).toBe(false);
+    expect(defaultDispatchMode(ctx).mode).toBe("headless");
+    expect(resolveDispatchMode(null, "interactive", defaultDispatchMode(ctx), ctx)).toBe("interactive");
+  });
+
+  it("gives a follow-up the first start's default, the saved background, and no mode for a queued reply", () => {
+    expect(followUpMode(base)).toBe("interactive");
+    expect(followUpMode(base, "background")).toBe("");
+    expect(followUpMode(base, "auto", true)).toBe("");
+    expect(followUpMode(base, "interactive", true)).toBe("");
   });
 });
 

@@ -157,6 +157,51 @@ describe("GlobalAgentGroup", () => {
     );
   });
 
+  it("says how many were skipped and why, and closes the tell box once some started", async () => {
+    const m1 = makeMember({ id: "m1", repoId: "r-api", repoName: "api", status: "succeeded", commit: "aaa1111" });
+    const m2 = makeMember({ id: "m2", repoId: "r-web", repoName: "web", status: "succeeded", commit: "bbb2222" });
+    const m3 = makeMember({ id: "m3", repoId: "r-db", repoName: "db", status: "succeeded", commit: "ccc3333" });
+    useGlobalAgents.setState({ groups: { grp1: makeGroup({ repoCount: 3 }) }, groupRuns: { grp1: [m1, m2, m3] } });
+    vi.spyOn(api, "followUpGlobalGroup").mockResolvedValue({
+      started: [makeMember({ id: "m1b", continueOf: "m1", workRoot: "m1", repoId: "r-api", status: "queued" })],
+      skipped: [
+        { runId: "m2", code: "WORK_GONE" },
+        { runId: "m3", code: "BUDGET_EXCEEDED" },
+      ],
+    });
+
+    render(<GlobalAgentGroup groupId="grp1" runs={[m1, m2, m3]} expanded own />);
+    fireEvent.click(screen.getByRole("button", { name: "Tell all" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Bump the version" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const report = await screen.findByTestId("group-tell-report");
+    expect(report).toHaveTextContent("2 skipped");
+    expect(report).toHaveTextContent("web: This work's folder is gone");
+    expect(report).toHaveTextContent("db: today's limit was reached");
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("keeps the text when nothing started", async () => {
+    const m1 = makeMember({ id: "m1", repoId: "r-api", repoName: "api", status: "succeeded", commit: "aaa1111" });
+    useGlobalAgents.setState({ groups: { grp1: makeGroup({ repoCount: 1 }) }, groupRuns: { grp1: [m1] } });
+    vi.spyOn(api, "followUpGlobalGroup").mockResolvedValue({
+      started: [],
+      skipped: [{ runId: "m1", code: "IN_USE" }],
+    });
+
+    render(<GlobalAgentGroup groupId="grp1" runs={[m1]} expanded own />);
+    fireEvent.click(screen.getByRole("button", { name: "Tell all" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Bump the version" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const report = await screen.findByTestId("group-tell-report");
+    expect(report).toHaveTextContent("Nothing started; your text is kept");
+    expect(report).toHaveTextContent("1 skipped");
+    expect(report).toHaveTextContent("api: Another turn of this work is still running");
+    expect(screen.getByRole("textbox")).toHaveValue("Bump the version");
+  });
+
   it("opens a member's dialog when its folder card is clicked", () => {
     const m1 = makeMember({ id: "m1", repoId: "r-api", repoName: "api", status: "succeeded", commit: "aaa1111" });
     const m2 = makeMember({ id: "m2", repoId: "r-web", repoName: "web", status: "running", commit: undefined, finishedAt: undefined });

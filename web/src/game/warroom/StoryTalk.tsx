@@ -12,6 +12,7 @@ import { askQuestionText } from "../../agents/AskCard";
 import { excerpt } from "../../agents/agentStore";
 import { useI18n } from "../../i18n";
 import { IconLayers, IconUsage } from "../../icons";
+import { ContestDecide } from "../../runs/coord/ContestDecide";
 import { useCoordStore } from "../../runs/coord/coordStore";
 import { OverlapNotice } from "../../runs/coord/OverlapNotice";
 import type { RunComposerHandle } from "../../runs/dialog/RunComposer";
@@ -591,6 +592,8 @@ export function StoryTalk({
 
   const isMultiRepoGroup = group.kind === "group";
   const isContest = group.kind === "contest";
+  // A contest pair is decided here too (node contests have no list row).
+  const contestId = isContest && group.key.startsWith("contest:") ? group.key.slice("contest:".length) : "";
 
   const pips = isMultiRepoGroup && group.members.length > 1 && (
     <div className="px-story-pips" aria-hidden="true">
@@ -679,6 +682,11 @@ export function StoryTalk({
           );
         })}
       </div>
+      {contestId && (
+        <div className="px-story-contest">
+          <ContestDecide contestId={contestId} simple={simple} />
+        </div>
+      )}
     </>
   );
 

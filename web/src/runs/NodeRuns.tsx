@@ -18,6 +18,7 @@ import {
   runHasChanges,
   totalTokens,
 } from "./runFormat";
+import { ContestDecide } from "./coord/ContestDecide";
 import { RunDiffDialog } from "./DiffViewer";
 import { MergeControl } from "./MergeApproval";
 import { NodeSessions } from "./NodeSessions";
@@ -413,6 +414,7 @@ export function RunDetail({
   };
 
   const single = useEdition() === "single";
+  const simple = useSimpleMode();
   const hint = runStatusHint(t, run, single);
   const fix = single && run.status === "declined" ? declineFix(run.declineCode) : null;
   const [diffOpen, setDiffOpen] = useState(false);
@@ -467,7 +469,12 @@ export function RunDetail({
         )}
       </div>
       <MergeControl run={run} className="run-detail-merge" />
-      {run.override && <p className="run-override">{t("runs.override", { reason: run.override })}</p>}
+      {run.contestId && run.contestLabel !== "J" && (
+        <div className="run-detail-contest">
+          <ContestDecide contestId={run.contestId} simple={simple} />
+        </div>
+      )}
+      {run.override &&<p className="run-override">{t("runs.override", { reason: run.override })}</p>}
       {run.checks && run.checks.length > 0 && <JudgeChecks checks={run.checks} />}
       <RunHandoff
         run={run}

@@ -601,6 +601,18 @@ function GlobalAgentRow({
   const applyRefused = useWorkspace((s) => s.actionKinds[run.id] === "merge");
   const overlaps = useCoordStore((s) => s.overlapsByRun[run.id]);
   const composerRef = useRef<RunComposerHandle>(null);
+  // "Start new work with this": the row opens and its composer gets the
+  // whole task, once the dialog (and its composer) is on screen.
+  const [prefill, setPrefill] = useState<string | null>(null);
+  useEffect(() => {
+    if (!expanded || prefill === null || !composerRef.current) return;
+    composerRef.current.prefill(prefill);
+    setPrefill(null);
+  }, [expanded, prefill]);
+  const onStartNewWork = (task: string) => {
+    setPrefill(task);
+    if (!expanded) onToggle();
+  };
 
   const who = agentWho(run.agent, run.model);
   const runner = runnerDisplayName(t, run.runnerName) || run.runnerId;
@@ -720,7 +732,7 @@ function GlobalAgentRow({
           </td>
         )}
         <td className="global-agent-actions">
-          {plain && <ResultActions run={run} compact />}
+          {plain && <ResultActions run={run} compact onStartNewWork={onStartNewWork} />}
           <span className="global-agent-buttons">
             <button type="button" className="ap-btn" onClick={() => openRunWorkspace(run.id)}>
               {t(simple ? "globalAgents.simple.open" : "globalAgents.action.workspace")}

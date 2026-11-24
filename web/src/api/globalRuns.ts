@@ -86,12 +86,17 @@ export interface CreateGlobalGroupRequest {
   repoIds: string[];
   agent: string;
   model?: string;
+  /** "" (headless) or "interactive"; the hub runs every member in the
+   * background (§8.1), so the form leaves it out. Mirrors runnerwire. */
+  mode?: "" | "interactive";
   base?: string;
   task: string;
   slug?: string;
   openPR: boolean;
   simple?: boolean;
   onBusy?: "" | "both" | "skip";
+  /** Coordination layer 1: visible holder ids the person saw. */
+  holderIds?: string[];
 }
 
 /** 201 POST /api/global-runs/groups and GET /api/global-runs/groups/:id. */

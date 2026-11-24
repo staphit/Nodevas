@@ -128,6 +128,15 @@ describe("copilot and draft keys in both catalogs", () => {
     expect(translate("draft.plan.tagsOne", "en")).toBe("1 tag");
   });
 
+  // An English interface never shows Chinese: "Compare agents (比稿)" did.
+  it("keeps Chinese out of the English values of these families", () => {
+    const hits = catalogKeys("en")
+      .filter(inFamily)
+      .filter((key) => /[\p{Script=Han}，；？！（）：]/u.test(translate(key, "en")))
+      .map((key) => `${key}: ${translate(key, "en")}`);
+    expect(hits).toEqual([]);
+  });
+
   it("covers the terminal dialog, picker, group, busy, overlap and contest keys and keeps globalAgents.noAsk intact", () => {
     for (const family of ["runDialog.", "picker.", "globalAgents.group.", "busy.", "overlap.", "contest."]) {
       expect(catalogKeys("en").some((key) => key.startsWith(family)), family).toBe(true);

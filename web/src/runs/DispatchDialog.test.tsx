@@ -372,7 +372,7 @@ describe("DispatchDialog", () => {
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
     await screen.findByRole("radiogroup", { name: "Which computer" });
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents (比稿)" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Compare agents" }));
     expect(screen.getByText("2 agents on the same task")).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
 

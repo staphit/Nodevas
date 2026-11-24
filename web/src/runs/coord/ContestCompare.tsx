@@ -13,6 +13,7 @@ import { CastPortrait } from "../../game/warroom/castArt";
 import { formatList, useI18n } from "../../i18n";
 import { WIDE_QUERY } from "../DiffViewer";
 import { LineCounts } from "../RunChanges";
+import { workspaceCodeText } from "../workspaceStore";
 
 export interface ContestCompareProps {
   contest: Contest;
@@ -68,7 +69,7 @@ export function ContestCompare({
   const refusedDiscards = (pickActions ?? []).filter(
     (act) =>
       act.action === "discard" &&
-      (act.status === "failed" || Boolean(act.reason) || Boolean(act.code)),
+      (act.status === "failed" || Boolean(act.code)),
   );
 
   const canPickEntry = (entry: ContestCompareEntry): boolean =>
@@ -154,7 +155,7 @@ export function ContestCompare({
 
         {entryScore?.why && (
           <div className="coord-score-why">
-            <span className="coord-score-why-label">{t("contest.why")}:</span>{" "}
+            <span className="coord-score-why-label">{t("contest.why")}</span>{" "}
             <span>{entryScore.why}</span>
           </div>
         )}
@@ -297,7 +298,8 @@ export function ContestCompare({
 
       {refusedDiscards.map((act) => {
         const label = entries.find((e) => e.runId === act.runId)?.label ?? act.runId;
-        const reason = act.reason || act.code || act.status;
+        // The hub sends a code, never words: say it as the workspace panel does.
+        const reason = workspaceCodeText(act.code) || act.code || act.status;
         return (
           <p key={act.runId} className="coord-discard-refused" role="alert">
             {t("contest.discardRefused", { label, reason })}

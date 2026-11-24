@@ -311,4 +311,29 @@ describe("terminalKeys and story palette", () => {
     expect(hasScreenMenuPrompt(["Ask anything...", "tab agents  ctrl+p commands"])).toBe(false);
     expect(hasScreenMenuPrompt(["> ", "? for shortcuts"])).toBe(false);
   });
+
+  // The agent's own prose ("you can allow or reject…", "approve or deny…",
+  // a quoted "> yes, do it") further up the screen must not lock text
+  // submit: only the cursor line and a few lines around it count (§3.1).
+  it("reads only the lines around the cursor, so the agent's prose never locks the composer", () => {
+    const prose = [
+      "I changed the permission check: callers can now allow or reject a request,",
+      "and reviewers approve or deny it in the panel.",
+      "As you said in the issue:",
+      "> yes, keep the old flag for now",
+    ];
+    const idle = ["", "", "", "", "", "", "", "", "", "", "╭────────╮", "│ >      │", "╰────────╯", "? for shortcuts"];
+    const screen = [...prose, ...idle];
+    // Cursor in the input box at the bottom: the prose is out of reach.
+    expect(hasScreenMenuPrompt(screen, screen.length - 3)).toBe(false);
+    // Without a cursor the last line stands for it: still out of reach.
+    expect(hasScreenMenuPrompt(screen)).toBe(false);
+    // A quoted "> yes," inside prose is not a focused option.
+    expect(hasScreenMenuPrompt(["she wrote > yes, ship it", "❯ "], 1)).toBe(false);
+
+    // A real menu at the cursor still locks it, prose above or not.
+    const menu = [...prose, ...idle.slice(0, 6), "Allow this command?", "❯ Allow once", "  Reject", "Esc to cancel"];
+    expect(hasScreenMenuPrompt(menu, menu.length - 2)).toBe(true);
+    expect(hasScreenMenuPrompt(["│ > Yes, I trust this folder", "│   No, exit"], 0)).toBe(true);
+  });
 });

@@ -101,6 +101,66 @@ describe("RunTranscript", () => {
     expect(screen.getByText("msg-1")).toBeInTheDocument();
   });
 
+  // The window stops growing at 200 lines, and text can grow inside the last
+  // row: following the end keys on what the end is, not on the line count.
+  it("keeps following the end past 200 lines and while the last line grows", () => {
+    const textEvents = (count: number, last = "") =>
+      Array.from({ length: count }, (_, i) => ({
+        seq: i + 1,
+        type: "text" as const,
+        text: i === count - 1 && last ? last : `msg-${i + 1}`,
+        at: "2026-11-20T08:00:01Z",
+      }));
+    const { rerender } = render(<RunTranscript lines={buildRunLines([{ run: baseRun, events: textEvents(210) }])} />);
+    const log = screen.getByRole("log");
+    let height = 5000;
+    Object.defineProperty(log, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(log, "clientHeight", { value: 200, configurable: true });
+
+    // A new line while the window is full (still 200 rendered).
+    log.scrollTop = 0;
+    height = 5100;
+    rerender(<RunTranscript lines={buildRunLines([{ run: baseRun, events: textEvents(211) }])} />);
+    expect(log.scrollTop).toBe(5100);
+
+    // The last line's text grows; no new line.
+    log.scrollTop = 0;
+    height = 5300;
+    rerender(
+      <RunTranscript lines={buildRunLines([{ run: baseRun, events: textEvents(211, "msg-211 and a much longer tail") }])} />,
+    );
+    expect(log.scrollTop).toBe(5300);
+  });
+
+  it("puts the colon after You in the catalog, full-width in Chinese", () => {
+    const lines = buildRunLines([
+      { run: baseRun, events: [{ seq: 0, type: "user", text: "Fix the bug", at: "2026-11-20T08:00:00Z" }] },
+    ]);
+    const { container, rerender } = render(<RunTranscript lines={lines} />);
+    expect(container.querySelector(".run-dlg-user-label")?.textContent).toBe("You:");
+    act(() => useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } }));
+    rerender(<RunTranscript lines={lines} />);
+    expect(container.querySelector(".run-dlg-user-label")?.textContent).toBe("你：");
+  });
+
+  // Simple speaks plain words: no runner notes toggle, and its notices are
+  // the runDialog.simple.* sentences.
+  it("offers no runner notes and plain notices in Simple", () => {
+    const lines = buildRunLines([
+      {
+        run: baseRun,
+        events: [
+          { seq: 1, type: "log", text: "debug runner boot", at: "2026-11-20T08:00:01Z" },
+          { seq: 2, type: "text", text: "Done", at: "2026-11-20T08:00:02Z" },
+        ],
+      },
+    ]);
+    const { container } = render(<RunTranscript lines={lines} simple />);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(container.textContent).not.toContain("runner");
+    expect(screen.queryByText("debug runner boot")).toBeNull();
+  });
+
   it("follows the end while scrolled to bottom and offers 'Jump to latest' when scrolled up", () => {
     const lines1 = buildRunLines([
       { run: baseRun, events: [{ seq: 1, type: "text", text: "first", at: "2026-11-20T08:00:01Z" }] },

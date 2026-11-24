@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hasMessage, translate } from "./i18n";
+import { FOLLOW_UP_ERROR_KEYS, SIMPLE_FOLLOW_UP_ERROR_KEYS } from "./runs/dialog/followUpErrors";
 
 // Easy start speaks to someone who does not write code: the first-run
 // questions, the agent scan and install help, adding an agent by hand, the
@@ -128,6 +129,19 @@ describe("easy start's plain words", () => {
     expect(translate("simple.local.permissionRelayHelp", "en")).toMatch(/OpenCode itself is set up/);
     expect(translate("simple.local.permissionRelayHelp", "zh-TW")).not.toContain("這項設定");
     expect(translate("simple.local.permissionRelayHelp", "zh-TW")).toContain("另外設定");
+  });
+
+  // A refused follow-up in Simple says one of these families' sentences,
+  // never runDialog.err.* (which says runner, branch, pull request).
+  it("has a plain sentence for every follow-up refusal Simple can meet", () => {
+    expect(Object.keys(SIMPLE_FOLLOW_UP_ERROR_KEYS).sort()).toEqual(Object.keys(FOLLOW_UP_ERROR_KEYS).sort());
+    for (const key of Object.values(SIMPLE_FOLLOW_UP_ERROR_KEYS)) {
+      expect(plain(key), key).toBe(true);
+      expect(hasMessage("en", key) && hasMessage("zh-TW", key), key).toBe(true);
+    }
+    for (const key of ["runDialog.simple.resumeLost", "runDialog.simple.ph.shownAbove", "runDialog.simple.shownAbove"]) {
+      expect(keys).toContain(key);
+    }
   });
 
   it("allows only keys that exist", () => {

@@ -14,6 +14,7 @@ import { formatLocalizedTime, useI18n } from "../i18n";
 import { IconFolder } from "../icons";
 import { useLocalRunner } from "../runners/edition";
 import { RunDialog } from "../runs/dialog/RunDialog";
+import { followUpErrorKey } from "../runs/dialog/followUpErrors";
 import { RunStatusBadge } from "../runs/NodeRuns";
 import { ResultActions } from "../runs/ResultActions";
 import { resultState } from "../runs/resultState";
@@ -153,6 +154,10 @@ export function GlobalAgentGroup({
   const [tellMode, setTellMode] = useState<"all" | "failed" | null>(null);
   const [tellText, setTellText] = useState("");
   const [sendingTell, setSendingTell] = useState(false);
+  const [tellReport, setTellReport] = useState<{
+    none: boolean;
+    skipped: { runId: string; repo: string; reason: string }[];
+  } | null>(null);
 
   // Fetch group metadata (heldUntil, repoCount, full member list) when expanded.
   useEffect(() => {
@@ -250,13 +255,36 @@ export function GlobalAgentGroup({
     }
   };
 
+  // Why the hub skipped a member, in the reader's words.
+  const skipReason = (code: string) => {
+    const key = followUpErrorKey(code, simple);
+    if (key) return t(key);
+    if (code === "BUDGET_EXCEEDED") return t("globalAgents.group.skipBudget");
+    return t("globalAgents.group.skipOther", { code });
+  };
+
   const onSendTell = async () => {
     const trimmed = tellText.trim();
     if (!tellMode || !trimmed || sendingTell) return;
     setSendingTell(true);
+    setTellReport(null);
     try {
       const res = await useGlobalAgents.getState().followUpGroup(groupId, { message: trimmed, only: tellMode });
-      if (res) {
+      if (!res) return;
+      const started = res.started ?? [];
+      const skipped = (res.skipped ?? []).map((item) => {
+        const member = members.find((m) => m.id === item.runId) ?? globalById[item.runId];
+        return {
+          runId: item.runId,
+          repo: member?.repoName || member?.repoId || item.runId,
+          reason: skipReason(item.code),
+        };
+      });
+      if (skipped.length > 0 || started.length === 0) {
+        setTellReport({ none: started.length === 0, skipped });
+      }
+      // Nothing started: the text stays, so the person can change it and try again.
+      if (started.length > 0) {
         setTellText("");
         setTellMode(null);
       }
@@ -384,6 +412,7 @@ export function GlobalAgentGroup({
                   onClick={() => {
                     setTellMode(null);
                     setTellText("");
+                    setTellReport(null);
                   }}
                 >
                   {t("common.cancel")}
@@ -397,6 +426,24 @@ export function GlobalAgentGroup({
                   {t("runDialog.send")}
                 </button>
               </div>
+            </div>
+          )}
+
+          {tellReport && (
+            <div className="global-group-tell-report" data-testid="group-tell-report" role="status">
+              {tellReport.none && <p>{t("globalAgents.group.noneStarted")}</p>}
+              {tellReport.skipped.length > 0 && (
+                <>
+                  <p>{t("globalAgents.group.skipped", { count: tellReport.skipped.length })}</p>
+                  <ul>
+                    {tellReport.skipped.map((item) => (
+                      <li key={item.runId}>
+                        {t("globalAgents.group.skipLine", { repo: item.repo, reason: item.reason })}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           )}
 

@@ -343,3 +343,33 @@ describe("GameDialog Escape inside xterm", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("GameDialog focus", () => {
+  // RunDialog's "Open large" passes a new onClose arrow on every render and
+  // re-renders on every event; the dialog's first focus must not come back
+  // each time, or typing then Enter lands on the close button.
+  it("focuses its first control once, and a new onClose on re-render keeps focus where the person put it", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = render(
+      <GameDialog title="Expanded session" onClose={() => first()}>
+        <textarea aria-label="composer" />
+      </GameDialog>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+
+    const composer = screen.getByLabelText("composer");
+    composer.focus();
+    rerender(
+      <GameDialog title="Expanded session" onClose={() => second()}>
+        <textarea aria-label="composer" />
+      </GameDialog>,
+    );
+    expect(document.activeElement).toBe(composer);
+
+    fireEvent.keyDown(composer, { key: "Escape" });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+});
