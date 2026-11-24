@@ -484,6 +484,75 @@ describe("GlobalAgentList", () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    // The composer may not be on screen yet when the row opens (its run still
+    // loading): the task lands once it shows during that opening, and never
+    // at some later opening after the row was closed.
+    it("fills the composer when it shows up, and drops the task once the row closes", async () => {
+      viewer = null;
+      useRunners.setState({ runners: [localRunner()], loaded: true });
+      const merged = makeGlobalRun({
+        id: "g3",
+        title: "Bakery page",
+        runnerId: "local1",
+        runnerName: "this machine",
+        status: "succeeded",
+        noPR: false,
+        prUrl: "https://github.com/o/r/pull/9",
+        prState: "merged",
+        finishedAt: "2026-11-14T08:10:00Z",
+      });
+      seed([merged]);
+      const task = "Bakery page\n\nWith a menu and opening hours.";
+      vi.mocked(api.getRunEvents).mockResolvedValue({
+        events: [{ seq: 0, type: "user", text: task, at: "2026-11-14T08:00:00Z" }],
+        more: false,
+      });
+      render(
+        <EditionProvider edition="single">
+          <GlobalAgentList />
+          <ConfirmDialogHost />
+        </EditionProvider>,
+      );
+      rememberGlobalRuns([merged]);
+      const textarea = () => document.querySelector(".global-agent-dialog-row textarea.run-dlg-textarea");
+      const toggle = () => within(rowOf("Bakery page")).getByRole("button", { name: "Bakery page" });
+      // Opening a row puts its run in the run store; holding that back keeps
+      // the dialog (and so its composer) off screen for a while.
+      const putRun = useRuns.getState().putRun;
+      const holdBack = () => useRuns.setState({ putRun: () => undefined });
+      const letThrough = () => useRuns.setState({ putRun });
+
+      // Opened while the dialog has no run yet: no composer to fill.
+      holdBack();
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() => expect(toggle()).toHaveAttribute("aria-expanded", "true"));
+      await act(async () => {});
+      expect(textarea()).toBeNull();
+
+      // Closed before it showed: the task is dropped, so a later opening
+      // starts with an empty box.
+      fireEvent.click(toggle());
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      letThrough();
+      fireEvent.click(toggle());
+      await waitFor(() => expect(textarea()).not.toBeNull());
+      await act(async () => {});
+      expect(textarea()).toHaveValue("");
+      fireEvent.click(toggle());
+
+      // Opened again before its run is in the store, which it reaches during
+      // the same opening: the composer gets the task once it shows.
+      act(() => useRuns.setState({ globalById: {} }));
+      holdBack();
+      fireEvent.click(within(rowOf("Bakery page")).getByRole("button", { name: "Start new work with this" }));
+      await waitFor(() => expect(toggle()).toHaveAttribute("aria-expanded", "true"));
+      await act(async () => {});
+      expect(textarea()).toBeNull();
+      letThrough();
+      act(() => useRuns.getState().putRun(merged));
+      await waitFor(() => expect(textarea()).toHaveValue(task));
+    });
+
     it("shows Take a look and Apply to my folder in place of Merge locally", () => {
       viewer = null;
       useRunners.setState({ runners: [localRunner()], loaded: true });

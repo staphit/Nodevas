@@ -474,7 +474,7 @@ export function RunDetail({
           <ContestDecide contestId={run.contestId} simple={simple} />
         </div>
       )}
-      {run.override &&<p className="run-override">{t("runs.override", { reason: run.override })}</p>}
+      {run.override && <p className="run-override">{t("runs.override", { reason: run.override })}</p>}
       {run.checks && run.checks.length > 0 && <JudgeChecks checks={run.checks} />}
       <RunHandoff
         run={run}

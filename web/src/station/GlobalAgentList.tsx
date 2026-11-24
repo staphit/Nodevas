@@ -600,15 +600,23 @@ function GlobalAgentRow({
   // row's own, as on any other row.
   const applyRefused = useWorkspace((s) => s.actionKinds[run.id] === "merge");
   const overlaps = useCoordStore((s) => s.overlapsByRun[run.id]);
-  const composerRef = useRef<RunComposerHandle>(null);
+  // The dialog's composer, as state: it can show up after the row opens
+  // (its run still loading), and a pending task must follow it there.
+  const [composer, setComposer] = useState<RunComposerHandle | null>(null);
   // "Start new work with this": the row opens and its composer gets the
-  // whole task, once the dialog (and its composer) is on screen.
+  // whole task once it is on screen during this opening. Closing the row
+  // drops a task not yet placed, so it never lands at a later opening.
   const [prefill, setPrefill] = useState<string | null>(null);
   useEffect(() => {
-    if (!expanded || prefill === null || !composerRef.current) return;
-    composerRef.current.prefill(prefill);
+    if (prefill === null) return;
+    if (!expanded) {
+      setPrefill(null);
+      return;
+    }
+    if (!composer) return;
+    composer.prefill(prefill);
     setPrefill(null);
-  }, [expanded, prefill]);
+  }, [expanded, prefill, composer]);
   const onStartNewWork = (task: string) => {
     setPrefill(task);
     if (!expanded) onToggle();
@@ -784,11 +792,11 @@ function GlobalAgentRow({
                 overlaps={overlaps}
                 run={run}
                 simple={simple}
-                onTell={(text) => composerRef.current?.prefill(text)}
-                onOpenFollowUp={(text) => composerRef.current?.prefill(text)}
+                onTell={(text) => composer?.prefill(text)}
+                onOpenFollowUp={(text) => composer?.prefill(text)}
               />
             )}
-            <RunDialog runId={run.id} variant="plain" simple={simple} composerRef={composerRef} />
+            <RunDialog runId={run.id} variant="plain" simple={simple} composerRef={setComposer} />
           </td>
         </tr>
       )}

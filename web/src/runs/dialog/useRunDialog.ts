@@ -49,8 +49,11 @@ export interface UseRunDialogResult {
   error: string | null;
   /** A "new work" start the hub answered BUSY: the choice to show. */
   busy: BusyResponse | null;
-  /** Starts the busy-refused new work again with the person's choice; true once started. */
-  chooseBusy: (choice: BusyOption | string) => Promise<boolean>;
+  /** Starts the busy-refused new work again with the person's choice; true
+   * once started. `text` is what the composer says at confirm time (the box
+   * stays editable while the choice is open); empty or missing falls back
+   * to the text the hub answered BUSY to. */
+  chooseBusy: (choice: BusyOption | string, text?: string) => Promise<boolean>;
   cancelBusy: () => void;
   submitText: (text: string) => Promise<boolean>;
   endRun: () => Promise<void>;
@@ -313,7 +316,11 @@ export function useRunDialog({
           ...(simple ? { simple: true } : {}),
         });
         putRun(created);
-        if (runFinal(targetRun.status)) {
+        // The turn's status now, not when the reply was sent: it may have
+        // ended while the POST was out, after the effect that moves to a
+        // queued reply had already run.
+        const current = selectRunById(useRuns.getState(), targetRun.id) ?? targetRun;
+        if (runFinal(current.status)) {
           setActiveId(created.id);
           void loadThread(created.id).catch(() => undefined);
         } else {
@@ -339,13 +346,14 @@ export function useRunDialog({
   );
 
   const chooseBusy = useCallback(
-    async (choice: BusyOption | string): Promise<boolean> => {
+    async (choice: BusyOption | string, text?: string): Promise<boolean> => {
       if (!busy || !targetRun) return false;
       const holderIds = (busy.response.holders ?? []).map((holder) => holder.runId);
+      const task = text?.trim() || busy.text;
       setSubmitting(true);
       setError(null);
       try {
-        return await startNewWork(targetRun, busy.text, choice as OnBusy, holderIds);
+        return await startNewWork(targetRun, task, choice as OnBusy, holderIds);
       } catch (err) {
         setBusy(null);
         setError(mapFollowUpError(err, t, simple));

@@ -14,7 +14,7 @@ import { formatLocalizedTime, useI18n } from "../i18n";
 import { IconFolder } from "../icons";
 import { useLocalRunner } from "../runners/edition";
 import { RunDialog } from "../runs/dialog/RunDialog";
-import { followUpErrorKey } from "../runs/dialog/followUpErrors";
+import { groupSkipReason } from "../runs/dialog/followUpErrors";
 import { RunStatusBadge } from "../runs/NodeRuns";
 import { ResultActions } from "../runs/ResultActions";
 import { resultState } from "../runs/resultState";
@@ -256,12 +256,7 @@ export function GlobalAgentGroup({
   };
 
   // Why the hub skipped a member, in the reader's words.
-  const skipReason = (code: string) => {
-    const key = followUpErrorKey(code, simple);
-    if (key) return t(key);
-    if (code === "BUDGET_EXCEEDED") return t("globalAgents.group.skipBudget");
-    return t("globalAgents.group.skipOther", { code });
-  };
+  const skipReason = (code: string) => groupSkipReason(code, t, simple);
 
   const onSendTell = async () => {
     const trimmed = tellText.trim();

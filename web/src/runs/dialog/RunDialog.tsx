@@ -360,7 +360,7 @@ export function RunDialog({
             simple={simple}
             maxConcurrent={dialog.runner?.info?.maxConcurrent}
             onChoose={(choice) => {
-              void dialog.chooseBusy(choice).then((started) => {
+              void dialog.chooseBusy(choice, ownComposerRef.current?.text()).then((started) => {
                 if (started) ownComposerRef.current?.prefill("");
               });
             }}

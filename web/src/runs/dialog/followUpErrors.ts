@@ -45,3 +45,26 @@ export function mapFollowUpError(error: unknown, t: Translate, simple: boolean):
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+/** A group member's skip code the hub returns beyond the follow-up refusals
+ * (internal/runs/groupfollowup.go groupFollowUpSkipCode) → its plain Simple
+ * sentence (checked by i18nPlainWords.test.ts). */
+export const SIMPLE_GROUP_SKIP_KEYS: Readonly<Record<string, string>> = {
+  BUDGET_EXCEEDED: "globalAgents.simple.skipBudget",
+  FAILED_PRECONDITION: "globalAgents.simple.skipNotReady",
+  NOT_FOUND: "globalAgents.simple.skipGone",
+  INVALID_ARGUMENT: "globalAgents.simple.skipCannot",
+};
+
+/** Simple's sentence for a skip code it has no sentence for yet. */
+export const SIMPLE_GROUP_SKIP_OTHER = "globalAgents.simple.skipOther";
+
+/** Why the hub skipped a group member, in the reader's words. Simple never
+ * shows a raw code; the full view names an unknown one. */
+export function groupSkipReason(code: string, t: Translate, simple: boolean): string {
+  const key = followUpErrorKey(code, simple);
+  if (key) return t(key);
+  if (simple) return t(SIMPLE_GROUP_SKIP_KEYS[code] ?? SIMPLE_GROUP_SKIP_OTHER);
+  if (code === "BUDGET_EXCEEDED") return t("globalAgents.group.skipBudget");
+  return t("globalAgents.group.skipOther", { code });
+}

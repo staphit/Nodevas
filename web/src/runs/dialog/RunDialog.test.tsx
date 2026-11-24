@@ -595,4 +595,89 @@ describe("RunDialog", () => {
       ),
     );
   });
+
+  // The box stays editable while the busy choice is open: Confirm starts the
+  // work with what the box says then, not with what it said when the hub
+  // answered BUSY.
+  it("starts a busy new-work start with the text as edited after the busy answer", async () => {
+    useRunners.setState({ runners: [interactiveRunner], loaded: true });
+    const ended = makeRun({
+      mode: "",
+      status: "succeeded",
+      prUrl: "https://github.com/o/r/pull/3",
+      prState: "merged",
+    });
+    rememberGlobalRuns([ended]);
+    useRuns.getState().putRun(ended);
+    const holder = {
+      runId: "h1",
+      title: "Other work",
+      agent: "codex",
+      model: "gpt-5",
+      status: "running",
+      since: "2026-11-20T08:00:00Z",
+      mayStop: true,
+    };
+    const created = makeRun({ id: "g3", mode: "interactive", status: "queued" });
+    rememberGlobalRuns([created]);
+    const create = vi
+      .spyOn(api, "createGlobalRun")
+      .mockRejectedValueOnce(new BusyError("busy", { holders: [holder], others: 0, choices: ["queue", "both"] }))
+      .mockResolvedValueOnce(created);
+
+    render(
+      <EditionProvider edition="single">
+        <RunDialog runId="g1" variant="plain" />
+      </EditionProvider>,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Redo it on main" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start new work with this" }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Start mine after it ends/ }));
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Redo it on main, with tests" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: "Redo it on main, with tests", onBusy: "queue", holderIds: ["h1"] }),
+    );
+  });
+
+  // The running turn can end while the queued reply's POST is still out: the
+  // view must still move to the reply once the POST answers.
+  it("moves to a queued reply whose turn ended while the reply was being sent", async () => {
+    useRunners.setState({ runners: [interactiveRunner], loaded: true });
+    const prior = makeRun({ mode: "", status: "running" });
+    rememberGlobalRuns([prior]);
+    useRuns.getState().putRun(prior);
+    vi.mocked(api.getGlobalRunThread).mockImplementation(async (id) => threadFromStore(id));
+    const queued = makeRun({ id: "g2", mode: "", status: "queued", continueOf: "g1", workRoot: "g1", createdAt: "2026-11-20T08:05:00Z" });
+    let answer!: (run: Run) => void;
+    const followUp = vi.spyOn(api, "followUpGlobalRun").mockImplementation(
+      () =>
+        new Promise<Run>((resolve) => {
+          answer = resolve;
+        }),
+    );
+
+    render(
+      <EditionProvider edition="single">
+        <RunDialog runId="g1" variant="plain" />
+      </EditionProvider>,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Also fix the footer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(followUp).toHaveBeenCalledWith("g1", { message: "Also fix the footer" }));
+
+    // The turn ends before the hub answers the reply.
+    act(() => {
+      useRuns.getState().putRun({ ...prior, status: "succeeded", finishedAt: "2026-11-20T08:06:00Z" });
+    });
+    await act(async () => {
+      rememberGlobalRuns([queued]);
+      answer(queued);
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Waiting for the runner to start it"),
+    );
+  });
 });

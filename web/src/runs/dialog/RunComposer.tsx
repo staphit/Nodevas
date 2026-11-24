@@ -78,6 +78,8 @@ export interface DeriveComposerInput {
 export interface RunComposerHandle {
   prefill: (text: string) => void;
   focus: () => void;
+  /** What the box says right now. */
+  text: () => string;
 }
 
 /**
@@ -432,6 +434,10 @@ export const RunComposer = forwardRef<RunComposerHandle, RunComposerProps>(funct
       },
       focus() {
         textareaRef.current?.focus();
+      },
+      // The box is controlled, so its value is the text as last rendered.
+      text() {
+        return textareaRef.current?.value ?? "";
       },
     }),
     [],

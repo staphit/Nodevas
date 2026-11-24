@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hasMessage, translate } from "./i18n";
-import { FOLLOW_UP_ERROR_KEYS, SIMPLE_FOLLOW_UP_ERROR_KEYS } from "./runs/dialog/followUpErrors";
+import {
+  FOLLOW_UP_ERROR_KEYS,
+  groupSkipReason,
+  SIMPLE_FOLLOW_UP_ERROR_KEYS,
+  SIMPLE_GROUP_SKIP_KEYS,
+  SIMPLE_GROUP_SKIP_OTHER,
+} from "./runs/dialog/followUpErrors";
 
 // Easy start speaks to someone who does not write code: the first-run
 // questions, the agent scan and install help, adding an agent by hand, the
@@ -141,6 +147,25 @@ describe("easy start's plain words", () => {
     }
     for (const key of ["runDialog.simple.resumeLost", "runDialog.simple.ph.shownAbove", "runDialog.simple.shownAbove"]) {
       expect(keys).toContain(key);
+    }
+  });
+
+  // A group member the hub skipped reads as a plain sentence in Simple, for
+  // every code groupFollowUpSkipCode can return and any it adds later.
+  it("has a plain sentence for every group skip Simple can meet, never a raw code", () => {
+    const hubCodes = ["BUDGET_EXCEEDED", "FAILED_PRECONDITION", "NOT_FOUND", "INVALID_ARGUMENT"];
+    for (const code of hubCodes) expect(Object.keys(SIMPLE_GROUP_SKIP_KEYS)).toContain(code);
+    for (const key of [...Object.values(SIMPLE_GROUP_SKIP_KEYS), SIMPLE_GROUP_SKIP_OTHER]) {
+      expect(plain(key), key).toBe(true);
+      expect(hasMessage("en", key) && hasMessage("zh-TW", key), key).toBe(true);
+    }
+    for (const language of ["en", "zh-TW"] as const) {
+      const t = (key: string, values?: Record<string, string | number>) => translate(key, language, values);
+      for (const code of [...hubCodes, "SOMETHING_NEW", ...Object.keys(SIMPLE_FOLLOW_UP_ERROR_KEYS)]) {
+        const reason = groupSkipReason(code, t, true);
+        expect(reason, code).not.toContain(code);
+        expect(reason, code).not.toMatch(/\b[A-Z]+_[A-Z_]+\b/);
+      }
     }
   });
 
