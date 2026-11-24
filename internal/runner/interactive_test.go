@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,10 @@ type fakeTerm struct {
 	input  bytes.Buffer
 	sizes  [][2]int
 	killed bool
+	// exitOn, if set before the program starts, is how many Ctrl+C presses
+	// make it exit (code 1) right as the last one is written, the way a TUI
+	// quits on its double Ctrl+C.
+	exitOn int
 }
 
 func newFakeTerm() *fakeTerm {
@@ -61,7 +66,14 @@ func (f *fakeTerm) Read(p []byte) (int, error) {
 func (f *fakeTerm) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.input.Write(p)
+	n, err := f.input.Write(p)
+	if f.exitOn > 0 && bytes.Count(f.input.Bytes(), []byte{0x03}) == f.exitOn {
+		select {
+		case f.exit <- 1:
+		default:
+		}
+	}
+	return n, err
 }
 
 func (f *fakeTerm) Resize(cols, rows int) error {
@@ -648,26 +660,24 @@ func TestInteractiveRunNeverSaysRelayed(t *testing.T) {
 func TestEndQuitsGracefullyThenKills(t *testing.T) {
 	t.Run("graceful", func(t *testing.T) {
 		env, started := startInteractiveRunner(t, func(c *Client) {
-			c.endQuitGap = 20 * time.Millisecond
+			c.endQuitGap = 50 * time.Millisecond
 			c.endGrace = 500 * time.Millisecond
+			// The program exits on the second Ctrl+C, as it is written (even
+			// with exit code 1, as Claude's trust screen does on a double
+			// Ctrl+C): no third press may follow.
+			next := c.NewTerminal
+			c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
+				term, err := next(cmd, cols, rows)
+				if ft, ok := term.(*fakeTerm); ok {
+					ft.exitOn = 2
+				}
+				return term, err
+			}
 		})
 		env.hub.hello()
 		env.hub.offer(interactiveJob("run-end-graceful"))
 		st := waitStarted(t, started)
 		env.hub.wait("run-end-graceful", runnerwire.TypeAccept)
-
-		// Simulate Claude/Agy exiting on the second Ctrl+C (even with exit code 1,
-		// as Claude's trust screen exits with code 1 on double Ctrl+C).
-		go func() {
-			deadline := time.Now().Add(5 * time.Second)
-			for time.Now().Before(deadline) {
-				if strings.Count(st.term.typed(), "\x03") >= 2 {
-					st.term.exit <- 1
-					return
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
-		}()
 
 		env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeEnd, RunID: "run-end-graceful"})
 		finish := env.hub.wait("run-end-graceful", runnerwire.TypeFinish)
@@ -1058,5 +1068,134 @@ func TestEndUnknownRunIgnored(t *testing.T) {
 	finish := env.hub.wait("run-after-unknown-end", runnerwire.TypeFinish)
 	if finish.Result.Status != runnerwire.RunSucceeded || finish.Result.EndReason != "" {
 		t.Fatalf("finish = %+v", finish.Result)
+	}
+}
+
+// A CLI that exits non-zero just as an End arrives failed: its exit is not
+// passed off as the End's graceful, succeeded quit. Each round lines up both
+// before the runner starts waiting, so without a preference for the exit a
+// select picks either at random.
+func TestExitBeatsAnEndArrivingWithIt(t *testing.T) {
+	var mu sync.Mutex
+	var current *fakeTerm
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.endQuitGap = 10 * time.Millisecond
+		c.endGrace = 40 * time.Millisecond
+		c.interactiveWaiting = func(runID string) {
+			mu.Lock()
+			term := current
+			mu.Unlock()
+			term.exit <- 3
+			c.jobs.terms.get(runID).requestEnd()
+			// Long enough for the exit to reach the runner's done channel.
+			time.Sleep(30 * time.Millisecond)
+		}
+		next := c.NewTerminal
+		c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
+			term, err := next(cmd, cols, rows)
+			mu.Lock()
+			current, _ = term.(*fakeTerm)
+			mu.Unlock()
+			return term, err
+		}
+	})
+	env.hub.hello()
+	for i := range 8 {
+		runID := "run-exit-end-" + strconv.Itoa(i)
+		env.hub.offer(interactiveJob(runID))
+		waitStarted(t, started)
+		res := env.hub.wait(runID, runnerwire.TypeFinish).Result
+		if res.Status != runnerwire.RunFailed || res.EndReason != "" || !strings.Contains(res.Error, "exited with code 3") {
+			t.Fatalf("round %d: finish = %+v, want failed with exit code 3", i, res)
+		}
+	}
+}
+
+// The last touched-files poll runs before the run's work is committed: an
+// edit the agent made after the watcher's last tick is still reported (an
+// interactive run has no tool events, only polls).
+func TestFinalTouchedPollRunsBeforeTheCommit(t *testing.T) {
+	env, started := startInteractiveRunner(t, nil)
+	env.hub.hello()
+	env.hub.offer(interactiveJob("run-final-poll"))
+	st := waitStarted(t, started)
+	env.hub.wait("run-final-poll", runnerwire.TypeAccept)
+	if err := os.WriteFile(filepath.Join(st.cmd.Dir, "late.txt"), []byte("written last\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.term.exit <- 0
+	if res := env.hub.wait("run-final-poll", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("finish = %+v", res)
+	}
+	if changes := env.hub.wait("run-final-poll", runnerwire.TypeChanges).Changes; changes == nil || changes.Commit == "" {
+		t.Fatalf("changes = %+v, want late.txt committed", changes)
+	}
+	for _, msg := range env.hub.messages("run-final-poll") {
+		if msg.Type == runnerwire.TypeTouched && msg.Touched != nil && slices.Contains(msg.Touched.Files, "late.txt") {
+			return
+		}
+	}
+	t.Fatalf("late.txt never reported as touched: %+v", env.hub.messages("run-final-poll"))
+}
+
+// An interactive follow-up of the same agent resumes the session the earlier
+// turn used: the runner hands Resume to the adapter, the Claude transcript
+// tail follows that session, and work.json keeps it for the next turn.
+func TestInteractiveFollowUpResumesTheSession(t *testing.T) {
+	envs := make(chan adapter.RunEnv, 4)
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		prev := c.Adapter
+		c.Adapter = func(kind string) adapter.Adapter {
+			ad := prev(kind)
+			if ia, ok := ad.(interactiveAgent); ok {
+				return capturingInteractiveAgent{interactiveAgent: ia, onEnv: func(e adapter.RunEnv) { envs <- e }}
+			}
+			return ad
+		}
+	})
+	env.hub.hello()
+
+	first := globalTestJob("run-ires1", "ok: look around")
+	first.Mode = runnerwire.ModeInteractive
+	env.hub.offer(first)
+	st := waitStarted(t, started)
+	env.hub.wait("run-ires1", runnerwire.TypeAccept)
+	env1 := <-envs
+	if env1.SessionID == "" || env1.Resume != "" {
+		t.Fatalf("turn 1 env: SessionID %q Resume %q", env1.SessionID, env1.Resume)
+	}
+	if err := os.WriteFile(filepath.Join(st.cmd.Dir, "note.txt"), []byte("turn 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.term.exit <- 0
+	if res := env.hub.wait("run-ires1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 = %+v", res)
+	}
+
+	second := followUpTestJob("run-ires2", "run-ires1", "run-ires1", "ok: and more")
+	second.Mode = runnerwire.ModeInteractive
+	env.hub.offer(second)
+	st2 := waitStarted(t, started)
+	env.hub.wait("run-ires2", runnerwire.TypeAccept)
+	env2 := <-envs
+	if env2.Resume != env1.SessionID {
+		t.Fatalf("turn 2 RunEnv.Resume = %q, want turn 1's session %q", env2.Resume, env1.SessionID)
+	}
+	if i := slices.Index(st2.cmd.Args, "--resume"); i < 0 || st2.cmd.Args[i+1] != env1.SessionID {
+		t.Fatalf("turn 2 argv = %q, want --resume %s", st2.cmd.Args, env1.SessionID)
+	}
+	env.client.jobs.mu.Lock()
+	tailed := env.client.jobs.runs["run-ires2"].session
+	env.client.jobs.mu.Unlock()
+	if tailed != env1.SessionID {
+		t.Fatalf("turn 2 follows session %q, want the resumed %q", tailed, env1.SessionID)
+	}
+	st2.term.exit <- 0
+	if res := env.hub.wait("run-ires2", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 2 = %+v", res)
+	}
+	entry, ok, err := lookupWork(env.client.Config.DataDir, "run-ires1")
+	if err != nil || !ok || entry.Session != env1.SessionID || entry.LastRunID != "run-ires2" {
+		t.Fatalf("work entry after turn 2 = %+v, %v, %v", entry, ok, err)
 	}
 }

@@ -411,8 +411,11 @@ func TestPipelineOpensPR(t *testing.T) {
 	env.hub.wait("run-pr", runnerwire.TypeFinish)
 	msgs := env.hub.messages("run-pr")
 
+	// Touched-file reports (the last poll, before the commit) go out between
+	// events; the order asked of here is the rest.
+	ordered := slices.DeleteFunc(slices.Clone(msgs), func(m runnerwire.Envelope) bool { return m.Type == runnerwire.TypeTouched })
 	want := []string{runnerwire.TypeAccept, runnerwire.TypeEvents, runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeFinish}
-	if got := typesOf(msgs); !slices.Equal(got, want) {
+	if got := typesOf(ordered); !slices.Equal(got, want) {
 		t.Fatalf("message order %v, want %v", got, want)
 	}
 	var changes *runnerwire.RunChanges

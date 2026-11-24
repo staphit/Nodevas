@@ -259,3 +259,32 @@ func TestResumeFastFailRetriesFresh(t *testing.T) {
 		t.Errorf("missing fast-fail retry log event in %+v", env.hub.messages("run-ff2"))
 	}
 }
+
+// The fresh retry after a failed resume shares the run's one touched-files
+// watcher: no watcher from the first attempt keeps polling beside it, so a
+// file the retry writes is reported once.
+func TestResumeFastFailReportsTouchedOnce(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.touchedPoll = 10 * time.Millisecond })
+	env.hub.hello()
+
+	env.hub.offer(globalTestJob("run-ft1", "edit: initial work"))
+	if res := env.hub.wait("run-ft1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 result = %+v", res)
+	}
+	second := globalTestJob("run-ft2", "resume-fail-slow: retry fresh")
+	second.ContinueOf = "run-ft1"
+	second.WorkRoot = "run-ft1"
+	env.hub.offer(second)
+	if res := env.hub.wait("run-ft2", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 2 result = %+v", res)
+	}
+	reported := 0
+	for _, msg := range env.hub.messages("run-ft2") {
+		if msg.Type == runnerwire.TypeTouched && msg.Touched != nil && slices.Contains(msg.Touched.Files, "more.txt") {
+			reported++
+		}
+	}
+	if reported != 1 {
+		t.Fatalf("more.txt reported in %d touched messages, want 1: %+v", reported, env.hub.messages("run-ft2"))
+	}
+}

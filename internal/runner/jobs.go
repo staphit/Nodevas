@@ -121,8 +121,11 @@ type run struct {
 	// to resume on this turn, the chain's work root id, an End that arrived
 	// before the PTY opened, and whether End asked to keep the branch without
 	// opening a PR (node take-over).
+	// resumeUsed: the agent was started with resumeSession, so it is the
+	// session this turn continued even when the CLI did not report one.
 	session       string
 	resumeSession string
+	resumeUsed    bool
 	workRoot      string
 	pendingEnd    bool
 	endNoPR       bool
@@ -466,10 +469,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	}
 	// A follow-up turn reuses the root's worktree and branch in place (work.go).
-	workEntry, contWT, recreated, contCode, contReason := j.prepareContinue(ctx, r)
+	// A folder it had to put back is removed again if the turn does not go
+	// ahead; the branch only if prepareContinue made it (undoContinue).
+	workEntry, contWT, undoContinue, contCode, contReason := j.prepareContinue(ctx, r)
 	if ctx.Err() != nil {
-		if recreated {
-			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		if undoContinue != nil {
+			undoContinue()
 		}
 		j.finish(r, cancelled(ctx))
 		return
@@ -478,19 +483,21 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		j.decline(r, contCode, contReason)
 		return
 	}
+	j.mu.Lock()
 	job = r.job
+	j.mu.Unlock()
 
 	ok, code, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
-		if recreated {
-			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		if undoContinue != nil {
+			undoContinue()
 		}
 		j.finish(r, cancelled(ctx))
 		return
 	}
 	if !ok {
-		if recreated {
-			_ = removeWorktree(j.ctx, r.repo.Path, contWT, true)
+		if undoContinue != nil {
+			undoContinue()
 		}
 		j.decline(r, code, reason)
 		return
@@ -581,6 +588,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	if !j.guardGitDir(r, wt) {
 		return
 	}
+	// The last look for touched files, while the edits are still uncommitted:
+	// after the commit below git status shows a clean tree (§C.3.1).
+	r.watcher.pollFinal()
 	j.mu.Lock()
 	r.publishing = true
 	if r.endNoPR {
@@ -589,7 +599,6 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.mu.Unlock()
 	if job.ContinueOf != "" {
 		changes, pr, result := j.publishTurn(r, wt, &workEntry, result)
-		r.watcher.pollFinal()
 		j.recordGlobalWork(r, wt, workEntry, result, pr)
 		j.finishWith(r, result, changes, pr)
 		return
@@ -600,12 +609,10 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	if result.Status == runnerwire.RunFailed && runnerwire.HandoffWorthy(result.FailureKind) &&
 		job.Mode != runnerwire.ModeInteractive && !job.Global {
 		changes := j.handOff(r, wt, &result)
-		r.watcher.pollFinal()
 		j.finishWith(r, result, changes, nil)
 		return
 	}
 	changes, pr := j.publish(r, wt, result)
-	r.watcher.pollFinal()
 	if job.Global {
 		j.recordGlobalWork(r, wt, workEntry, result, pr)
 	}
@@ -760,9 +767,32 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	if job.Mode == runnerwire.ModeInteractive {
 		return j.runInteractive(ctx, r, wt), ""
 	}
-	fail := func(kind, format string, args ...any) (runnerwire.RunResult, string) {
+	// One touched-files watcher for the run, whatever the attempts: a resume
+	// that fails fast is retried fresh (startAttempt), and a second watcher
+	// beside a first still polling would report the same files twice.
+	var watcher *touchedWatcher
+	if !adapter.ReadOnly(job) {
+		watcher = newTouchedWatcher(wt.Path, func(t runnerwire.Touched) {
+			j.queueTouched(r, t)
+		}, j.c.touchedOptions(false))
+		r.watcher = watcher
+		watcher.start(ctx)
+		defer watcher.close()
+	}
+	result, text, retry := j.startAttempt(ctx, r, wt, job, watcher)
+	if retry {
+		result, text, _ = j.startAttempt(ctx, r, wt, job, watcher)
+	}
+	return result, text
+}
+
+// startAttempt runs the agent once. retry is true when it resumed a session
+// that failed fast: the caller runs it again without the session, once the
+// first attempt's process tree is gone.
+func (j *jobs) startAttempt(ctx context.Context, r *run, wt Worktree, job runnerwire.Job, watcher *touchedWatcher) (_ runnerwire.RunResult, _ string, retry bool) {
+	fail := func(kind, format string, args ...any) (runnerwire.RunResult, string, bool) {
 		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: kind,
-			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
+			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, "", false
 	}
 	version := j.agentVersion(job.Agent)
 	ad, note := withoutOpenCode2ACP(j.c.adapterUnder(j.runCfg(r), job.Agent), version)
@@ -858,12 +888,6 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 			return fail(runnerwire.FailureTask, "could not open %s's stdin: %v", job.Agent, err)
 		}
 	}
-	var watcher *touchedWatcher
-	if !adapter.ReadOnly(job) {
-		watcher = newTouchedWatcher(wt.Path, func(t runnerwire.Touched) {
-			j.queueTouched(r, t)
-		}, touchedOptions{})
-	}
 	sawText := false
 	stdout := &lineWriter{fn: func(line []byte) {
 		for _, ev := range parser.Parse(line) {
@@ -888,10 +912,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 	tree := attachTree(cmd)
 	defer tree.close()
-	if watcher != nil {
-		r.watcher = watcher
-		watcher.start(ctx)
-		defer watcher.close()
+	if runEnv.Resume != "" {
+		j.mu.Lock()
+		r.resumeUsed = true
+		j.mu.Unlock()
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), modeText)})
@@ -939,11 +963,12 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		!sawText && time.Since(attemptStart) < resumeFastFailDuration {
 		j.mu.Lock()
 		r.resumeSession = ""
+		r.resumeUsed = false
 		r.session = ""
 		j.mu.Unlock()
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "resume failed; continuing without the agent's memory"})
 		j.c.logf("run %s: resume failed; continuing without the agent's memory", job.RunID)
-		return j.startAgent(ctx, r, wt, job)
+		return runnerwire.RunResult{}, "", true
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})
 	result := runnerwire.RunResult{ExitCode: exitCode, Summary: outcome.Summary, Usage: outcome.Usage}
@@ -992,7 +1017,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 			}
 		}
 	}
-	return result, outcome.Text
+	return result, outcome.Text, false
 }
 
 // runPermission is how freely job's agent may act under this runner's

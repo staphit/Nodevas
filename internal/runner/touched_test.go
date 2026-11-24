@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -361,6 +362,48 @@ func TestTouchedRunsForInteractiveByPollOnly(t *testing.T) {
 	eventually(t, "interactive poll picks up file", func() bool {
 		return slices.Contains(got.allFiles(), "interactive_change.go")
 	})
+}
+
+// The watcher's git status and diff --numstat run with the repository's
+// filter drivers emptied, as every other read of a worktree the agent could
+// have configured does: a clean filter the agent planted never runs as the
+// owner.
+func TestTouchedDoesNotRunFilterDrivers(t *testing.T) {
+	dir := initTouchedRepo(t)
+	marker := filepath.Join(t.TempDir(), "marker")
+	writeTestFile(t, filepath.Join(dir, ".gitattributes"), "*.go filter=evil\n")
+	gitT(t, dir, "config", "filter.evil.clean", "echo x > '"+filepath.ToSlash(marker)+"'; cat")
+	// A modified tracked file, and one only stat-dirty, so git has to read
+	// (and would clean) both.
+	writeTestFile(t, filepath.Join(dir, "base.go"), "package base\n\nfunc Hello() string { return \"bye\" }\n")
+	stamp := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "oldname.go"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: plain git status runs the filter, so the test proves something.
+	if out, err := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Skip("this git did not run the clean filter on status; nothing to prove")
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "oldname.go"), stamp.Add(time.Hour), stamp.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	var got collectedTouched
+	w := newTouchedWatcher(dir, got.send, touchedOptions{})
+	w.poll(context.Background())
+	if !slices.Contains(got.allFiles(), "base.go") {
+		t.Fatalf("touched = %v, want base.go", got.allFiles())
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the touched-files watcher ran the repository's clean filter")
+	}
 }
 
 func TestCapabilitiesAdvertiseTouched(t *testing.T) {

@@ -209,13 +209,19 @@ func dropWork(dataDir, root string) {
 }
 
 func workRootOfJob(job runnerwire.Job) string {
-	if job.WorkRoot != "" {
-		return job.WorkRoot
+	return workRootOf(job.WorkRoot, job.ContinueOf, job.RunID)
+}
+
+// workRootOf is workRootOfJob from the three fields it reads, for callers
+// that must not copy a whole job another goroutine may be writing.
+func workRootOf(workRoot, continueOf, runID string) string {
+	if workRoot != "" {
+		return workRoot
 	}
-	if job.ContinueOf != "" {
-		return job.ContinueOf
+	if continueOf != "" {
+		return continueOf
 	}
-	return job.RunID
+	return runID
 }
 
 func (j *jobs) workRootActive(root, ignoreRunID string) bool {
@@ -232,7 +238,8 @@ func (j *jobs) workRootActiveLocked(root, ignoreRunID string) bool {
 		if id == ignoreRunID || r == nil || r.finish != nil {
 			continue
 		}
-		if id == root || r.workRoot == root || workRootOfJob(r.job) == root || r.job.ContinueOf == root {
+		if id == root || r.workRoot == root || workRootOf(r.job.WorkRoot, r.job.ContinueOf, r.job.RunID) == root ||
+			r.job.ContinueOf == root {
 			return true
 		}
 	}
@@ -242,74 +249,98 @@ func (j *jobs) workRootActiveLocked(root, ignoreRunID string) bool {
 // prepareContinue vets a follow-up offer before asking for acceptance (§6.4,
 // §6.5). It resolves the worktree, branch, HEAD and session solely from the
 // runner's own work.json and git state.
-func (j *jobs) prepareContinue(ctx context.Context, r *run) (workEntry, Worktree, bool, string, string) {
+//
+// When it had to put the root's folder back, undo removes that folder again
+// (and the branch, only when it made the branch too) for a turn that then
+// does not start; undo is nil otherwise. The run's fields other goroutines
+// read under j.mu (workRoot, the job, resumeSession) are written under it.
+func (j *jobs) prepareContinue(ctx context.Context, r *run) (_ workEntry, _ Worktree, undo func(), code, reason string) {
 	job := &r.job
 	if job.ContinueOf == "" {
 		if job.Global {
+			j.mu.Lock()
 			r.workRoot = job.RunID
+			j.mu.Unlock()
 		}
-		return workEntry{}, Worktree{}, false, "", ""
+		return workEntry{}, Worktree{}, nil, "", ""
 	}
 	root := workRootOfJob(*job)
+	j.mu.Lock()
 	r.workRoot = root
 	job.WorkRoot = root
+	j.mu.Unlock()
 
 	dataDir, err := j.runCfg(r).RunDataDir()
 	if err != nil {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, "cannot read the work record: " + err.Error()
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, "cannot read the work record: " + err.Error()
 	}
 	entry, ok, err := lookupWork(dataDir, root)
 	if err != nil {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, "cannot read the work record: " + err.Error()
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, "cannot read the work record: " + err.Error()
 	}
 	if !ok {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, fmt.Sprintf("work %s is not on record on this runner", root)
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, fmt.Sprintf("work %s is not on record on this runner", root)
 	}
 	if entry.LastRunID != job.ContinueOf {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 			fmt.Sprintf("run %s is not the latest turn of %s (latest is %s)", job.ContinueOf, root, entry.LastRunID)
 	}
 	if entry.RepoID != job.RepoID {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 			fmt.Sprintf("work %s belongs to repository %s, not %s", root, entry.RepoID, job.RepoID)
 	}
 	if j.workRootActive(root, job.RunID) {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 			fmt.Sprintf("another run on this runner is already working in %s", root)
 	}
 	if entry.Branch == "" || !strings.HasPrefix(entry.Branch, "agent/") || checkBase(entry.Branch) != nil {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 			fmt.Sprintf("recorded branch %q is not a valid agent branch", entry.Branch)
 	}
 
 	found, err := findRunWorktreeDirect(ctx, dataDir, r.repo.Path, root)
 	if err != nil {
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, err.Error()
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, err.Error()
 	}
 
 	var wt Worktree
-	recreated := false
 	if !found.Exists {
 		if entry.PRURL != "" {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclinePREnded,
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclinePREnded,
 				fmt.Sprintf("the worktree for %s (%s) was removed after its pull request ended", root, entry.PRURL)
 		}
-		wt, err = recreateWorktree(ctx, r.repo.Path, dataDir, root, entry.Branch, entry.Base, entry.Head)
-		if err != nil {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, err.Error()
+		// A recorded head means an earlier turn committed on the branch: the
+		// branch must still be there, at that head. Starting again from the
+		// base would quietly lose that work.
+		if entry.Head != "" {
+			tip, err := revParse(ctx, r.repo.Path, "refs/heads/"+entry.Branch)
+			if err != nil || tip == "" {
+				return workEntry{}, Worktree{}, nil, runnerwire.DeclineBranchMoved,
+					fmt.Sprintf("branch %s, which held this work up to %s, is gone", entry.Branch, short(entry.Head))
+			}
+			if tip != entry.Head {
+				return workEntry{}, Worktree{}, nil, runnerwire.DeclineBranchMoved,
+					fmt.Sprintf("branch %s moved (at %s, expected %s)", entry.Branch, short(tip), short(entry.Head))
+			}
 		}
-		recreated = true
+		var madeBranch bool
+		wt, madeBranch, err = recreateWorktree(ctx, r.repo.Path, dataDir, root, entry.Branch, entry.Base, entry.Head)
+		if err != nil {
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, err.Error()
+		}
+		put := wt
+		undo = func() { _ = removeWorktree(context.WithoutCancel(j.ctx), r.repo.Path, put, madeBranch) }
 		head, err := revParse(ctx, wt.Path, "HEAD")
 		if err != nil {
-			_ = removeWorktree(ctx, r.repo.Path, wt, true)
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, err.Error()
+			undo()
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, err.Error()
 		}
 		entry.Head = head
 		entry.GitFile = wt.GitFile
 		entry.GitDirs = wt.GitDirs
 	} else {
 		if !found.Listed || !found.GitFile {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 				"the worktree is not a registered git worktree of this repository"
 		}
 		wt = Worktree{
@@ -321,25 +352,25 @@ func (j *jobs) prepareContinue(ctx context.Context, r *run) (workEntry, Worktree
 		}
 		if wt.GitFile != "" {
 			if err := checkGitDir(ctx, wt); err != nil {
-				return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, err.Error()
+				return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, err.Error()
 			}
 		} else if err := recordGitDir(ctx, &wt); err != nil {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, err.Error()
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, err.Error()
 		} else {
 			entry.GitFile, entry.GitDirs = wt.GitFile, wt.GitDirs
 		}
 		if found.Branch != entry.Branch {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 				fmt.Sprintf("worktree is on branch %s, not %s", orDash(found.Branch), entry.Branch)
 		}
 		head, err := revParse(ctx, wt.Path, "HEAD")
 		if err != nil || (entry.Head != "" && head != entry.Head) {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 				fmt.Sprintf("worktree HEAD moved (at %s, expected %s)", short(head), short(entry.Head))
 		}
 		branchTip, err := revParse(ctx, r.repo.Path, "refs/heads/"+entry.Branch)
 		if err != nil || branchTip != head {
-			return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+			return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 				fmt.Sprintf("branch %s moved (at %s, expected %s)", entry.Branch, short(branchTip), short(head))
 		}
 		entry.Head = head
@@ -347,42 +378,48 @@ func (j *jobs) prepareContinue(ctx context.Context, r *run) (workEntry, Worktree
 
 	dirty, dirtyPaths, err := worktreeDirtyBeyondWithheld(ctx, dataDir, wt.Path)
 	if err != nil {
-		if recreated {
-			_ = removeWorktree(ctx, r.repo.Path, wt, true)
+		if undo != nil {
+			undo()
 		}
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther, "cannot read the worktree's changes: " + err.Error()
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther, "cannot read the worktree's changes: " + err.Error()
 	}
 	if dirty && entry.LastStatus != runnerwire.RunCancelled && entry.LastStatus != runnerwire.RunFailed {
-		if recreated {
-			_ = removeWorktree(ctx, r.repo.Path, wt, true)
+		if undo != nil {
+			undo()
 		}
-		return workEntry{}, Worktree{}, false, runnerwire.DeclineOther,
+		return workEntry{}, Worktree{}, nil, runnerwire.DeclineOther,
 			fmt.Sprintf("worktree has uncommitted changes after a succeeded run: %s", strings.Join(dirtyPaths, ", "))
 	}
 
 	if entry.PRURL != "" {
 		if code, reason := j.prepareContinuePR(ctx, r, dataDir, &entry, wt, dirty); reason != "" {
-			if recreated {
-				_ = removeWorktree(ctx, r.repo.Path, wt, true)
+			if undo != nil {
+				undo()
 			}
-			return workEntry{}, Worktree{}, false, code, reason
+			return workEntry{}, Worktree{}, nil, code, reason
 		}
 	}
 
 	wt.Base = entry.Base
 	wt.BaseRef = entry.Head
-	job.Base = entry.Base
-	job.ContinuePR = entry.PRURL
-	job.ContinueTask = adapter.Truncate(redact.String(job.ContinueTask), runnerwire.MaxPromptBytes)
-	job.ContinueSummary = adapter.Truncate(redact.String(job.ContinueSummary), runnerwire.MaxSummaryBytes)
 
+	resume := ""
 	if entry.Session != "" && runnerwire.ValidSessionID(entry.Session) && entry.Agent == job.Agent {
 		ad, _ := withoutOpenCode2ACP(j.c.adapterUnder(j.runCfg(r), job.Agent), j.agentVersion(job.Agent))
 		if resumer, ok := ad.(adapter.Resumer); ok && resumer.SupportsResume(job.Mode == runnerwire.ModeInteractive) {
-			r.resumeSession = entry.Session
+			resume = entry.Session
 		}
 	}
-	return entry, wt, recreated, "", ""
+	task := adapter.Truncate(redact.String(job.ContinueTask), runnerwire.MaxPromptBytes)
+	summary := adapter.Truncate(redact.String(job.ContinueSummary), runnerwire.MaxSummaryBytes)
+	j.mu.Lock()
+	job.Base = entry.Base
+	job.ContinuePR = entry.PRURL
+	job.ContinueTask = task
+	job.ContinueSummary = summary
+	r.resumeSession = resume
+	j.mu.Unlock()
+	return entry, wt, undo, "", ""
 }
 
 // prepareContinuePR enforces §6.5's pre-turn open-PR checks and fast-forwards
@@ -451,20 +488,23 @@ func (j *jobs) prepareContinuePR(ctx context.Context, r *run, dataDir string, en
 	return runnerwire.DeclineBranchMoved, fmt.Sprintf("branch %s diverged on origin", entry.Branch)
 }
 
-// recreateWorktree recreates <dataDir>/worktrees/<root> on branch from base
-// when the prior turn changed nothing and publish removed its worktree.
-func recreateWorktree(ctx context.Context, repoPath, dataDir, root, branch, base, expectedHead string) (Worktree, error) {
+// recreateWorktree recreates <dataDir>/worktrees/<root> on branch when its
+// folder is gone: on the branch as it is when the branch is still there (at
+// expectedHead, when one is given), else on a new branch from base (the prior
+// turn changed nothing and publish removed both). madeBranch says which: only
+// a branch it made may be deleted again if the turn does not go ahead.
+func recreateWorktree(ctx context.Context, repoPath, dataDir, root, branch, base, expectedHead string) (_ Worktree, madeBranch bool, _ error) {
 	if !validRunID.MatchString(root) {
-		return Worktree{}, fmt.Errorf("run id %q is not usable as a directory name", root)
+		return Worktree{}, false, fmt.Errorf("run id %q is not usable as a directory name", root)
 	}
 	if base != "" {
 		if err := checkBase(base); err != nil {
-			return Worktree{}, err
+			return Worktree{}, false, err
 		}
 	} else {
 		var err error
 		if base, err = defaultBranch(ctx, repoPath); err != nil {
-			return Worktree{}, err
+			return Worktree{}, false, err
 		}
 	}
 	baseRef := base
@@ -480,7 +520,7 @@ func recreateWorktree(ctx context.Context, repoPath, dataDir, root, branch, base
 	case refExists(ctx, repoPath, remoteRef):
 		baseRef = remoteRef
 	default:
-		return Worktree{}, fmt.Errorf("base branch %q exists neither locally nor on origin", base)
+		return Worktree{}, false, fmt.Errorf("base branch %q exists neither locally nor on origin", base)
 	}
 
 	wt := Worktree{
@@ -490,27 +530,31 @@ func recreateWorktree(ctx context.Context, repoPath, dataDir, root, branch, base
 		BaseRef: baseRef,
 	}
 	if err := os.MkdirAll(filepath.Dir(wt.Path), 0o700); err != nil {
-		return Worktree{}, err
+		return Worktree{}, false, err
 	}
 	if refExists(ctx, repoPath, "refs/heads/"+branch) {
 		if expectedHead != "" {
 			if tip, err := revParse(ctx, repoPath, "refs/heads/"+branch); err != nil || tip != expectedHead {
-				return Worktree{}, fmt.Errorf("branch %s moved since the last run", branch)
+				return Worktree{}, false, fmt.Errorf("branch %s moved since the last run", branch)
 			}
 		}
 		if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "--", wt.Path, branch); err != nil {
-			return Worktree{}, err
+			return Worktree{}, false, err
 		}
 	} else {
-		if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "-b", branch, "--", wt.Path, baseRef); err != nil {
-			return Worktree{}, err
+		if expectedHead != "" {
+			return Worktree{}, false, fmt.Errorf("branch %s, which held this work, is gone", branch)
 		}
+		if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "-b", branch, "--", wt.Path, baseRef); err != nil {
+			return Worktree{}, false, err
+		}
+		madeBranch = true
 	}
 	if err := recordGitDir(ctx, &wt); err != nil {
-		_ = removeWorktree(ctx, repoPath, wt, false)
-		return Worktree{}, err
+		_ = removeWorktree(ctx, repoPath, wt, madeBranch)
+		return Worktree{}, false, err
 	}
-	return wt, nil
+	return wt, madeBranch, nil
 }
 
 // worktreeDirtyBeyondWithheld reports whether dir has uncommitted tracked or
@@ -554,7 +598,11 @@ func worktreeDirtyBeyondWithheld(ctx context.Context, dataDir, dir string) (bool
 //     fast-forward only, attaches the existing PR instead of creating a new one,
 //     posts one PR comment per push, and never marks a draft PR ready;
 //   - on a rejected push, keeps commits local and pushedHead unchanged and marks
-//     RunResult.PushRefused = true.
+//     RunResult.PushRefused = true;
+//   - looks at the PR again right before pushing: one merged or closed while
+//     the turn ran gets no push and no comment, the commits stay local, and
+//     the turn reports the PR as gh shows it (the hub's pr_ended); one it
+//     cannot look at is not pushed either (PushRefused).
 func (j *jobs) publishTurn(r *run, wt Worktree, entry *workEntry, result runnerwire.RunResult) (*runnerwire.RunChanges, *runnerwire.PRInfo, runnerwire.RunResult) {
 	ctx := j.ctx
 	job := r.job
@@ -617,6 +665,22 @@ func (j *jobs) publishTurn(r *run, wt Worktree, entry *workEntry, result runnerw
 				Text: fmt.Sprintf("autoPR is off: branch %s stays in %s", wt.Branch, wt.Path)})
 			return &changes, nil, result
 		}
+		// The PR was open before the turn; it may have been merged or closed
+		// while the agent worked. Pushing then would put commits on a branch
+		// nobody reviews, so look again first.
+		if info, ended, why := j.prStillOpen(r, entry.PRURL); why != "" {
+			result.PushRefused = true
+			j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+				Text: fmt.Sprintf("%s; not pushed: commits kept on %s in %s", why, wt.Branch, wt.Path)})
+			j.c.logf("run %s: %s; not pushed; commits kept locally at %s", job.RunID, why, wt.Path)
+			return &changes, nil, result
+		} else if ended {
+			text := fmt.Sprintf("pull request %s was %s while this turn ran; not pushed and no comment posted: commits kept on %s in %s",
+				entry.PRURL, info.State, wt.Branch, wt.Path)
+			j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
+			j.c.logf("run %s: %s", job.RunID, text)
+			return &changes, &info, result
+		}
 		pushCtx, cancel := context.WithTimeout(ctx, pushTimeout)
 		_, err := git(pushCtx, wt.Path, "push", "--no-verify", "origin", "HEAD:refs/heads/"+wt.Branch)
 		cancel()
@@ -667,6 +731,21 @@ func (j *jobs) publishTurn(r *run, wt Worktree, entry *workEntry, result runnerw
 		j.watch(watched)
 	}
 	return &changes, &pr, result
+}
+
+// prStillOpen looks at a turn's PR right before its push. ended is true, with
+// the PR as gh shows it, when it was merged or closed; why is non-empty when
+// it could not be looked at, and then nothing is pushed either.
+func (j *jobs) prStillOpen(r *run, prURL string) (info runnerwire.PRInfo, ended bool, why string) {
+	gh, err := j.c.gh()
+	if err != nil {
+		return runnerwire.PRInfo{}, false, "could not look at " + prURL + " before pushing: " + err.Error()
+	}
+	info, err = gh.view(j.ctx, r.repo.Path, prURL)
+	if err != nil {
+		return runnerwire.PRInfo{}, false, "could not look at " + prURL + " before pushing: " + err.Error()
+	}
+	return info, info.State == runnerwire.PRMerged || info.State == runnerwire.PRClosed, ""
 }
 
 // attachTurnPR reads an open PR back after pushing a follow-up turn and updates
@@ -750,14 +829,18 @@ func (j *jobs) recordGlobalWork(r *run, wt Worktree, prev workEntry, result runn
 			pushedHead = head
 		}
 	}
+	// The session to resume next turn is one this turn really used: the one
+	// the CLI reported or the runner gave it, else the one it was resumed
+	// with. A turn that never started the agent with the old session (no
+	// resume, or a retry without it) does not carry that session forward.
 	j.mu.Lock()
 	session := r.session
-	resumed := r.resumeSession
+	resumed, used := r.resumeSession, r.resumeUsed
 	j.mu.Unlock()
 	if !runnerwire.ValidSessionID(session) {
 		session = ""
 	}
-	if session == "" && resumed != "" && prev.Agent == r.job.Agent && runnerwire.ValidSessionID(resumed) {
+	if session == "" && used && resumed != "" && prev.Agent == r.job.Agent && runnerwire.ValidSessionID(resumed) {
 		session = resumed
 	}
 	turn := prev.Turn + 1

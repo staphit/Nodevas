@@ -512,6 +512,9 @@ type followUpGH struct {
 	bodies   []string
 	comments []string
 	calls    [][]string
+	// endAfterView, when set, is the state the PR takes right after the next
+	// gh pr view answers: it was merged or closed while a turn ran.
+	endAfterView string
 }
 
 func newFollowUpGH(url, branch, base string) *followUpGH {
@@ -547,6 +550,9 @@ func (g *followUpGH) run(_, stdin string, args []string) (string, error) {
 			"headRefOid":        g.headSHA,
 			"statusCheckRollup": []any{},
 		})
+		if g.endAfterView != "" {
+			g.state, g.endAfterView = g.endAfterView, ""
+		}
 		return string(raw), nil
 	}
 	if len(args) >= 2 && args[0] == "pr" && args[1] == "comment" {
@@ -1107,4 +1113,162 @@ func TestAcceptReportsViewOnly(t *testing.T) {
 	}
 	stTy.term.exit <- 0
 	envTyping.hub.wait("run-ty", runnerwire.TypeFinish)
+}
+
+// A follow-up whose folder is gone but whose branch still holds the earlier
+// turns' commits reuses that branch; a decline, a cancel or a runner stop
+// before the turn starts removes only the folder it put back, never the
+// branch it did not make.
+func TestFollowUpKeepsAnExistingBranchWhenDeclined(t *testing.T) {
+	hermeticGit(t)
+	env := startJobRunner(t, func(c *Client) {
+		c.Accepter = acceptFunc(func(_ context.Context, o Offer) (bool, string) {
+			if o.Job.RunID == "run-kb2" {
+				return false, ReasonDeclined
+			}
+			return true, ""
+		})
+	})
+	env.hub.hello()
+
+	env.hub.offer(globalTestJob("run-kb1", "edit: turn 1"))
+	if res := env.hub.wait("run-kb1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 = %+v", res)
+	}
+	const branch = "agent/tidy-readme-run-kb1"
+	c1 := gitT(t, env.repo, "rev-parse", "refs/heads/"+branch)
+	wtPath := filepath.Join(env.client.Config.DataDir, "worktrees", "run-kb1")
+	if err := removeWorktree(context.Background(), env.repo, Worktree{Path: wtPath, Branch: branch}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	env.hub.offer(followUpTestJob("run-kb2", "run-kb1", "run-kb1", "continue: turn 2"))
+	env.hub.wait("run-kb2", runnerwire.TypeDecline)
+
+	if got, err := git(context.Background(), env.repo, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err != nil || strings.TrimSpace(got) != c1 {
+		t.Fatalf("branch %s after a declined follow-up = %q, %v; want %s", branch, strings.TrimSpace(got), err, c1)
+	}
+	if _, err := os.Stat(wtPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the folder put back for the declined turn is still there: %v", err)
+	}
+}
+
+// A follow-up whose recorded head names commits on a branch that is gone is
+// declined (branch_moved), not silently started again from the base.
+func TestFollowUpDeclinesWhenItsBranchIsGone(t *testing.T) {
+	hermeticGit(t)
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+
+	env.hub.offer(globalTestJob("run-bg1", "edit: turn 1"))
+	if res := env.hub.wait("run-bg1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 = %+v", res)
+	}
+	const branch = "agent/tidy-readme-run-bg1"
+	wtPath := filepath.Join(env.client.Config.DataDir, "worktrees", "run-bg1")
+	if err := removeWorktree(context.Background(), env.repo, Worktree{Path: wtPath, Branch: branch}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	env.hub.offer(followUpTestJob("run-bg2", "run-bg1", "run-bg1", "continue: turn 2"))
+	msg := env.hub.wait("run-bg2", runnerwire.TypeDecline)
+	if msg.Code != runnerwire.DeclineBranchMoved {
+		t.Fatalf("decline = %+v, want code %q", msg, runnerwire.DeclineBranchMoved)
+	}
+	if _, err := os.Stat(wtPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the folder was re-created from the base")
+	}
+}
+
+// A PR merged or closed while a turn ran gets no push and no comment: the
+// turn's commits stay on the local branch and the turn reports the PR's end.
+func TestTurnDoesNotPushToAPRThatEndedDuringTheTurn(t *testing.T) {
+	for _, state := range []string{"MERGED", "CLOSED"} {
+		t.Run(state, func(t *testing.T) {
+			id := "run-end" + strings.ToLower(state[:1])
+			branch := "agent/tidy-readme-" + id
+			gh := newFollowUpGH("https://github.com/o/r/pull/31", branch, "main")
+			env := startFollowUpPRRunner(t, gh, nil)
+			env.hub.hello()
+
+			first := globalTestJob(id, "edit: turn 1")
+			first.NoPR = false
+			env.hub.offer(first)
+			if res := env.hub.wait(id, runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+				t.Fatalf("turn 1 = %+v", res)
+			}
+			c1 := gitT(t, env.bare, "rev-parse", "refs/heads/"+branch)
+
+			// The pre-turn look sees it open; it ends right after.
+			gh.mu.Lock()
+			gh.endAfterView = state
+			gh.mu.Unlock()
+			second := followUpTestJob(id+"-2", id, id, "continue: turn 2")
+			second.NoPR = false
+			env.hub.offer(second)
+			res := env.hub.wait(id+"-2", runnerwire.TypeFinish).Result
+			if res.Status != runnerwire.RunSucceeded || res.PushRefused {
+				t.Fatalf("turn 2 = %+v, want succeeded without pushRefused", res)
+			}
+			if got := gitT(t, env.bare, "rev-parse", "refs/heads/"+branch); got != c1 {
+				t.Fatalf("origin moved to %s after the PR ended; want %s", got, c1)
+			}
+			local := gitT(t, env.repo, "rev-parse", "refs/heads/"+branch)
+			if local == c1 || gitT(t, env.repo, "rev-parse", local+"^") != c1 {
+				t.Fatalf("local branch at %s, want turn 2's commit on top of %s", local, c1)
+			}
+			gh.mu.Lock()
+			comments := len(gh.comments)
+			gh.mu.Unlock()
+			if comments != 0 {
+				t.Fatalf("posted %d PR comments on a PR that ended", comments)
+			}
+			want := runnerwire.PRMerged
+			if state == "CLOSED" {
+				want = runnerwire.PRClosed
+			}
+			if pr := env.hub.wait(id+"-2", runnerwire.TypePR).PR; pr == nil || pr.State != want || pr.URL != gh.url {
+				t.Fatalf("turn 2 PR = %+v, want state %s", pr, want)
+			}
+			if !hubHasEvent(env.jobEnv, id+"-2", "not pushed") {
+				t.Errorf("no log line says the turn was not pushed: %+v", env.hub.messages(id+"-2"))
+			}
+			entry, _, _ := lookupWork(env.client.Config.DataDir, id)
+			if entry.Head != local || entry.PushedHead != c1 {
+				t.Fatalf("work entry = %+v, want head=%s pushedHead=%s", entry, local, c1)
+			}
+		})
+	}
+}
+
+// prepareContinue records the turn's work root and job fields under j.mu:
+// other goroutines (offers, the PR watcher, merges) read them under it.
+func TestContinueWritesRunFieldsUnderTheLock(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+
+	env.hub.offer(globalTestJob("run-mu1", "edit: turn 1"))
+	env.hub.wait("run-mu1", runnerwire.TypeFinish)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			env.client.jobs.workRootActive("run-mu1", "")
+			time.Sleep(50 * time.Microsecond)
+		}
+	}()
+	env.hub.offer(followUpTestJob("run-mu2", "run-mu1", "run-mu1", "continue: turn 2"))
+	res := env.hub.wait("run-mu2", runnerwire.TypeFinish).Result
+	close(stop)
+	<-done
+	if res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 2 = %+v", res)
+	}
 }

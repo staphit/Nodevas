@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"path"
 	"slices"
@@ -196,8 +195,9 @@ func (w *touchedWatcher) start(ctx context.Context) {
 }
 
 // close halts background polling and waits for the watcher goroutine to exit
-// without running a final poll. Callers that commit the worktree next use
-// close before committing and pollFinal afterwards if uncommitted files remain.
+// without running a final poll. Callers that commit the worktree next close
+// it when the agent exits and call pollFinal before committing: once the
+// work is committed, git status shows nothing left to report.
 func (w *touchedWatcher) close() {
 	if w == nil {
 		return
@@ -504,12 +504,11 @@ type numstatInfo struct {
 func (w *touchedWatcher) gitTouched(ctx context.Context, dir string, stdin []byte, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, w.gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", hardenedArgs(dir, args)...)
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GCM_INTERACTIVE=never",
-		"GIT_OPTIONAL_LOCKS=0",
-	)
+	// The agent can write the worktree's git config while it runs: its filter
+	// drivers are emptied (repoGitArgs), as for every other read of a run's
+	// worktree, so status and diff never run a command it planted.
+	cmd := exec.CommandContext(ctx, "git", hardenedArgs(dir, repoGitArgs(ctx, dir, args))...)
+	cmd.Env = append(repoGitEnv(), "GIT_OPTIONAL_LOCKS=0")
 	if len(stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

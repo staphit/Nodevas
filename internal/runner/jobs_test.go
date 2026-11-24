@@ -166,7 +166,7 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fixture("claude_error.jsonl")
 		os.Exit(3)
-	case "resume-fail":
+	case "resume-fail", "resume-fail-slow":
 		if i := slices.Index(os.Args, "--"); i >= 0 && slices.Contains(os.Args[i+1:], "--resume") {
 			raw, _ := json.Marshal(os.Args[i+1:])
 			put("resume-args", string(raw))
@@ -176,6 +176,10 @@ func TestHelperProcess(t *testing.T) {
 		}
 		if err := os.WriteFile(filepath.Join(wd, "more.txt"), []byte("more\n"), 0o644); err != nil {
 			os.Exit(9)
+		}
+		if mode == "resume-fail-slow" {
+			// Long enough for a touched-files watcher to poll a few times.
+			time.Sleep(400 * time.Millisecond)
 		}
 		fixture("claude_stream.jsonl")
 		os.Exit(0)

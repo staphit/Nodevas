@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -40,7 +41,7 @@ const (
 	// summaryLines is how many lines of the final screen the summary keeps.
 	summaryLines = 20
 	// waitingCheckLines is how many non-empty tail lines screenWaiting checks
-	// for a question, permission or trust menu (§6.3 smoke test).
+	// for a question, permission or trust menu (§3.1, §7.2).
 	waitingCheckLines = 15
 	// termDrainQuiet / termDrainMax: after the program exits, its last output
 	// is read until the terminal has been quiet this long, at most that long.
@@ -51,12 +52,14 @@ const (
 	// interactiveQuiet ends an idle interactive session after 20 minutes with
 	// no visible output and no user input (§7.2).
 	interactiveQuiet = 20 * time.Minute
-	// endQuitGap spaces the Ctrl+C presses sent by End / quiet timeout. Live
-	// CLI smoke tests (§5.2) showed 300ms stays within Claude Code's double
-	// Ctrl+C confirmation window while 1s expires it.
+	// endQuitGap spaces the Ctrl+C presses sent by End / quiet timeout. It
+	// is meant to fall inside the window in which a CLI such as Claude Code
+	// takes a second Ctrl+C as "exit". Not yet confirmed per CLI: the plan's
+	// live smoke test (§16.2 item 3) has not been recorded.
 	endQuitGap = 300 * time.Millisecond
-	// endGrace is how long End waits for the CLI to exit on its own (Codex
-	// takes ~5.2s to shut down MCP servers) before killing the process tree.
+	// endGrace is how long End waits for the CLI to exit on its own (one that
+	// shuts down MCP servers first, as Codex does, takes a few seconds)
+	// before killing the process tree.
 	endGrace = 10 * time.Second
 )
 
@@ -179,11 +182,23 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	}
 
 	cfg := j.runCfg(r)
-	var sessionID string
+	// A follow-up of the same agent resumes the earlier turn's session
+	// (prepareContinue checked the adapter can, in a terminal). A new Claude
+	// session gets an id the runner picks; a resumed one keeps its own, since
+	// `claude --resume <id>` goes on writing that session's transcript (it
+	// forks a new id only with --fork-session). Either way the transcript
+	// tail follows the session the CLI really writes.
+	j.mu.Lock()
+	resume := r.resumeSession
+	j.mu.Unlock()
+	var sessionID, tailSession string
 	if job.Agent == "claude" {
-		sessionID = newUUIDv4()
+		if resume == "" {
+			sessionID = newUUIDv4()
+		}
+		tailSession = cmp.Or(resume, sessionID)
 		j.mu.Lock()
-		r.session = sessionID
+		r.session = tailSession
 		j.mu.Unlock()
 	}
 	cmd, err := ia.InteractiveCommand(job, adapter.RunEnv{
@@ -198,9 +213,15 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:        j.agentVersion(job.Agent),
 		SessionID:      sessionID,
+		Resume:         resume,
 	})
 	if err != nil {
 		return fail("%v", err)
+	}
+	if resume != "" {
+		j.mu.Lock()
+		r.resumeUsed = true
+		j.mu.Unlock()
 	}
 	term, err := j.c.startTerminal(cmd, initialCols, initialRows)
 	if err != nil {
@@ -235,12 +256,12 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	// Interactive runs emit no tool events, so touched files rely on polling (§C.3.1).
 	watcher := newTouchedWatcher(wt.Path, func(t runnerwire.Touched) {
 		j.queueTouched(r, t)
-	}, touchedOptions{interactive: true})
+	}, j.c.touchedOptions(true))
 	r.watcher = watcher
 	watcher.start(ctx)
 	defer watcher.close()
 
-	tail := j.startTranscriptTail(ctx, r, sessionID)
+	tail := j.startTranscriptTail(ctx, r, tailSession, wt.Path)
 	defer tail.stop()
 
 	readerDone := make(chan struct{})
@@ -268,11 +289,23 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	quietTimer := time.NewTimer(quiet)
 	defer quietTimer.Stop()
 
+	if j.c.interactiveWaiting != nil {
+		j.c.interactiveWaiting(job.RunID)
+	}
+
 	var waitErr error
 	stopped := ""
 	endReason := ""
 waitLoop:
 	for {
+		// The CLI's own exit comes first: one that exited (perhaps failing)
+		// just as an End or the quiet timeout came due ended by itself, and
+		// a select with both ready would pick either.
+		select {
+		case waitErr = <-done:
+			break waitLoop
+		default:
+		}
 		rem := quiet - time.Since(s.lastActivity())
 		if rem <= 0 {
 			stopped = "ended"
@@ -308,6 +341,12 @@ waitLoop:
 			waitErr = <-done
 			break waitLoop
 		case <-s.endCh:
+			select {
+			case waitErr = <-done:
+				// It had already exited when the End came: its own exit.
+				break waitLoop
+			default:
+			}
 			stopped = "ended"
 			endReason = runnerwire.EndReasonEnded
 			var override string
@@ -382,9 +421,11 @@ func (j *jobs) endRun(runID string, noPR ...bool) {
 }
 
 // quitSequence returns the key sequence used to ask agent's TUI to quit
-// gracefully. Live smoke testing across Claude Code, Codex, OpenCode and
-// Antigravity (§5.2) showed 3× Ctrl+C spaced 300ms apart interrupts any active
-// turn on the first press and triggers double-Ctrl+C exit on the next two.
+// gracefully: three Ctrl+C presses (endQuitGap apart), the first to interrupt
+// a turn in progress and the next two for the double Ctrl+C these TUIs take
+// as "exit". One sequence for every agent until the plan's live smoke test
+// (§16.2 item 3) fixes a per-agent table; the kill after endGrace covers a
+// CLI it does not stop.
 func quitSequence(agent string) []string {
 	switch agent {
 	default:
@@ -402,13 +443,7 @@ func (j *jobs) quitInteractive(ctx context.Context, agent string, s *termSession
 	grace := j.c.quitGrace()
 	for i, key := range keys {
 		if i > 0 {
-			wait := gap
-			if i == 2 && wait < 100*time.Millisecond {
-				// Give a process exiting on press 2 a beat to be reaped in fast
-				// unit tests before queuing press 3.
-				wait = 2 * gap
-			}
-			timer := time.NewTimer(wait)
+			timer := time.NewTimer(gap)
 			select {
 			case err := <-done:
 				timer.Stop()
@@ -459,9 +494,10 @@ var (
 )
 
 // screenWaiting reports whether the last visible lines of raw PTY output match
-// a known question, permission or folder-trust prompt for agent (§6.3 smoke
-// test table, §7.2). plainText expands Ink's CSI cursor-forward (\x1b[NC) into
-// spaces before matching.
+// a known question, permission or folder-trust prompt for agent (the menu
+// markers of §3.1 and §7.2, to be confirmed per CLI by the live smoke test).
+// plainText expands Ink's CSI cursor-forward (\x1b[NC) into spaces before
+// matching.
 func screenWaiting(agent string, raw []byte) bool {
 	tail := lastLines(plainText(raw), waitingCheckLines)
 	if tail == "" {

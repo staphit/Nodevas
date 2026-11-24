@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"nodevas/internal/redact"
 	"nodevas/internal/runner/adapter"
@@ -22,10 +24,21 @@ const (
 	transcriptPollInterval = 250 * time.Millisecond
 	// transcriptReadChunk sizes each read from the tailed transcript file.
 	transcriptReadChunk = 32 << 10
+	// transcriptScanMax caps the backoff between looks through every project
+	// folder, for a transcript that is not where the worktree's own folder
+	// name says (see claudeProjectDirName).
+	transcriptScanMax = 15 * time.Second
+	// claudeProjectNameMax is the longest folder name Claude Code uses as is;
+	// a longer one it shortens and suffixes with a hash this runner does not
+	// reproduce, so such a transcript is found by the scan.
+	claudeProjectNameMax = 200
 )
 
 type transcriptOptions struct {
-	projectsDir  string
+	projectsDir string
+	// workdir is the folder the CLI runs in: its transcript is first looked
+	// for in the project folder Claude Code names after it.
+	workdir      string
 	pollInterval time.Duration
 	// expectedUID overrides os.Geteuid in tests so refusal of foreign-owned
 	// files can be tested without root privileges.
@@ -36,9 +49,15 @@ type transcriptOptions struct {
 // (~/.claude/projects/*/<sessionID>.jsonl) read-only through Claude's
 // stream-json parser into emit, tracking the last non-empty assistant text for
 // the end-of-run summary (R3, §14, §16.6).
+//
+// Until the file exists it is looked for each poll only in the project
+// folders named after the worktree (projectDirs); a look through every
+// project folder, which can be thousands on a busy machine, backs off from
+// the poll interval to transcriptScanMax.
 type transcriptTail struct {
 	sessionID    string
 	projectsDir  string
+	projectDirs  []string
 	pollInterval time.Duration
 	expectedUID  func() int
 	emit         func(runnerwire.RunEvent)
@@ -49,7 +68,12 @@ type transcriptTail struct {
 	lastText string
 	started  bool
 
-	file     *os.File
+	file *os.File
+	// nextScan and scanGap pace the full scans; scans counts them (tests).
+	nextScan time.Time
+	scanGap  time.Duration
+	scans    int
+
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	stopOnce sync.Once
@@ -59,7 +83,7 @@ type transcriptTail struct {
 // j.emit for an interactive Claude run with a runner-chosen session ID.
 // Returns nil for other agents or invalid session IDs; nil-safe methods keep
 // the call site in interactive.go a no-op in those cases.
-func (j *jobs) startTranscriptTail(ctx context.Context, r *run, sessionID string) *transcriptTail {
+func (j *jobs) startTranscriptTail(ctx context.Context, r *run, sessionID, workdir string) *transcriptTail {
 	if r == nil || r.job.Agent != "claude" || !validTranscriptSessionID(sessionID) {
 		return nil
 	}
@@ -69,7 +93,7 @@ func (j *jobs) startTranscriptTail(ctx context.Context, r *run, sessionID string
 	}
 	t := newTranscriptTail(sessionID, func(ev runnerwire.RunEvent) {
 		j.emit(r, ev)
-	}, transcriptOptions{projectsDir: dir})
+	}, transcriptOptions{projectsDir: dir, workdir: workdir})
 	t.start(ctx)
 	return t
 }
@@ -86,7 +110,9 @@ func newTranscriptTail(sessionID string, emit func(runnerwire.RunEvent), opts tr
 	t := &transcriptTail{
 		sessionID:    sessionID,
 		projectsDir:  opts.projectsDir,
+		projectDirs:  claudeProjectDirs(opts.workdir),
 		pollInterval: poll,
+		scanGap:      poll,
 		expectedUID:  expectedUID,
 		emit:         emit,
 		parser:       (adapter.Claude{}).NewParser(),
@@ -231,36 +257,106 @@ func (t *transcriptTail) openTranscriptFile() (*os.File, error) {
 	}
 	defer root.Close()
 
+	for _, dir := range t.projectDirs {
+		if f := t.openIn(root, dir); f != nil {
+			return f, nil
+		}
+	}
+	now := time.Now()
+	if now.Before(t.nextScan) {
+		return nil, fs.ErrNotExist
+	}
+	t.nextScan = now.Add(t.scanGap)
+	t.scanGap = min(2*t.scanGap, transcriptScanMax)
+	t.mu.Lock()
+	t.scans++
+	t.mu.Unlock()
 	entries, err := os.ReadDir(t.projectsDir)
 	if err != nil {
 		return nil, err
 	}
-	name := t.sessionID + ".jsonl"
 	for _, ent := range entries {
 		if ent.Type()&os.ModeSymlink != 0 || !ent.IsDir() {
 			continue
 		}
-		dirInfo, err := root.Lstat(ent.Name())
-		if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || !t.ownedByRunner(dirInfo) {
-			continue
+		if f := t.openIn(root, ent.Name()); f != nil {
+			return f, nil
 		}
-		rel := filepath.Join(ent.Name(), name)
-		linfo, err := root.Lstat(rel)
-		if err != nil || !linfo.Mode().IsRegular() || !t.ownedByRunner(linfo) {
-			continue
-		}
-		f, err := root.Open(rel)
-		if err != nil {
-			continue
-		}
-		finfo, err := f.Stat()
-		if err != nil || !finfo.Mode().IsRegular() || !os.SameFile(linfo, finfo) || !t.ownedByRunner(finfo) {
-			_ = f.Close()
-			continue
-		}
-		return f, nil
 	}
 	return nil, fs.ErrNotExist
+}
+
+// openIn opens <dir>/<sessionID>.jsonl under root when dir is a real
+// directory and the file a regular one, both the runner user's; nil
+// otherwise.
+func (t *transcriptTail) openIn(root *os.Root, dir string) *os.File {
+	dirInfo, err := root.Lstat(dir)
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || !t.ownedByRunner(dirInfo) {
+		return nil
+	}
+	rel := filepath.Join(dir, t.sessionID+".jsonl")
+	linfo, err := root.Lstat(rel)
+	if err != nil || !linfo.Mode().IsRegular() || !t.ownedByRunner(linfo) {
+		return nil
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil
+	}
+	finfo, err := f.Stat()
+	if err != nil || !finfo.Mode().IsRegular() || !os.SameFile(linfo, finfo) || !t.ownedByRunner(finfo) {
+		_ = f.Close()
+		return nil
+	}
+	return f
+}
+
+// claudeProjectDirs is the project folder names Claude Code may give a
+// session started in workdir: its name for the path as given, and for the
+// path with symlinks resolved (the CLI's working directory is the resolved
+// one, /private/var for /var on macOS).
+func claudeProjectDirs(workdir string) []string {
+	if workdir == "" {
+		return nil
+	}
+	var dirs []string
+	add := func(path string) {
+		if name := claudeProjectDirName(path); name != "" && !slices.Contains(dirs, name) {
+			dirs = append(dirs, name)
+		}
+	}
+	add(workdir)
+	if resolved, err := filepath.EvalSymlinks(workdir); err == nil {
+		add(resolved)
+	}
+	return dirs
+}
+
+// claudeProjectDirName is the folder Claude Code keeps a project's
+// transcripts in, under ~/.claude/projects: the absolute path with every
+// character other than an ASCII letter or digit turned into "-" (its
+// path.replace(/[^a-zA-Z0-9]/g, "-"), which sees UTF-16 code units, so a
+// character beyond the BMP becomes two). "" for a name it would shorten and
+// hash instead.
+func claudeProjectDirName(path string) string {
+	if path == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range path {
+		switch {
+		case r < 0x80 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			b.WriteString("--")
+		default:
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() > claudeProjectNameMax {
+		return ""
+	}
+	return b.String()
 }
 
 func (t *transcriptTail) ownedByRunner(info os.FileInfo) bool {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,9 +14,11 @@ import (
 	"nodevas/internal/runnerwire"
 )
 
-// recordedClaudeTranscript returns JSONL lines matching the exact wire schema
-// recorded from the installed Claude Code CLI (2.1.329) in interactive mode.
-func recordedClaudeTranscript(sessionID string) []string {
+// claudeTranscriptFixture returns hand-written JSONL lines in the shape of a
+// Claude Code interactive session transcript (record types, field names and
+// content blocks as the transcript uses them). It is not a recording of a
+// real session.
+func claudeTranscriptFixture(sessionID string) []string {
 	return []string{
 		`{"type":"last-prompt","lastPrompt":"Check status and update greeting","sessionId":"` + sessionID + `"}`,
 		`{"type":"mode","mode":"default","sessionId":"` + sessionID + `"}`,
@@ -58,7 +61,7 @@ func TestTailEmitsTextAndToolLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionID := newUUIDv4()
-	lines := recordedClaudeTranscript(sessionID)
+	lines := claudeTranscriptFixture(sessionID)
 
 	var mu sync.Mutex
 	var events []runnerwire.RunEvent
@@ -268,6 +271,86 @@ func TestTailRefusesSymlinkOrForeignFile(t *testing.T) {
 		}
 		runCase(t, projectsDir, transcriptOptions{})
 	})
+}
+
+func TestClaudeProjectDirName(t *testing.T) {
+	for path, want := range map[string]string{
+		"/private/tmp/nodevas-smoke-wt2":     "-private-tmp-nodevas-smoke-wt2",
+		"/Users/a.b/work_tree/run-1":         "-Users-a-b-work-tree-run-1",
+		`C:\Users\me\worktrees\run-1`:        "C--Users-me-worktrees-run-1",
+		"/home/me/文件/x":                      "-home-me----x",
+		"/" + strings.Repeat("a", 250):       "",
+		"":                                   "",
+		"/tmp/emoji-\U0001F600/run":          "-tmp-emoji----run",
+		"/var/folders/xy/T/nodevas/wt/run-9": "-var-folders-xy-T-nodevas-wt-run-9",
+	} {
+		if got := claudeProjectDirName(path); got != want {
+			t.Errorf("claudeProjectDirName(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// The tail looks for the transcript in the project folder named after the
+// worktree each poll, and through every project folder only with a backoff:
+// a busy ~/.claude/projects is not read four times a second for 20 minutes.
+func TestTailLooksInTheWorktreesProjectFolder(t *testing.T) {
+	base := t.TempDir()
+	projectsDir := filepath.Join(base, "projects")
+	for i := range 50 {
+		if err := os.MkdirAll(filepath.Join(projectsDir, "-other-"+strings.Repeat("x", i)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workdir := filepath.Join(base, "worktrees", "run-tail")
+	if err := os.MkdirAll(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(projectsDir, claudeProjectDirName(resolved))
+	if err := os.MkdirAll(projDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := newUUIDv4()
+
+	var mu sync.Mutex
+	var texts []string
+	tail := newTranscriptTail(sessionID, func(ev runnerwire.RunEvent) {
+		mu.Lock()
+		texts = append(texts, ev.Text)
+		mu.Unlock()
+	}, transcriptOptions{projectsDir: projectsDir, workdir: workdir, pollInterval: 5 * time.Millisecond})
+	tail.start(context.Background())
+	defer tail.stop()
+
+	// No transcript yet: 300ms of 5ms polls is 60 looks in the worktree's
+	// folder, but only a handful through all of them.
+	time.Sleep(300 * time.Millisecond)
+	tail.mu.Lock()
+	scans := tail.scans
+	tail.mu.Unlock()
+	if scans > 8 {
+		t.Fatalf("scanned every project folder %d times in 300ms of 5ms polls; want a backoff", scans)
+	}
+
+	// Once it is there, the next poll finds it, without waiting for a scan.
+	appendFile(t, filepath.Join(projDir, sessionID+".jsonl"),
+		`{"type":"assistant","sessionId":"`+sessionID+`","message":{"role":"assistant","content":[{"type":"text","text":"found it"}]}}`+"\n")
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		found := slices.Contains(texts, "found it")
+		mu.Unlock()
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the transcript in the worktree's project folder was not found within a second")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func TestTailStopsAtEnd(t *testing.T) {

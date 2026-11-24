@@ -95,6 +95,13 @@ type Client struct {
 	interactiveQuietTimeout time.Duration
 	endQuitGap              time.Duration
 	endGrace                time.Duration
+	// interactiveWaiting, if set, is called once an interactive run's
+	// terminal is up, right before the runner starts waiting on it: tests
+	// line up an exit and an End there to see which one wins.
+	interactiveWaiting func(runID string)
+	// touchedPoll overrides how often a run's touched-files watcher polls
+	// git status; zero uses touchedPollInterval. Tests shorten it.
+	touchedPoll time.Duration
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
@@ -747,4 +754,14 @@ func (c *Client) quitGrace() time.Duration {
 		return c.endGrace
 	}
 	return endGrace
+}
+
+// touchedOptions is a run's touched-files watcher settings; zero fields take
+// the defaults in touched.go.
+func (c *Client) touchedOptions(interactive bool) touchedOptions {
+	opts := touchedOptions{interactive: interactive}
+	if c != nil {
+		opts.pollInterval = c.touchedPoll
+	}
+	return opts
 }
