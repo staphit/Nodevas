@@ -165,6 +165,50 @@ or `limit` (up to 200) for larger reads, and follow the returned offsets/cursors
 Outline edges connect nodes on the current page only. Node resources remain
 explicit full-file reads.
 
+### A run's tools
+
+`nodevas mcp --toolset <name>` picks the tools a session serves: `full` (the
+default: every tool, for your own agents, `nodevas setup-agent` and the
+copilot), `run` or `coordinated`. Every tool definition costs tokens on each
+model call, so a runner's run gets only what its prompt and its job need. A run
+with a role gets its role's tools instead (`--tools`, the hub's allowlist; see
+[Roles](#roles)). A call to a tool the session leaves out is refused with the
+list of tools it has. A global agent's run gets no `nodevas` server at all (see
+[Global agents](./workstation.md#global-agents)).
+
+The `run` toolset is `claim_task`, `get_node`, `set_node_status`,
+`release_task`, `create_node`, `create_subgraph`, `link_nodes`, `ask_user`,
+`approve_tool`, `check_inbox`, `send_message`, `list_team`, `save_attachment`
+and `submit_verdict`. `list_team` and `save_attachment` are there because
+`check_inbox` tells a run it has mail and to open attachments with
+`save_attachment`: without them a run could neither find who wrote to it nor
+read what was attached. The built-in roles that have `check_inbox` have both as
+well.
+
+### Coordinated runs
+
+Sometimes two runs work on one node at once, or one after the other while the
+first still holds it (see [Busy choices](./workstation.md#busy-choices)). These
+runs are coordinated:
+
+- a node run started with **Run both**;
+- a node run started with **Start mine after it ends** or **Stop it and start
+  mine** that finds the node claimed or done when it is offered to the runner;
+- every entry of a node contest, and the contest's read-only comparison.
+
+A coordinated run's MCP server uses the `coordinated` toolset: the `run`
+toolset without `claim_task`, `release_task`, `set_node_status` and
+`create_subgraph`. A coordinated run with a role gets its role's tools without
+those four. Its prompt tells it not to claim the task or change its status, and
+to read the task with `get_node` instead. The reason is that the node already
+belongs to another run, or is done: a second run that claimed, released or set
+the status of it would move the node under the run that holds it, and contest
+entries are only attempts until you pick one. `create_subgraph`
+would plan the task a second time. So the board stays as the first run left
+it, and you set the node's status yourself once you see the result. **Run
+both**, waiting in line and contests need a runner new enough to run coordinated
+runs; on an older one a person is offered only **Stop it and start mine**.
+
 ## Document retrieval with ChromaDB
 
 Optional `index_documents` and `search_documents` tools give agents semantic

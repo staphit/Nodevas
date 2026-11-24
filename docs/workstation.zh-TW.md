@@ -4,7 +4,7 @@ English: [workstation.md](./workstation.md)
 
 server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程式。你電腦上的 **runner**（`nodevas runner`）主動連到 hub，接下你同意的 run，用你自己的登入執行 agent CLI。程式碼、agent 登入與 `gh` 登入都只留在 runner 上，而且它只執行你同意的工作，並守住自己的限制（見[安全模型](../README.zh-TW.md#安全模型)）。
 
-- **Run**：分成 headless 與互動兩種。headless 把事件串流到節點上；互動模式把 agent 的 TUI 放進瀏覽器。runner 會 commit、push，再用 `gh` 開 PR，並回報 diff 與 CI 狀態。
+- **Run**：分成互動與 headless（背景）兩種。互動模式在 runner 上一個看不見的終端機裡執行 agent 的 TUI，再轉到你的瀏覽器（不會開任何視窗）；headless 把事件串流到節點上。只要支援，在你自己的 runner 上預設就是互動；見[互動 run](#互動-run)。runner 會 commit、push，再用 `gh` 開 PR，並回報 diff 與 CI 狀態。
 - **模型**：每次 run 可以自己選 agent 與模型，也可以交給路由規則與 fallback 鏈決定。遇到 rate limit、額度用完或 CLI 不存在時，就改用鏈上的下一個模型。OpenCode 也可以改走 [Agent Client Protocol](https://agentclientprotocol.com)（`nodevas runner set opencodeProtocol acp`，實驗性，僅限 OpenCode 1.x；OpenCode 2 的 run 會改用 `opencode run`）：每個工具呼叫即時串流；權限提示見[權限提示](#權限提示預設關閉)。
 - **審查管線**：實作完成後，可以交給其他 agent 或模型審查、交給人審，或兩者都要。要求修改時會再跑一次 revise run。runner 只把修改推到它自己的 run 為那個節點開的分支（記在它的 PR 監看清單）；別的成員的 PR，或監看紀錄已不在的 PR（例如關閉後又重開），會被拒絕。
 - **Agent 對話**：agent 可以看到還有誰在工作、互相傳訊息，也能透過 hub 停下來問你（`ask_user`）；見[回覆你的 agent](#回覆你的-agent)。
@@ -23,12 +23,12 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
   - **共用的電腦**：單人版信任所有能使用這台電腦的人。同一台電腦上的其他使用者帳號可以透過 loopback 開啟 app，而 run 會直接開始，所以它能以你的身分啟動 agent。請只在你一個人使用的電腦上用單人版；共用的電腦請改用有帳號的團隊 hub。那道防線也不是沙箱：這台電腦上任何沒有被沙箱限制的程式（包括可以執行任何指令的 agent）都能以你的身分回答它。
   - **團隊 hub**：run 需要你在 runner 所在的電腦上、在它的終端機同意；hub 只顯示「等待在某台電腦上核准」與原因。hub 永遠不會核准 run，所以被入侵的 hub 無法在那裡啟動 run；hub 所說的「誰開始了這個 run」只會顯示，從不採信。遠端派工需要 step-up passcode，加上你在 runner 上設定的 auto-accept 白名單。
   - 遠端 merge 預設關閉，要自己打開。
-  - 審查、拆解與評審（目標 QA 與檢查清單檢查）一律唯讀，而且不載入 repo 自帶的 agent 設定；Claude Code 在這些 run 裡也不能用 WebFetch、WebSearch 或 Monitor。
+  - 審查、拆解、比稿的比較（`compare`）與評審（目標 QA 與檢查清單檢查）一律唯讀，而且不載入 repo 自帶的 agent 設定；Claude Code 在這些 run 裡也不能用 WebFetch、WebSearch 或 Monitor。
   - run 新增或修改的 agent 設定（`.claude/settings.json`、`.mcp.json`、`.codex/`、`.gemini/`、`opencode.json` 等）不會進它的 commit，worktree 會保留下來，讓你自己決定要不要 commit。`nodevas runner status` 會列出保留的 worktree；`nodevas runner prune-kept [--dry-run]` 移除只剩被擋下設定的那些（分支保留）；不會自動移除。讀寫這份清單時會加鎖（runner 資料夾裡的 `kept-worktrees.lock`），所以 `prune-kept` 或共用同一個資料夾的另一個 runner，不會弄丟 run 剛保留的 worktree。
   - headless run 的權限提示一律拒絕，除非你[轉給 Nodevas](#權限提示預設關閉)；自動接受的 run 只有在打開 `allow-shell` 時才會轉送。
   - 專案總管的 **檔案** 分頁只讓你本人唯讀瀏覽你 runner 上的 repo，並隱藏看起來像祕密的檔案（`.env`、金鑰、`.ssh`、憑證）。執行 `nodevas runner set repoBrowse off` 並重啟 runner 即可關閉。
   - run 的 **工作區**（它的 worktree、分支與變更）只有你本人能瀏覽、在本機合併或捨棄，管理員與 agent 都不行；見 [Agent 工作區](#agent-工作區)。執行 `nodevas runner set workspaceActions false` 並重啟 runner，即可關閉合併與捨棄。
-  - **全域 agent** 只能在你自己的 runner、已登記的 repo 裡啟動，沒有看板；除非你要求開 PR，分支都留在 runner 上。見[全域 agent](#全域-agent)。執行 `nodevas runner set globalRuns off` 並重啟 runner，即可拒絕全域 agent。
+  - **全域 agent** 只能在你自己的 runner、已登記的 repo 裡啟動，沒有看板；除非你要求開 PR，分支都留在 runner 上。它可以接著做後續回合，也可以一次跑多個 repo。見[全域 agent](#全域-agent)。執行 `nodevas runner set globalRuns off` 並重啟 runner，即可拒絕全域 agent。
   - hub 放在 Cloudflare Access 後面，runner 用 service token 連線。
   - 可以用驗證器 App 開啟兩步驟驗證（**設定 → 帳號**）。開啟後登入還要輸入 App 的驗證碼，step-up 也改問 App，不再寄 email。
 
@@ -67,6 +67,19 @@ Codex、Gemini CLI 與 `opencode run` 無法轉送權限提示；互動 run 則�
 
 轉送打開後，你的回覆會經由 hub 送到 runner，所以被入侵的 hub 可以替你允許一個你從沒看過的權限提示。除非你信任這個 hub，否則請保持關閉。轉送不會放寬任何 run：CLI 要先過自己的拒絕規則與權限模式才會來問，所以唯讀的 run 仍是唯讀。沒有執行 `nodevas runner autoaccept allow-shell on` 而被自動接受的 run 不會轉送；它的開頭那行會以「permission prompts not relayed: auto-accepted without allow-shell (denied headless)」結尾。
 
+## 互動 run
+
+只用一個資料夾的 run，符合下列條件時，在你自己的 runner 上預設以**互動**模式開始：runner 與選定的 agent 都支援、agent 已信任 runner 的工作資料夾、自動接受（若有打開）涵蓋互動 run 並允許遠端輸入，而且節點的 run 必須是單純的實作 run，沒有工作流程階段、審查管線或 fallback 鏈。否則就在背景開始，並用一行說明原因。多 repo 群組、比稿、自動推進、管線的回合、fallback，以及在隊友 runner 上的 run，一律在背景執行。後續回合也用同一套規則，依前一個 run 的 runner 與 agent 判斷；要等待的回覆（排在執行中的回合後面，或等用量上限重置）一律在背景執行（見[後續回合與 PR 更新](#後續回合與-pr-更新)）。
+
+開始表單會記住你上次選的是 **互動** 還是 **背景**。記住的互動選擇，永遠蓋不過一定要在背景執行的原因：runner 或 agent 無法在終端機裡執行、資料夾還沒被它的 CLI 信任、隊友的 runner、不允許輸入的自動接受、分階段的節點、管線或 fallback、群組或比稿。這時 **互動** 卡片會停用，run 在背景開始。自動接受只涵蓋背景 run 的情況比較寬鬆：預設改成 **背景**，但你仍可以選 **互動**，自己回答提示。
+
+agent 的 TUI 在 runner 上一個看不見的 PTY 裡執行（絕不會開出桌面上的終端機視窗），畫面串流到 run 的對話框，你可以直接在裡面輸入，或使用輸入框與按鍵列。在「簡單」模式裡，agent 的畫面外面會包一層用白話說明的框；工作資料夾還沒被信任時，會自動改成背景 run；沒有登入的 agent 在兩種模式下都無法開始。
+
+- **唯讀觀看**：在團隊 hub 上，若 runner 的擁有者沒有允許互動 run 遠端輸入，runner 會把它標成唯讀觀看。瀏覽器把終端機顯示為唯讀，並停用輸入框，而不是默默吞掉你的輸入。
+- **結束（完成，保留成果）**：和 **停止**（取消，未完成的工作會丟掉）不同，**完成，保留成果** 會把互動 run 乾淨地結束，並把它的成果當成成功發布：commit 變更、保留分支，有要求時開 PR。runner 會送出 CLI 的離開按鍵序列，最多等 10 秒讓它自己結束，之後才終止整個程序樹，所以被終止的結束碼不會被當成失敗。終端機開啟前就送出的結束會先保留，一開啟就套用。只有能在這個 run 裡輸入的人（派工的人或 runner 的擁有者；agent 一律不行，管理員也沒有額外權限）可以結束它；唯讀觀看的 run **只有 runner 的擁有者** 能結束。記為 `run.end`。
+- **20 分鐘沒動靜就結束**：每個互動 run 在 runner 上都有固定 20 分鐘的閒置上限（不能調整，「簡單」模式也一樣）。若 20 分鐘內畫面沒有有意義的輸出（TUI 閒置時的重繪不算），也沒有人輸入，runner 就用和結束相同的方式收掉這個 session，保留成果。若逾時當下畫面正顯示提問或選單，對話框會說它是在等你回答時停下的，而不是一般的閒置結束。整個 run 60 分鐘的逾時（`runTimeoutMinutes`）仍然適用，逾時就算失敗。
+- **run 結束之後**：即時終端機的內容還能再看 10 分鐘。Claude Code 的互動 run，runner 還會追讀它 session 的對話紀錄檔（`~/.claude/projects/*/<session-id>.jsonl`，唯讀，只讀 runner 使用者擁有、不是 symlink 的一般檔案），轉成遮蔽過祕密的結構化事件，所以畫面過期後仍看得到 **步驟** 與最後的摘要。
+
 ## 用量上限與交接
 
 headless 實作 run 若因 agent 達到用量上限或 rate limit 而停下，runner 會保留已完成的部分，不會丟掉：
@@ -98,17 +111,93 @@ headless 實作 run 若因 agent 達到用量上限或 rate limit 而停下，ru
 
 ## 全域 agent
 
-工作站的 **全域 agent** 分頁可以啟動不屬於任何專案、也沒有看板的 agent：在你 runner 的某個 repo 裡做一件事，適合不是節點的工作（整理 repo、試個想法、修個腳本）。寫下任務即可，第一行會成為它的標題。
+工作站的 **全域 agent** 分頁可以啟動不屬於任何專案、也沒有看板的 agent：在你 runner 的一個或多個 repo 裡做一件事，適合不是節點的工作（整理 repo、跨服務升級相依套件、調整 CI、修補 CVE）。寫下任務即可，第一行會成為它的標題。
 
-- **誰、在哪裡**：只有你本人，只能用你自己的 runner（管理員也不例外），而且只能在那台 runner 已加入的 repo 裡；runner 還沒有 repo 時，表單會列出要在那台電腦上執行的 `nodevas runner repo add <路徑>`。hub 從不指定資料夾，agent 也不能啟動全域 agent。分頁列出你啟動的、或在你 runner 上執行的全域 agent，以及你的 runner。
-- **沒有看板**：runner 不會給全域 agent `nodevas` MCP server，所以它不認領任務、不設定狀態，也無法問你任何事，權限提示也一律不轉送。在背景執行時它自己做決定，並在摘要裡說明它的假設；想和它對話請選 **互動式**，在它的終端機裡談。你 runner 本身的限制（權限模式、沙箱、自動接受規則）照常適用。Claude Code 與 Gemini CLI 完全不載入 MCP server；OpenCode 會關掉所有 server，包括你自己的 `nodevas` 設定；Codex 與 agy 仍會載入你自己設定檔（`config.toml`、`~/.gemini/config`）列出的 server，但其中的 `nodevas mcp` 在全域 agent 的 run 裡會拒絕服務：runner 在 agent 的環境變數放 `NODEVAS_NO_BOARD`，並在 agent 執行期間於它工作樹的 git 資料夾放一個 `nodevas-no-board` 檔（給 Codex 用，它在工作樹裡以清空的環境變數啟動 MCP server）。它在讀取參數、連上 hub 之前就停下，所以不論是 run 經由 runner 的通道，還是 loopback hub 對本機的信任，都不會讓它碰到看板。不涵蓋：你 `PATH` 上比 runner 舊的 `nodevas`，以及你在會清空環境變數的 CLI 裡、設定成在工作樹以外啟動的 MCP 項目。沒有指定專案或節點、又不是全域 agent 的 run，runner 一律拒絕。
+- **誰、在哪裡**：只有你本人，只能用你自己的 runner（管理員也不例外），而且只能在那台 runner 已加入的 repo 裡；runner 還沒有 repo 時，表單會列出要在那台電腦上執行的 `nodevas runner repo add <路徑>`。hub 從不指定資料夾，agent 也不能啟動全域 agent。分頁列出你啟動的、或在你 runner 上執行的全域 agent、群組與比稿，以及你的 runner。
+- **沒有看板**：runner 不會給全域 agent `nodevas` MCP server，所以它不認領任務、不設定狀態，也無法透過 `ask_user` 問你任何事，權限提示也一律不轉送。只用一個 repo 的全域 agent 預設以**互動**模式執行，你可以在它的終端機裡和它對話、回答提示（見[互動 run](#互動-run)）。在背景執行時它自己做決定；需要你決定的事，它可以在訊息最後提問，你的回覆就會接著這份工作做下去。你 runner 本身的限制（權限模式、沙箱、自動接受規則）照常適用。Claude Code 與 Gemini CLI 完全不載入 MCP server；OpenCode 會關掉所有 server，包括你自己的 `nodevas` 設定；Codex 與 agy 仍會載入你自己設定檔（`config.toml`、`~/.gemini/config`）列出的 server，但其中的 `nodevas mcp` 在全域 agent 的 run 裡會拒絕服務：runner 在 agent 的環境變數放 `NODEVAS_NO_BOARD`，並在 agent 執行期間於它工作樹的 git 資料夾放一個 `nodevas-no-board` 檔（給 Codex 用，它在工作樹裡以清空的環境變數啟動 MCP server）。它在讀取參數、連上 hub 之前就停下，所以不論是 run 經由 runner 的通道，還是 loopback hub 對本機的信任，都不會讓它碰到看板。不涵蓋：你 `PATH` 上比 runner 舊的 `nodevas`，以及你在會清空環境變數的 CLI 裡、設定成在工作樹以外啟動的 MCP 項目。沒有指定專案或節點、又不是全域 agent 的 run，runner 一律拒絕。
 - **分支與 PR**：分支是 `agent/<slug>-<run>`，slug 取自標題（小寫英文字母、數字與單一連字號，最多 40 個字元；標題裡沒有這些字元時用 `task`），也可以自己取。預設不開 PR：commit 留在那個分支、runner 上它的 worktree 裡，可以從它的[工作區](#agent-工作區)**在本機合併**或**捨棄**。勾選 **完成後開 PR**，runner 就會像節點的 run 一樣推送並開 PR，前提是它的 `autoPR` 是開著的。commit 與 PR 會註明 run（`Nodevas-Run`），但沒有節點。
-- **全域 agent 不支援**：審查管線、拆解、角色與階段、路由規則、fallback 鏈、等待用量重置與交接、自動推進。全域 agent 因用量上限停下就算失敗，已做的部分會 commit 在它的分支上。
+- **全域 agent 不支援**：審查管線、拆解、角色與階段、路由規則、fallback 鏈、用量上限後的自動交接、自動推進。全域 agent 因用量上限停下就算失敗，已做的部分會 commit 在它的分支上；你可以用後續回合接著做（若記錄的重置時間還沒到，會等到那時）。
 - **runner 有多忙**：分頁會逐台列出 runner 正在執行與排隊中的 run（包含所有專案與全域的），以及今天的 run 數、token 與花費。**同時執行** 可以從 hub 設定 runner 的 `maxConcurrent`，上限是它的 `maxConcurrentCeiling`（預設 8；`maxConcurrent` 更大時取它）。runner 會立即套用，並寫進它的 `runner.json`，只改這一個設定，而且是重新讀檔後再寫，所以 runner 啟動後用 `nodevas runner set` 改過的設定都會保留；調低不會停掉任何 run，只是先不接新的。
+
+### 後續回合與 PR 更新
+
+全域 run 結束後（成功、失敗、取消或達到用量上限），在它的對話框回覆，就會開始一個接著同一份工作的後續回合：同一台 runner、同一個 worktree 資料夾、同一個分支。
+
+- **互動或背景**：後續回合用和第一次開始相同的模式規則（見[互動 run](#互動-run)），依前一個 run 的 runner 與 agent 判斷，並套用你記住的選擇。**用這句開始新工作** 也一樣。
+- **接續 session**：可以的話，runner 會從它本機的紀錄接續 CLI 自己的 session：Claude Code、OpenCode 與 Antigravity 兩種模式都可以，Codex 只在背景執行時可以（`codex exec resume`）。Gemini CLI 永遠不接續。其他情況（Gemini CLI、在終端機裡的 Codex、換了 agent、沒有 session 紀錄，或 headless 的接續在 30 秒內以非零結束碼結束、又沒有任何文字輸出），runner 會開新的 session。hub 每次送出後續回合時，都會附上前一次的任務與那個回合的摘要（遮蔽過祕密，最多 4 KiB）；新的 session 會在 prompt 裡收到它們，標明是資料而非指令，所以不能接續的 agent 也知道之前做了什麼。
+- **排隊的回覆**：**背景**全域 run 還在執行時輸入，會建立一個排隊中的後續回合，等目前的回合結束才開始；開始前可以按 **收回** 撤回。（互動 run 執行中時，請直接在它的畫面裡輸入。）若前一個回合停在用量上限、而重置時間還沒到，後續回合會等到那時。要等待的回覆一律在背景執行。
+- **回合的擁有與生命週期**：只有你（啟動者，也是 runner 的擁有者）可以回覆。只有最新的回合能接著做、在本機合併或捨棄；較早的回合維持唯讀，並連到最新的回合。開始前被收回或被拒絕的後續回合會讓出位置。工作在本機合併、被捨棄，或它的 PR 已合併或關閉後，對話框會提供 **用這句開始新工作**，從 base 重新開始。
+- **更新開啟中的 PR**：工作已有開啟中的 PR 時，後續回合會更新它，而不是再開第二個 PR：
+  - 回合開始前，runner 會重新檢查 PR（`gh pr view`）與遠端分支。PR 已合併或關閉（`pr_ended`）、PR 的 base 改了（`pr_moved`），或遠端分支分岔了（`branch_moved`；只有本機 HEAD 沒有未推送的 commit、worktree 也乾淨時才會快轉），就拒絕；
+  - 失敗、取消或達到用量上限的回合只在本機 commit，絕不推送；下一個成功的回合會把這些 commit 一起推送；
+  - 每個有新 commit 的成功回合只做快轉推送（絕不用 `--force` 或 `--force-with-lease`），掛到既有的 PR 上，並留一則 PR 留言（`Turn N: …` 加上這個回合遮蔽過祕密的摘要）。draft PR 絕不會自動改成 ready。每次推送都會重跑 CI，也可能讓已有的核可失效；PR 的標題與內文維持第一個回合的版本；
+  - 回合執行期間若有人推送到這個分支，推送會被拒絕（`branch_moved`），這個回合的 commit 留在本機，也不會留 PR 留言。沒有變更的回合保留原本的分支，什麼都不推送；
+  - 推送前一刻，runner 會再看一次 PR。若它在回合執行期間被合併或關閉，runner 不推送、也不留言：commit 留在本機分支上，run 上會顯示 PR 已結束（`pr_ended`）。runner 看不到的 PR 也不會推送；
+  - 只要還有回合沒結束，遠端合併就會被擋下，PR 監看也會保留 worktree，直到回合結束。
+- **runner 端的紀錄**：hub 只指名 run ID。worktree 路徑、分支、HEAD、已推送的 HEAD、PR 網址與 CLI 的 session ID，runner 一律只從它自己的 `work.json`（權限 `0600`，保留 30 天，最多 500 筆）取得，並在磁碟上確認 worktree 屬於它、git 狀態正確。有未提交變更的 worktree，只在前一個回合被取消或失敗時才接受；若沒有變更的第一個回合已經移除了資料夾，後續回合會在原本的分支上從 base 重建它。
+
+### 多 repo 群組
+
+在 **全域 agent** 裡選同一台 runner 上的 **2 到 30 個資料夾**，就能在多個彼此獨立的 repo 同時做同一件事（升級相依套件、修改 CI 工作流程、修補 CVE）。
+
+- **分頭進行**：hub 為每個 repo 各建立一個背景全域 run，放在同一個群組列底下（在「故事」畫面裡顯示成一個人物，每個 repo 一個分頁）。每個成員的 prompt 都會列出一起修改的其他 repo。群組不用互動模式；某個 repo 的 run 完成後，可以用後續回合單獨和它對話。
+- **預算與排隊**：每日的 run 上限以整個群組一起計算：剩下的額度不夠所有選取的 repo 時，整個群組都會被拒絕，並告訴你能放進幾個（不會只開始一部分）。成員在 runner 的 `maxConcurrent` 之下依先來先做的順序執行；派出每個排隊中的成員前，hub 會再檢查每日的花費與 token 上限，超過就取消剩下的成員。在團隊 hub 上，每個成員都照一般的接受規則逐一派給你的 runner（hub 沒有「全部接受」）。
+- **用量上限時暫停**：有成員停在額度或 rate limit 時，群組會暫停到重置時間（**已暫停到 HH:MM：用量上限**），排隊中的其他成員跟著等；按 **立即繼續** 可以提早解除，停下的成員則用後續回合接著做。
+- **群組動作**：每個 repo 都有自己的分支、（開始時選的）PR、diff 與結果動作；不需要修改的 repo 會移除它的 worktree，顯示 **這裡沒有需要改的**。群組的控制有 **全部停止**、**套用全部已完成的**（逐一在本機合併已完成的成員，某個 repo 有衝突就停在那個 repo，並回報每個結果）、**告訴全部** 與 **告訴失敗的**（對符合條件的最新回合送出後續回合）。
 
 在 runner 上：`nodevas runner set globalRuns off` 拒絕全域 agent，`nodevas runner set remoteSettings off` 讓 `maxConcurrent` 只能在那台電腦上改，`nodevas runner set maxConcurrentCeiling <1-16>` 設定 hub 最多能要求多少。這些都要重啟 runner 才生效。只有 runner 的擁有者能從 hub 變更它的設定，runner 也會再確認一次。
 
-全域 agent 的更新只會送給你和它 runner 的擁有者，不會送到任何專案。啟動全域 agent 會以 `run.global.start` 記進稽核紀錄（不含任務內容），從 **同時執行** 做的變更則記為 `runner.settings.update`。
+全域 agent 的更新只會送給你和它 runner 的擁有者，不會送到任何專案。稽核紀錄（一律不記任務或後續回合的內容）：`run.global.start`、`run.global.followup`、`run.global.group`，以及 **同時執行** 的 `runner.settings.update`。
+
+## 協調同時進行的 run
+
+工作互相重疊時，Nodevas 分三層協調，決定權仍在你：要重複做之前先問你、兩個 run 動到相同檔案時及早提醒，以及刻意讓幾個 agent 並排比稿。
+
+### 忙碌時的選擇
+
+還沒結束的寫入型 run（節點上的實作、測試、修訂或拆解），或還在兩個步驟之間的管線，會占住它要寫的地方：
+
+- 開始**節點 run** 時，會檢查同一個節點上還沒結束的寫入型 run（任何成員的都算），以及你自己在同一個 repo 裡還沒結束的全域 run；
+- 開始**全域 run** 時，會檢查你自己在同一個 repo 裡還沒結束的寫入型 run（全域或節點的都算）。
+
+同一個 repo 裡*不同*節點的兩個節點 run 不會互相擋住；唯讀的 run（審查、評審、驗證、比較）與同一脈絡的 run（管線、fallback 鏈、後續回合、群組或比稿）也不會。
+
+目標忙碌時，開始表單會先提醒你，hub 也會在建立 run 之前請你選擇：
+
+- **等它做完再開始我的**（排隊）：建立一個新的 run，以嚴格的先來先做順序，排在每個進行中或更早排隊的占用者與它的後續（fallback、等待用量重置、管線剩下的步驟）後面。開始時，會把你自己前一個 run 的摘要放進它的 prompt（絕不放別的成員的）。
+- **改成接著它的成果做**（接續）：只在你要開始的全域 run 排在你自己同一台 runner、同一個 repo 的全域 run 後面時提供；把你的訊息變成那個 run 的後續回合，沿用它的資料夾、分支、agent、模型與 PR 設定。
+- **停下它，改做我的**（接手）：停掉你看到的那些占用者（若期間占用者有變，會再問你一次），並把你的 run 排在它們正後方。停下執行中的互動 run 用的是**結束**，所以它已做的成果會保留（接手節點時，結束會保留分支但不開 PR，免得出現兩個互相競爭的 PR）；停下 headless run 則會取消它，以及它所屬的管線。
+- **兩個都做**：馬上和占用者同時開始，並由[重疊提醒](#重疊提醒)留意共用的檔案。runner 的 `maxConcurrent` 是 1 時，兩個 run 仍會一個接一個執行。
+- **多 repo 群組**只提供 **兩個都做** 與 **略過忙碌中的資料夾**（在檢查預算之前先去掉忙碌的 repo）。
+- **自動開始**（自動推進）不問，直接排隊。在舊到不支援協調的 runner 上，人開始忙碌中的節點時只會看到 **停下它，改做我的**，但自動推進仍會排在占用者後面等，不會失敗。Copilot 的工具會回答目標忙碌中，並列出正在進行的工作，而不會替你選；見 COPILOT.md 的 [When the target is busy](../COPILOT.md#when-the-target-is-busy)。
+
+**團隊隱私與看板認領**：在團隊 hub 上，別的成員的 run 只會顯示成一個數字（「另有 1 個別人的工作」），沒有名字、任務或細節，而且只有它的擁有者或管理員能停下它（所以有看不到的占用者時，不提供 **停下它，改做我的**）。兩個 run 共用一個節點時（排隊、接手、兩個都做或比稿的參賽者），hub 會釋放被停下或被等待的占用者的看板認領（只限它自己 session 的）。**兩個都做** 的 run 與每個比稿參賽者都以協調模式執行；排隊或接手的 run 若在派給 runner 時發現節點已被認領或已完成，也一樣：它的 MCP server 不提供 `claim_task`、`release_task`、`set_node_status` 與 `create_subgraph`（見 MCP 文件的 [Coordinated runs](./mcp.md#coordinated-runs)），agent 就不會搶看板；節點的狀態由你自己更新。記為 `run.busy` 與 `run.takeover`（不含任務內容）。
+
+### 重疊提醒
+
+run 進行期間，runner 會留意它動到哪些檔案（以 repo 為根的相對路徑）：每 30 秒跑一次 `git status`，repo 很慢時逐步放寬到最多 5 分鐘一次，再加上 headless run 的編輯工具路徑與結束時 commit 的檔案；每個 run 最多 500 個路徑。它讀 worktree 時會關掉 repo 的 filter driver，和其他讀取 run 的 worktree 的地方一樣，所以 agent 埋下的 filter 永遠不會執行。祕密路徑、常見的 lockfile（`package-lock.json`、`go.sum`、`Cargo.lock`、`yarn.lock`、`pnpm-lock.yaml` 等）與 `linguist-generated` 的檔案，在 runner 上就會略過。
+
+hub 會比對同一個 repo 裡各個 run 動到的檔案（包括你自己過去 24 小時內已完成、還沒套用、也沒有 PR 的結果）：
+
+- **強重疊與弱重疊**：兩邊都只新增行的檔案記為*弱*重疊（列在清單裡，但不會發提醒或信件）。只要有一邊在共用的檔案裡修改或刪除行（*強*重疊），就會出現重疊提醒與標記。
+- **你自己的節點 run**：hub 會發一次協調訊息（寄件者 `nodevas`，每個 run 最多 5 則）到每個 run 自己的 MCP session，列出共用的路徑，讓 agent 可以用 `send_message` 協調，或盡量少改。
+- **你自己的全域 run**：全域 run 沒有看板也沒有信件，也絕不會在執行中收到沒人要求的輸入。重疊提醒改為提供 **告訴它**，把訊息先填進對話框的輸入框（由你送進互動的終端機，或排成背景的後續回合），之後每個後續回合的 prompt 都會附上目前的重疊說明。
+- **團隊 hub 的隱私**：不同成員之間，只比對同一個專案裡進行中的節點 run（兩個成員的全域 run 從不比對）。runner 回報的路徑在成員之間不可信，所以跨成員的重疊只會顯示「另一位成員的工作也在改一些相同的檔案」，沒有路徑、數量、名字，也不發 agent 信件，管理員看到的也一樣。
+
+動到的檔案與重疊的紀錄，會在 run 結束 7 天後刪除，即使原始事件保留設成永久也一樣。
+
+### 比稿
+
+在單純的節點派工（沒有工作流程階段、管線或 fallback 鏈）或只用一個 repo 的全域 run 打開 **比稿**，就會讓 **2 或 3** 份 headless 參賽作品（**A**、**B**、**C**）在你自己 runner 上各自的 worktree 裡做同一個任務。比稿要從「完整」模式開始；「簡單」模式只在已有比稿時顯示比較的結果。
+
+- **參賽規則與預算**：每份參賽作品都以 headless 執行，不開 PR、沒有 fallback 鏈，也不等用量重置；節點比稿的參賽作品以協調模式執行，所以不會認領節點或更新它的狀態。預算把所有參賽作品加上選用的審查者當成一整塊檢查：額度不夠就什麼都不開始。在團隊 hub 上，每份參賽作品都照一般的接受規則逐一派給你的 runner。
+- **選用的審查者**：可以在開始時，或參賽作品完成後，挑一個審查用的 agent 與模型。所有參賽作品都結束、而且至少兩份成功並有 commit 時，就會開始一個唯讀的 `compare` run（和審查一樣，不載入 repo 自帶的 agent 設定）。hub 會拿掉祕密檔案的 hunk、遮蔽每份 diff 裡的祕密、輪換參賽作品的順序，並以 A/B/C 匿名標示，不寫 agent 或模型名稱。審查者回傳 0 到 10 的分數、簡短理由與建議的選擇；分數只是參考，不會自動套用任何東西。
+- **選出一份**：全域比稿在 **全域 agent** 裡它的那一列就能打開比較。節點比稿則在節點的 run 畫面裡，從比稿的 run 按 **比較並選出一份** 打開；「故事」畫面裡比稿的那組人物也有這個按鈕。並排比較各份作品（摘要、檔案、diff 與分數），再按 **用這份**，選擇怎麼套用：
+  - **套用到我的資料夾**：經過 runner 工作區的合併檢查，在本機合併勝出作品的分支；
+  - **開 pull request**：不強制推送勝出作品自己的分支，並開 PR（只有比稿勝出的作品可以）；
+  - **先保留**：勝出作品的工作區原封不動，之後再處理。
+
+  **丟掉其他份**（預設勾選）會對沒選上的作品執行一般的工作區捨棄；多了額外 commit 的作品會保留，被拒絕的也會回報。節點比稿選定後，請自己更新節點的狀態。只有比稿的建立者（也是每份作品的 runner 擁有者）能請審查者評分或選出勝者；建立者或管理員可以取消。記為 `run.contest.start`、`run.contest.judge`、`run.contest.pick` 與 `run.contest.cancel`（套用與捨棄另記 `run.workspace.*`）。
 
 ## Agent 角色與工作流程階段
 
@@ -160,7 +249,7 @@ verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在
 
 在 **等級與分派** 中，**這個專案自動分派**（預設關閉）會在沒有任何路由規則符合時，替派工或自動推進的任務挑選 agent 與模型：達到該角色要求等級中最便宜的組合，並把一部分任務（預設 10%）交給試用組合以累積樣本。預算照常套用。
 
-hub 每 6 小時刪除超過 180 天的原始事件（已結束 run 的紀錄行、agent session 的動作與分派紀錄，以及稽核紀錄中的 `auth.signin.failed`、`auth.stepup.failed`、`auth.totp.failed`、`runner.link.failed`），並清空舊的 diff，但保留檔案清單與行數（diff 畫面會註明是歷史保留期限清除的）；run、用量、判定、成績單與其餘稽核紀錄都會保留。管理員可在 **原始事件保留** 修改（30 到 3650 天，或永久）。
+hub 每 6 小時刪除超過 180 天的原始事件（已結束 run 的紀錄行、agent session 的動作與分派紀錄，以及稽核紀錄中的 `auth.signin.failed`、`auth.stepup.failed`、`auth.totp.failed`、`runner.link.failed`），並清空舊的 diff，但保留檔案清單與行數（diff 畫面會註明是歷史保留期限清除的）；run、群組、比稿、用量、判定、成績單與其餘稽核紀錄都會保留。管理員可在 **原始事件保留** 修改（30 到 3650 天，或永久）。動到的檔案與重疊的紀錄另有固定的保留期限：run 結束後 7 天。
 
 ## 示範影片
 
