@@ -966,8 +966,8 @@ func (j *jobs) startAttempt(ctx context.Context, r *run, wt Worktree, job runner
 		r.resumeUsed = false
 		r.session = ""
 		j.mu.Unlock()
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "resume failed; continuing without the agent's memory"})
-		j.c.logf("run %s: resume failed; continuing without the agent's memory", job.RunID)
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: resumeFailedText})
+		j.c.logf("run %s: %s", job.RunID, resumeFailedText)
 		return runnerwire.RunResult{}, "", true
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)})

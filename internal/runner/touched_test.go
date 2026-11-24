@@ -343,6 +343,10 @@ func TestTouchedBacksOffWhenSlow(t *testing.T) {
 	}
 }
 
+// An interactive run's touched files come from polling git status, and only
+// from it: tool events (a Claude transcript tail can produce some) neither
+// report an edit tool's path nor schedule an early poll, as they do for a
+// headless run.
 func TestTouchedRunsForInteractiveByPollOnly(t *testing.T) {
 	dir := initTouchedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -353,6 +357,23 @@ func TestTouchedRunsForInteractiveByPollOnly(t *testing.T) {
 		pollInterval: 20 * time.Millisecond,
 		interactive:  true,
 	})
+
+	// Before the watcher starts, so nothing drains the debounce channel and
+	// no poll runs: whatever these leave behind came from the event path.
+	// tool_event.go is not on disk, so no poll would report it.
+	w.onEvent(runnerwire.RunEvent{
+		Type:  runnerwire.EventToolCall,
+		Tool:  "Edit",
+		Input: `{"file_path":"tool_event.go"}`,
+	})
+	w.onEvent(runnerwire.RunEvent{Type: runnerwire.EventToolResult, Tool: "Edit"})
+	if msgs := got.all(); len(msgs) != 0 {
+		t.Fatalf("an edit tool's event sent touched files for an interactive run: %+v", msgs)
+	}
+	if n := len(w.debounceCh); n != 0 {
+		t.Fatalf("a tool_result scheduled a debounced poll for an interactive run (%d queued)", n)
+	}
+
 	w.start(ctx)
 	defer w.stop()
 
@@ -362,6 +383,9 @@ func TestTouchedRunsForInteractiveByPollOnly(t *testing.T) {
 	eventually(t, "interactive poll picks up file", func() bool {
 		return slices.Contains(got.allFiles(), "interactive_change.go")
 	})
+	if files := got.allFiles(); slices.Contains(files, "tool_event.go") {
+		t.Fatalf("touched = %v: tool_event.go came from a tool event, not the poll", files)
+	}
 }
 
 // The watcher's git status and diff --numstat run with the repository's

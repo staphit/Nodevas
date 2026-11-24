@@ -99,6 +99,12 @@ type Client struct {
 	// terminal is up, right before the runner starts waiting on it: tests
 	// line up an exit and an End there to see which one wins.
 	interactiveWaiting func(runID string)
+	// interactiveExited, if set, is called once an interactive run's CLI
+	// exit is ready for the wait to take; interactiveEnd, once the wait has
+	// taken an End and before it looks for that exit. Tests line up an exit
+	// that is there by the time an End is handled.
+	interactiveExited func(runID string)
+	interactiveEnd    func(runID string)
 	// touchedPoll overrides how often a run's touched-files watcher polls
 	// git status; zero uses touchedPollInterval. Tests shorten it.
 	touchedPoll time.Duration

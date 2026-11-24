@@ -283,7 +283,7 @@ func (j *jobs) interactiveAttempt(ctx context.Context, r *run, wt Worktree, ir *
 		ir.s = s
 	} else {
 		s = ir.s
-		j.terms.reopen(s, term, "\r\n\x1b[0m[nodevas: resume failed; starting again without the agent's memory]\r\n")
+		j.terms.reopen(s, term, "\r\n\x1b[0m[nodevas: "+resumeFailedText+"]\r\n")
 	}
 	j.mu.Lock()
 	typing := r.remoteTyping
@@ -339,6 +339,9 @@ func (j *jobs) interactiveAttempt(ctx context.Context, r *run, wt Worktree, ir *
 		code, err := term.Wait()
 		exitCode = code
 		done <- err
+		if j.c.interactiveExited != nil {
+			j.c.interactiveExited(job.RunID)
+		}
 	}()
 	timeout := j.c.runTimeout(j.runCfg(r), job.Kind)
 
@@ -401,6 +404,9 @@ waitLoop:
 			waitErr = <-done
 			break waitLoop
 		case <-s.endCh:
+			if j.c.interactiveEnd != nil {
+				j.c.interactiveEnd(job.RunID)
+			}
 			select {
 			case waitErr = <-done:
 				// It had already exited when the End came: its own exit.
@@ -432,9 +438,8 @@ waitLoop:
 		r.resumeUsed = false
 		r.session = ""
 		j.mu.Unlock()
-		const text = "resume failed; starting again without the agent's memory"
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
-		j.c.logf("run %s: %s", job.RunID, text)
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: resumeFailedText})
+		j.c.logf("run %s: %s", job.RunID, resumeFailedText)
 		return runnerwire.RunResult{}, true
 	}
 

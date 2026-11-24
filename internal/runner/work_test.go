@@ -255,8 +255,31 @@ func TestResumeFastFailRetriesFresh(t *testing.T) {
 	if !strings.Contains(stdin, "<prior-task>\ninitial work\n</prior-task>") || !strings.Contains(stdin, "resume-fail: retry fresh") {
 		t.Errorf("retry stdin missing ContinueSection:\n%s", stdin)
 	}
-	if !hubHasEvent(env, "run-ff2", "resume failed; continuing without the agent's memory") {
-		t.Errorf("missing fast-fail retry log event in %+v", env.hub.messages("run-ff2"))
+	// The hub gets the same run event an interactive run's failed resume
+	// sends, once, between the two starts, so the run's page says the agent
+	// started again from the carry-over prompt instead of resuming.
+	var logs []string
+	for _, msg := range env.hub.messages("run-ff2") {
+		for _, ev := range msg.Events {
+			if ev.Type == runnerwire.EventLog {
+				logs = append(logs, ev.Text)
+			}
+		}
+	}
+	var starts, failed []int
+	for i, text := range logs {
+		if strings.HasPrefix(text, "started claude") {
+			starts = append(starts, i)
+		}
+		if strings.Contains(text, "resume failed") {
+			failed = append(failed, i)
+		}
+	}
+	if len(failed) != 1 || logs[failed[0]] != "resume failed; starting again without the agent's memory" {
+		t.Fatalf("resume-failed events in %q, want one, worded as an interactive run's", logs)
+	}
+	if len(starts) != 2 || failed[0] < starts[0] || failed[0] > starts[1] {
+		t.Fatalf("log events %q: want the resume-failed event between the two starts", logs)
 	}
 }
 

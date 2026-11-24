@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1243,32 +1244,97 @@ func TestTurnDoesNotPushToAPRThatEndedDuringTheTurn(t *testing.T) {
 
 // prepareContinue records the turn's work root and job fields under j.mu:
 // other goroutines (offers, the PR watcher, merges) read them under it.
+//
+// Without the race detector: the test holds j.mu while prepareContinue runs
+// and lets go only while it is parked waiting for j.mu, taking it straight
+// back. A field that changes while the test holds the lock was written
+// without it. The first write (the work root) comes before prepareContinue
+// takes the lock at all, so code that wrote it unlocked fails every time. A
+// later unlocked write is caught only when it lands while the test holds
+// the lock again (about half the runs for the last batch of fields, which
+// follows a short locked read); go test -race catches those every time.
 func TestContinueWritesRunFieldsUnderTheLock(t *testing.T) {
 	env := startJobRunner(t, nil)
 	env.hub.hello()
 
 	env.hub.offer(globalTestJob("run-mu1", "edit: turn 1"))
-	env.hub.wait("run-mu1", runnerwire.TypeFinish)
+	if res := env.hub.wait("run-mu1", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
+		t.Fatalf("turn 1 = %+v", res)
+	}
 
-	stop := make(chan struct{})
+	j := env.client.jobs
+	cfg := env.client.cfg()
+	job := followUpTestJob("run-mu2", "run-mu1", "run-mu1", "continue: turn 2")
+	job.WorkRoot = "" // prepareContinue fills it in
+	r := &run{job: job, cfg: cfg}
+	for _, repo := range cfg.Repos {
+		if repo.ID == job.RepoID {
+			r.repo = repo
+		}
+	}
+	type fields struct{ workRoot, jobWorkRoot, base, pr, task, summary, resume string }
+	// Only with j.mu held.
+	snapshot := func() fields {
+		return fields{r.workRoot, r.job.WorkRoot, r.job.Base, r.job.ContinuePR,
+			r.job.ContinueTask, r.job.ContinueSummary, r.resumeSession}
+	}
+
+	var code, reason string
 	done := make(chan struct{})
+	j.mu.Lock()
+	start := snapshot()
 	go func() {
 		defer close(done)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			env.client.jobs.workRootActive("run-mu1", "")
-			time.Sleep(50 * time.Microsecond)
-		}
+		_, _, _, code, reason = j.prepareContinue(context.Background(), r)
 	}()
-	env.hub.offer(followUpTestJob("run-mu2", "run-mu1", "run-mu1", "continue: turn 2"))
-	res := env.hub.wait("run-mu2", runnerwire.TypeFinish).Result
-	close(stop)
-	<-done
-	if res.Status != runnerwire.RunSucceeded {
-		t.Fatalf("turn 2 = %+v", res)
+	for {
+		before := snapshot()
+		finished := waitParkedOnLock(t, "(*jobs).prepareContinue(", done)
+		after := snapshot()
+		j.mu.Unlock()
+		if after != before {
+			<-done
+			t.Fatalf("prepareContinue changed %+v to %+v while the test held j.mu", before, after)
+		}
+		if finished {
+			break
+		}
+		j.mu.Lock()
+	}
+	if reason != "" {
+		t.Fatalf("prepareContinue declined: %s %s", code, reason)
+	}
+	j.mu.Lock()
+	end := snapshot()
+	j.mu.Unlock()
+	if end.workRoot != "run-mu1" || end.jobWorkRoot != "run-mu1" || end.base == start.base {
+		t.Fatalf("fields after prepareContinue = %+v (before %+v): nothing to check", end, start)
+	}
+}
+
+// waitParkedOnLock waits until the goroutine running fn (a function name
+// as a stack shows it) is blocked acquiring a sync.Mutex, or done is closed;
+// it says which.
+func waitParkedOnLock(t *testing.T, fn string, done chan struct{}) (finished bool) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	buf := make([]byte, 1<<20)
+	for {
+		select {
+		case <-done:
+			return true
+		default:
+		}
+		n := runtime.Stack(buf, true)
+		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+			header, _, _ := strings.Cut(g, "\n")
+			if strings.Contains(header, "[sync.Mutex.Lock") && strings.Contains(g, fn) {
+				return false
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s neither waited for a lock nor returned in 20s", fn)
+		}
+		time.Sleep(100 * time.Microsecond)
 	}
 }

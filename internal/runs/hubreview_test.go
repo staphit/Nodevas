@@ -224,6 +224,10 @@ func TestContinuedBySubqueryUsesPartialIndex(t *testing.T) {
 
 // Finding 5: a follow-up and a merge approval on the same work must not both
 // pass: each checks the other under the work's lock in one transaction.
+//
+// A smoke test only: whether the two calls really overlap is up to the
+// scheduler, so a round may pass on code without the locked re-checks.
+// TestFollowUpAndMergeWaitForTheWorkLock lines them up deterministically.
 func TestFollowUpAndMergeApprovalNeverBothPass(t *testing.T) {
 	for i := range 8 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -272,6 +276,144 @@ func TestFollowUpAndMergeApprovalNeverBothPass(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The deterministic form of the test above. The test takes the work's
+// advisory lock on a connection of its own (as another hub would), lets the
+// first call (follow-up or merge approval) pass its unlocked checks and park
+// on that lock inside its transaction, holding the hub's one writer
+// connection, then lets the second call pass its unlocked checks too, up to
+// where it waits for that connection, and only then lets go. The first call
+// passes; the second has read nothing of it before it waited, so only the
+// re-check it makes under the lock can refuse it. Code without the lock, or
+// without that re-check, lets both through.
+func TestFollowUpAndMergeWaitForTheWorkLock(t *testing.T) {
+	for _, mergeFirst := range []bool{true, false} {
+		name := "follow-up first"
+		if mergeFirst {
+			name = "merge first"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, _ := newGlobalFixture(t, continueHello())
+			ctx := context.Background()
+			t1 := startAndFinishGlobal(t, f, "Turn 1", func(r *GlobalStartRequest) { r.Body.OpenPR = true })
+			if err := f.d.PR(ctx, f.runner.ID, t1.ID, runnerwire.PRInfo{
+				URL: "https://github.com/o/r/pull/32", Number: 32, State: runnerwire.PROpen,
+				CI: runnerwire.CISuccess, HeadSHA: testHead,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			var fuErr, mergeErr error
+			fuDone, mergeDone := make(chan struct{}), make(chan struct{})
+			followUp := func() {
+				defer close(fuDone)
+				_, fuErr = f.d.FollowUp(ctx, FollowUpRequest{
+					PriorID: t1.ID, Body: runnerwire.FollowUpRequest{Message: "Turn 2"},
+					ActorID: "u-ann", ActorName: "ann",
+				})
+			}
+			merge := func() {
+				defer close(mergeDone)
+				_, mergeErr = f.d.Merge(ctx, t1.ID, Approver{ID: "u-ann", Name: "ann"}, testHead)
+			}
+			first, second := followUp, merge
+			firstDone, secondDone := fuDone, mergeDone
+			if mergeFirst {
+				first, second = merge, followUp
+				firstDone, secondDone = mergeDone, fuDone
+			}
+
+			// Not the writer pool: its one connection is what the calls
+			// queue for.
+			holder, err := f.d.store.db.Search().BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer holder.Rollback()
+			if err := lockWork(ctx, holder, workRootOf(t1)); err != nil {
+				t.Fatal(err)
+			}
+
+			go first()
+			waitFor(t, "the first call to wait on the work lock", firstDone, func() bool {
+				return workLockWaiters(t, f.d.store, workRootOf(t1)) == 1
+			})
+			writer := f.d.store.db.Writer()
+			waits := writer.Stats().WaitCount
+			go second()
+			waitFor(t, "the second call to wait for the writer connection", secondDone, func() bool {
+				return writer.Stats().WaitCount > waits
+			})
+			for call, done := range map[string]chan struct{}{"first": firstDone, "second": secondDone} {
+				select {
+				case <-done:
+					t.Errorf("the %s call finished while the test held the work lock", call)
+				default:
+				}
+			}
+			if err := holder.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			<-fuDone
+			<-mergeDone
+
+			if mergeFirst {
+				if mergeErr != nil {
+					t.Fatalf("merge approval (first to the lock) = %v, want it to pass", mergeErr)
+				}
+				var se *StartError
+				if !errors.As(fuErr, &se) || se.Reason != CodeMergePending {
+					t.Fatalf("follow-up after the approval = %#v, want MERGE_PENDING", fuErr)
+				}
+			} else {
+				if fuErr != nil {
+					t.Fatalf("follow-up (first to the lock) = %v, want it to pass", fuErr)
+				}
+				if BlockedCode(mergeErr) != CodeTurnRunning {
+					t.Fatalf("merge approval after the follow-up = %#v, want TURN_RUNNING", mergeErr)
+				}
+			}
+		})
+	}
+}
+
+// waitFor waits until cond holds or done is closed (the call it watches
+// finished early, which the caller's checks then catch).
+func waitFor(t *testing.T, what string, done chan struct{}, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waited 10s for %s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// workLockWaiters counts the sessions in this test's database waiting for
+// lockWork's advisory lock on workRoot. A bigint advisory key shows as its
+// high half in classid and its low half in objid.
+func workLockWaiters(t *testing.T, s *Store, workRoot string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRowContext(context.Background(), `
+SELECT COUNT(*) FROM pg_locks
+WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
+  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+  AND ((classid::bigint << 32) | objid::bigint) = hashtextextended(?, 0)`,
+		"busy:work:"+workRoot).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // Finding 6: an automatic start that asks to queue on a runner without

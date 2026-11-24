@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1074,42 +1073,71 @@ func TestEndUnknownRunIgnored(t *testing.T) {
 }
 
 // A CLI that exits non-zero just as an End arrives failed: its exit is not
-// passed off as the End's graceful, succeeded quit. Each round lines up both
-// before the runner starts waiting, so without a preference for the exit a
-// select picks either at random.
+// passed off as the End's graceful, succeeded quit.
+//
+// The seams make each case exact, with no sleeps. "taken End" is the one a
+// wait loop without the preference fails every time: the End is the only
+// thing ready when the wait selects, and the exit is in by the time the End
+// is handled, so only a look for the exit before quitting finds it. In
+// "both ready" the exit and the End are both in before the wait starts; a
+// loop that only selected would pick either at random there.
 func TestExitBeatsAnEndArrivingWithIt(t *testing.T) {
-	var mu sync.Mutex
-	var current *fakeTerm
-	env, started := startInteractiveRunner(t, func(c *Client) {
-		c.endQuitGap = 10 * time.Millisecond
-		c.endGrace = 40 * time.Millisecond
-		c.interactiveWaiting = func(runID string) {
-			mu.Lock()
-			term := current
-			mu.Unlock()
-			term.exit <- 3
-			c.jobs.terms.get(runID).requestEnd()
-			// Long enough for the exit to reach the runner's done channel.
-			time.Sleep(30 * time.Millisecond)
-		}
-		next := c.NewTerminal
-		c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
-			term, err := next(cmd, cols, rows)
-			mu.Lock()
-			current, _ = term.(*fakeTerm)
-			mu.Unlock()
-			return term, err
-		}
-	})
-	env.hub.hello()
-	for i := range 8 {
-		runID := "run-exit-end-" + strconv.Itoa(i)
-		env.hub.offer(interactiveJob(runID))
-		waitStarted(t, started)
-		res := env.hub.wait(runID, runnerwire.TypeFinish).Result
-		if res.Status != runnerwire.RunFailed || res.EndReason != "" || !strings.Contains(res.Error, "exited with code 3") {
-			t.Fatalf("round %d: finish = %+v, want failed with exit code 3", i, res)
-		}
+	for _, tc := range []struct {
+		name string
+		// endTaken: the exit comes once the wait has taken the End, not
+		// before the wait starts.
+		endTaken bool
+	}{
+		{name: "both ready", endTaken: false},
+		{name: "taken End", endTaken: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var current *fakeTerm
+			exited := make(chan string, 1)
+			env, started := startInteractiveRunner(t, func(c *Client) {
+				c.endQuitGap = 10 * time.Millisecond
+				c.endGrace = 40 * time.Millisecond
+				// exit makes the CLI exit with code 3 and returns once the
+				// wait can take that exit.
+				exit := func(runID string) {
+					mu.Lock()
+					term := current
+					mu.Unlock()
+					term.exit <- 3
+					if got := <-exited; got != runID {
+						t.Errorf("exited %s, want %s", got, runID)
+					}
+				}
+				c.interactiveExited = func(runID string) { exited <- runID }
+				c.interactiveWaiting = func(runID string) {
+					if !tc.endTaken {
+						exit(runID)
+					}
+					c.jobs.terms.get(runID).requestEnd()
+				}
+				c.interactiveEnd = func(runID string) {
+					if tc.endTaken {
+						exit(runID)
+					}
+				}
+				next := c.NewTerminal
+				c.NewTerminal = func(cmd *exec.Cmd, cols, rows int) (Terminal, error) {
+					term, err := next(cmd, cols, rows)
+					mu.Lock()
+					current, _ = term.(*fakeTerm)
+					mu.Unlock()
+					return term, err
+				}
+			})
+			env.hub.hello()
+			env.hub.offer(interactiveJob("run-exit-end"))
+			waitStarted(t, started)
+			res := env.hub.wait("run-exit-end", runnerwire.TypeFinish).Result
+			if res.Status != runnerwire.RunFailed || res.EndReason != "" || !strings.Contains(res.Error, "exited with code 3") {
+				t.Fatalf("finish = %+v, want failed with exit code 3", res)
+			}
+		})
 	}
 }
 
@@ -1275,7 +1303,7 @@ func TestInteractiveResumeThatFailsFastStartsAgainWithoutIt(t *testing.T) {
 	if res := env.hub.wait("run-rf2", runnerwire.TypeFinish).Result; res.Status != runnerwire.RunSucceeded {
 		t.Fatalf("turn 2 = %+v", res)
 	}
-	if !hubHasEvent(env, "run-rf2", "resume failed") {
+	if !hubHasEvent(env, "run-rf2", resumeFailedText) {
 		t.Fatal("no event says the resume failed")
 	}
 	// One terminal for the hub: both attempts' output, numbered on.

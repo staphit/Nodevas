@@ -32,6 +32,11 @@ const (
 	maxWorks               = 500
 	maxTurnCommentSummary  = 2 << 10
 	resumeFastFailDuration = 30 * time.Second
+	// resumeFailedText is the run event (and runner log line) of a resume
+	// that failed fast, headless or interactive: the hub keeps it with the
+	// run, so the person sees the agent started again from the carry-over
+	// prompt instead of resuming.
+	resumeFailedText = "resume failed; starting again without the agent's memory"
 )
 
 type workEntry struct {
